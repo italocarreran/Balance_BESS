@@ -171,3 +171,28 @@ normal, última) quedaron `Completa=1` con 36/96/60 filas respectivamente, y R=1
 filas de `Medidores`. Un segundo caso con una hora "No" en vez de "Sí" marcó correctamente
 `Oferta completa=0`. No se probó contra un caso real ni contra la hoja `Medidores` de la
 planilla 11 (sigue pendiente, ver arriba).
+
+---
+
+## 2026-09-10 (4) — El archivo de SoC puede ser .csv, no solo .xlsx
+
+El usuario aclaró que `SOC_AAMM` (el archivo de SoC) puede llegar como `.csv`, manteniendo la
+misma estructura de bloques horizontales por central (`Status | Questionable | Time Stamp |
+Value`) que ya soportaba `extraer_soc()`. Antes de tocar código se preguntó explícitamente por
+la estructura del CSV (¿tabla larga o mantiene los bloques?) para no adivinar mal un formato
+que ya funcionaba: el usuario confirmó que mantiene los bloques, solo cambia el contenedor.
+
+Cambios en `nucleo.py`:
+
+- `EXTENSIONES_SOC = {".xlsx", ".csv"}` (antes `buscar_soc()` exigía `.xlsx` a secas).
+- Nueva función `leer_soc_crudo(ruta_soc)`: elige `pd.read_csv(ruta_soc, header=None)` o
+  `pd.read_excel(ruta_soc, sheet_name=0, header=None)` según la extensión.
+  `extraer_soc()` la usa en vez de llamar a `pd.read_excel` directo.
+  `detectar_fila_nombres()`/`detectar_bloques()` no cambiaron: ya trabajan sobre el DataFrame
+  resultante sin que les importe de dónde vino.
+
+Probado con un CSV sintético (mismo layout de bloque que ya se probaba en Excel, separador
+coma, UTF-8): `extraer_soc()` lo lee igual que un `.xlsx` equivalente, sin incidencias.
+
+No se tocó el formato del archivo de OfertasSSCC (sigue siendo Excel, como confirma el propio
+VBA que filtra por extensiones `.xlsx/.xlsm/.xlsb/.xls`) ni el de `Medidas_SAE.xlsx`.

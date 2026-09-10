@@ -168,7 +168,15 @@ contra él.
   formato; todo lo demás (`buscar_soc`, `revisar_estructura`, `ejecutar`)
   recibe el AAMM ya como parámetro. El archivo de SoC dentro de `Medidas/`
   tampoco tiene un nombre fijo: solo debe contener "SOC" y el AAMM en
-  cualquier posición del nombre (`_es_archivo_de_soc()`).
+  cualquier posición del nombre (`_es_archivo_de_soc()`), y puede ser
+  `.xlsx` o `.csv` (`EXTENSIONES_SOC`) — la estructura de bloques
+  horizontales por central es la misma en ambos formatos, solo cambia
+  cómo se abre el archivo (`leer_soc_crudo()` elige `pd.read_csv` o
+  `pd.read_excel` según la extensión). Al agregar un formato de
+  contenedor nuevo para el SoC, tocar `leer_soc_crudo()` y
+  `EXTENSIONES_SOC`; `detectar_fila_nombres()`/`detectar_bloques()` no
+  cambian, ya trabajan sobre el DataFrame resultante sin importar de
+  dónde vino.
 - **Columnas de `Medidores` (A:U):** el orden final de columnas sale de
   `LETRA_A_CAMPO`, cuyo **orden de inserción** es el orden de Excel.
   `COLUMNAS_VACIAS` (M, P, Q, U) son diseño confirmado, no trabajo

@@ -46,9 +46,11 @@ de.
   calculan y se escriben como hojas propias — ver plan §20.1.
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
-  - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
-    contenga "SOC" y el AAMM ingresado por el usuario (no hay un nombre de
-    archivo fijo; debe existir exactamente uno)
+  - Un archivo `.xlsx` o `.csv` dentro de `<CARPETA_BASE>/Medidas/` cuyo
+    nombre contenga "SOC" y el AAMM ingresado por el usuario (no hay un
+    nombre de archivo fijo; debe existir exactamente uno). La estructura
+    de bloques horizontales por central es la misma en ambos formatos;
+    `leer_soc_crudo()` elige el lector según la extensión.
   - `<CARPETA_BASE>/Auxiliares/Centrales.xlsx` (hojas `Resumen BESS` y
     `Diccionario`; `Diccionario` columnas E/F/G — índices 4/5/6 — se usan
     específicamente para homologar Ofertas SSCC)
@@ -60,6 +62,8 @@ de.
   `Resumen Ofertas SSCC`, `Ofertas SSCC por Dia`, `Resumen Ventana Oferta`,
   `Log`.
 - **Expone (además de lo ya listado antes de esta sesión):**
+  - `leer_soc_crudo(ruta_soc)` — lee el archivo de SoC sin encabezado,
+    con `pd.read_csv` o `pd.read_excel` según la extensión.
   - `buscar_archivo_ofertas(ofertas_dir)` — busca el archivo `*OfertasSSCC*`
     más reciente.
   - `construir_resumen_ofertas_sscc(ruta_ofertas, registrar=print)` —

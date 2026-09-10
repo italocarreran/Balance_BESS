@@ -1364,3 +1364,17 @@ real ni contra la hoja `Medidores` de la planilla 11 (sigue sin datos reales dis
   a la hoja "Ofertas SSCC por Dia".
 - `U:AE` fuera de lo ya cubierto por `R,S,T,V,W,X,Y,AB,AC,AD,AE` no aplica: esas eran todas las
   columnas pendientes identificadas hasta ahora (plan §9.12 original).
+
+---
+
+# 21. El archivo de SoC puede ser `.xlsx` o `.csv`
+
+Se confirmó que el archivo de SoC (buscado en `Medidas/` por contener "SOC" y el AAMM, sección
+19.1) puede llegar como `.csv`, no solo como `.xlsx`. La estructura interna — bloques
+horizontales por central (`Status | Questionable | Time Stamp | Value` repetidos lado a lado) —
+es la misma en ambos formatos; solo cambia el contenedor.
+
+`nucleo.buscar_soc()` acepta ambas extensiones (`EXTENSIONES_SOC = {".xlsx", ".csv"}`) y
+`nucleo.leer_soc_crudo()` elige `pd.read_csv` o `pd.read_excel` según corresponda antes de
+pasarle el resultado a la misma lógica de detección de bloques (`detectar_fila_nombres`,
+`detectar_bloques`), que no necesitó cambios.

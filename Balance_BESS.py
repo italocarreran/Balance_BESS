@@ -8,9 +8,11 @@ resuelve solas todas las entradas por ruta relativa.
     <CARPETA_BASE>/
         Medidas/
             Medidas_SAE.xlsx
-            SOC_AAMM.xlsx
+            <algo>SOC<algo>AAMM<algo>.xlsx o .csv
         Auxiliares/
             Centrales.xlsx
+        Ofertas/
+            <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Hoja_Medidas.xlsx      <- salida
 
 La ubicacion de este .py no influye en nada salvo en donde se
