@@ -179,9 +179,15 @@ contra él.
   en la planilla original no son una columna por fila de `Medidores`, son
   tablas auxiliares de otro largo (central × día, central × ventana) que
   comparten esas letras de columna solo porque ahí había espacio libre. Se
-  calculan y se escriben como hojas propias de `Hoja_Medidas.xlsx` en vez
-  de forzarlas a columnas `pd.NA` del mismo largo que A:U (ver plan de
-  migración §20.1). `R`, `S`, `T` sí son columnas por fila y están
+  calculan y se escriben juntas en una sola hoja auxiliar
+  (`HOJA_OFERTAS_SSCC = "Ofertas SSCC"`, una tabla debajo de la otra con
+  su propio título vía `_escribir_tabla_con_titulo()`) en vez de
+  forzarlas a columnas `pd.NA` del mismo largo que A:U (ver plan de
+  migración §20.1, §22). El resumen intermedio equivalente a la hoja
+  "Resumen Ofertas SSCC" del `.xlsm` original (con una columna por
+  servicio `_RS`) es puramente auxiliar para construir la tabla W:Y — no
+  se persiste en `Hoja_Medidas.xlsx`, solo vive en memoria dentro de
+  `construir_medidores()`. `R`, `S`, `T` sí son columnas por fila y están
   implementadas: dependen de las macros de Ofertas SSCC
   (`Generar_Resumen_Ofertas_SSCC`, `Resumir_Medidores_Central_Ventana_
   Oferta_Completa`), replicadas fielmente a partir del código VBA y las
@@ -269,8 +275,10 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   `Medidores` porque ahí había espacio libre en la planilla. Forzarlas a
   columnas `pd.NA` del mismo largo que A:U (como se hizo antes de tener el
   código VBA) ya no es una aproximación razonable una vez que se pueden
-  calcular de verdad: se escriben como hojas propias de `Hoja_Medidas.xlsx`
-  (ver plan §20.1).
+  calcular de verdad: se escriben juntas en la hoja auxiliar
+  `HOJA_OFERTAS_SSCC` (ver plan §20.1, §22). El resumen "Resumen Ofertas
+  SSCC" del `.xlsm` original tampoco se persiste — es un paso intermedio
+  que solo hace falta en memoria para construir la tabla W:Y.
 - **El período AAMM lo escribe el usuario, no se adivina del nombre de un
   archivo.** `SOC_AAMM.xlsx` era solo un patrón conceptual en el plan
   original; en la práctica el archivo de SoC llega con nombres variables.

@@ -43,7 +43,11 @@ de.
   vacías (diseño confirmado, no pendiente): M, P, Q, U. `V, W, X, Y, AB,
   AC, AD, AE` del plan **no son columnas de `Medidores`**: son tablas
   auxiliares de otro largo (central × día, central × ventana) que se
-  calculan y se escriben como hojas propias — ver plan §20.1.
+  calculan y se escriben juntas en una sola hoja (`HOJA_OFERTAS_SSCC =
+  "Ofertas SSCC"`) — ver plan §20.1 y §22. El resumen intermedio
+  equivalente a la hoja "Resumen Ofertas SSCC" del `.xlsm` original
+  (Nombre/Año/Mes/Día/servicios/Oferta completa) es puramente auxiliar
+  para construir la tabla W:Y: no se persiste en `Hoja_Medidas.xlsx`.
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
@@ -57,8 +61,8 @@ de.
     más de uno, a diferencia del SoC, se toma el más reciente por fecha de
     modificación — así lo hace la macro original)
 - **Produce:** `<CARPETA_BASE>/Hoja_Medidas.xlsx`, hojas: `Medidores`,
-  `Resumen Ofertas SSCC`, `Ofertas SSCC por Dia`, `Resumen Ventana Oferta`,
-  `Log`.
+  `Ofertas SSCC` (las tablas W:Y y AB:AE equivalentes, una debajo de la
+  otra con su propio título — ver `_escribir_tabla_con_titulo()`), `Log`.
 - **Expone (además de lo ya listado antes de esta sesión):**
   - `buscar_archivo_ofertas(ofertas_dir)` — busca el archivo `*OfertasSSCC*`
     más reciente.
@@ -77,8 +81,10 @@ de.
   - `calcular_t(clave, ventana, resumen_ventana_oferta)` →
     `(serie_t, cantidad_sin_match)` — replica la fórmula de `Medidores!T`.
   - `construir_medidores(df_sae, df_soc, anio, mes, ruta_ofertas, diccionario, registrar=print)`
-    → `(df_medidores, avisos, df_resumen_ofertas, df_wxy, df_resumen_ventana)`.
-  - `escribir_salida(df, ruta_salida, avisos, incidencias, df_resumen_ofertas=None, df_wxy=None, df_resumen_ventana=None)`.
+    → `(df_medidores, avisos, df_wxy, df_resumen_ventana)`.
+  - `escribir_salida(df, ruta_salida, avisos, incidencias, df_wxy=None, df_resumen_ventana=None)`
+    — usa `_escribir_tabla_con_titulo()` para apilar `df_wxy` y
+    `df_resumen_ventana` en la misma hoja `HOJA_OFERTAS_SSCC`.
   - `ejecutar(carpeta_base, aamm, registrar=print, progreso=None)` —
     orquesta el proceso completo de punta a punta.
 - **Parámetros fijos:** `INICIO_VENTANA = 10`, `UMBRAL_SOC = 0.06` (ver plan

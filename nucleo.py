@@ -1558,10 +1558,13 @@ def construir_medidores(
     diccionario:  hoja Diccionario de Centrales.xlsx (header=None), la
                   misma que se usa para homologar el SoC.
 
-    Devuelve (df_medidores, avisos, df_resumen_ofertas, df_wxy,
-    df_resumen_ventana). Estas ultimas tres son las tablas auxiliares
-    equivalentes a la hoja "Resumen Ofertas SSCC", a Medidores!W:Y y a
-    Medidores!AB:AE respectivamente (ver comentario de LETRA_A_CAMPO).
+    Devuelve (df_medidores, avisos, df_wxy, df_resumen_ventana). Estas
+    ultimas dos son las tablas auxiliares equivalentes a Medidores!W:Y
+    y a Medidores!AB:AE respectivamente (ver comentario de
+    LETRA_A_CAMPO). El resumen intermedio equivalente a la hoja
+    "Resumen Ofertas SSCC" (Nombre/Año/Mes/Día/servicios/Oferta
+    completa) es puramente auxiliar para calcular df_wxy: no se
+    devuelve ni se persiste, solo sirve como paso intermedio.
     """
 
     avisos = []
@@ -1739,7 +1742,41 @@ def construir_medidores(
         f"{len(df.columns)} columnas"
     )
 
-    return df, avisos, df_resumen_ofertas, df_wxy, df_resumen_ventana
+    return df, avisos, df_wxy, df_resumen_ventana
+
+
+HOJA_OFERTAS_SSCC = "Ofertas SSCC"
+
+
+def _escribir_tabla_con_titulo(writer, hoja, df, titulo, fila_inicio):
+    """
+    Escribe 'titulo' en una fila y 'df' (con su propio encabezado)
+    justo debajo, dentro de la hoja 'hoja', empezando en fila_inicio.
+    Devuelve la fila donde debería empezar el siguiente bloque.
+    """
+
+    pd.DataFrame([[titulo]]).to_excel(
+        writer,
+        sheet_name=hoja,
+        index=False,
+        header=False,
+        startrow=fila_inicio,
+    )
+
+    df.to_excel(
+        writer,
+        sheet_name=hoja,
+        index=False,
+        startrow=fila_inicio + 1,
+    )
+
+    celda_titulo = writer.sheets[hoja].cell(
+        row=fila_inicio + 1, column=1
+    )
+    celda_titulo.font = celda_titulo.font.copy(bold=True)
+
+    # +1 titulo, +1 encabezado de df, +len(df) filas, +2 de separacion
+    return fila_inicio + len(df) + 4
 
 
 def escribir_salida(
@@ -1747,15 +1784,14 @@ def escribir_salida(
     ruta_salida,
     avisos,
     incidencias,
-    df_resumen_ofertas=None,
     df_wxy=None,
     df_resumen_ventana=None,
 ):
     """
     Escribe Hoja_Medidas.xlsx: la tabla Medidores (A:U, una fila por
     registro), las tablas auxiliares de Ofertas SSCC -de otro largo,
-    ver comentario de LETRA_A_CAMPO- cada una en su propia hoja, y un
-    Log.
+    ver comentario de LETRA_A_CAMPO- juntas en una misma hoja
+    (HOJA_OFERTAS_SSCC, una debajo de la otra), y un Log.
     """
 
     ruta_salida = Path(ruta_salida)
@@ -1778,25 +1814,24 @@ def escribir_salida(
             index=False,
         )
 
-        if df_resumen_ofertas is not None:
-            df_resumen_ofertas.to_excel(
-                writer,
-                sheet_name="Resumen Ofertas SSCC",
-                index=False,
-            )
+        fila = 0
 
         if df_wxy is not None:
-            df_wxy.to_excel(
+            fila = _escribir_tabla_con_titulo(
                 writer,
-                sheet_name="Ofertas SSCC por Dia",
-                index=False,
+                HOJA_OFERTAS_SSCC,
+                df_wxy,
+                "Ofertas SSCC por dia (equivalente a Medidores!W:Y)",
+                fila,
             )
 
         if df_resumen_ventana is not None:
-            df_resumen_ventana.to_excel(
+            _escribir_tabla_con_titulo(
                 writer,
-                sheet_name="Resumen Ventana Oferta",
-                index=False,
+                HOJA_OFERTAS_SSCC,
+                df_resumen_ventana,
+                "Resumen ventana oferta (equivalente a Medidores!AB:AE)",
+                fila,
             )
 
         df_log.to_excel(
@@ -1881,7 +1916,6 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
     (
         df_medidores,
         avisos,
-        df_resumen_ofertas,
         df_wxy,
         df_resumen_ventana,
     ) = construir_medidores(
@@ -1905,7 +1939,6 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
         rutas["salida"],
         avisos,
         incidencias,
-        df_resumen_ofertas,
         df_wxy,
         df_resumen_ventana,
     )

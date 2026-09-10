@@ -228,3 +228,30 @@ Se revirtió el soporte de `.csv` para el SoC agregado en la entrada anterior:
 Esta entrada de bitácora no borra ni edita la entrada anterior (2026-09-10 (4)) según la regla
 de solo-agregar; queda como registro de que esa sesión partió de una premisa equivocada y esta
 la corrigió.
+
+---
+
+## 2026-09-10 (6) — Hojas auxiliares de Ofertas SSCC: se unen y se recorta una
+
+Pedido del usuario: las tablas "Ofertas SSCC por Dia" y "Resumen Ventana Oferta" deben quedar
+en la misma hoja, y "Resumen Ofertas SSCC" es auxiliar — mejor no crearla como hoja.
+
+Cambios en `nucleo.py`:
+
+- `construir_resumen_ofertas_sscc()` sigue calculándose igual dentro de `construir_medidores()`
+  (sin cambios en su lógica), pero deja de devolverse/persistirse: es un paso intermedio que
+  solo hace falta en memoria para construir la tabla equivalente a `Medidores!W:Y`.
+  `construir_medidores()` ahora devuelve `(df_medidores, avisos, df_wxy, df_resumen_ventana)`
+  (antes devolvía también `df_resumen_ofertas`).
+- Nueva función `_escribir_tabla_con_titulo(writer, hoja, df, titulo, fila_inicio)`: escribe un
+  título en negrita y la tabla debajo, dentro de una hoja dada, y devuelve la fila donde debería
+  empezar el siguiente bloque (para poder apilar varias tablas en la misma hoja).
+- `escribir_salida()` ya no recibe `df_resumen_ofertas`; ahora escribe `df_wxy` y
+  `df_resumen_ventana` una debajo de la otra en una sola hoja nueva, `HOJA_OFERTAS_SSCC =
+  "Ofertas SSCC"`, cada una con su título.
+- `Hoja_Medidas.xlsx` queda con tres hojas: `Medidores`, `Ofertas SSCC`, `Log` (antes tenía
+  cinco).
+
+Probado con el mismo caso sintético de sesiones anteriores: la hoja combinada queda con el
+título+tabla de "Ofertas SSCC por dia" (31 filas) seguido de una fila en blanco y el
+título+tabla de "Resumen ventana oferta" (3 filas), en el orden y con los valores esperados.

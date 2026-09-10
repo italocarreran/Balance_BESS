@@ -1381,3 +1381,23 @@ de bloques horizontales por central — eso no cambió, solo el contenedor sí v
 únicamente Excel). Ver `METODOLOGIA.md` §7 (trampas conocidas) para la regla que evita repetir
 esta confusión: un archivo que matchea el patrón de nombre pero no tiene la estructura de
 bloques esperada no es el archivo de SoC, aunque comparta "SOC"+AAMM en el nombre.
+
+---
+
+# 22. Ajuste de las hojas auxiliares de Ofertas SSCC
+
+Tras usar `Hoja_Medidas.xlsx` en la práctica, se ajustó cómo se exponen las tablas auxiliares
+descritas en la sección 20.1:
+
+- **"Resumen Ofertas SSCC"** (salida de `Generar_Resumen_Ofertas_SSCC`: Nombre, Año, Mes, Día,
+  una columna por servicio `_RS`, Oferta completa) deja de escribirse como hoja. Es puramente
+  auxiliar — solo existe para construir la tabla equivalente a `Medidores!W:Y` — y no aporta
+  valor de validación por sí sola. Sigue calculándose en memoria dentro de
+  `construir_medidores()` (función `construir_resumen_ofertas_sscc()`, sin cambios), solo que ya
+  no se persiste ni se devuelve fuera de esa función.
+- **"Ofertas SSCC por Dia"** (equivalente a `Medidores!W:Y`) y **"Resumen Ventana Oferta"**
+  (equivalente a `Medidores!AB:AE`) se unen en una sola hoja, `"Ofertas SSCC"`
+  (`nucleo.HOJA_OFERTAS_SSCC`), una tabla debajo de la otra, cada una con un título en negrita
+  arriba (`_escribir_tabla_con_titulo()`) para distinguirlas al abrir el archivo.
+
+`Hoja_Medidas.xlsx` queda entonces con tres hojas: `Medidores`, `Ofertas SSCC`, `Log`.

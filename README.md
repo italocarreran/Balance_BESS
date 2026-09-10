@@ -76,11 +76,16 @@ Etapa Medidores completa: columnas A:U de `Medidores` implementadas
 (A:J entrada, K copia de L, L, N, O, R, S, T calculadas; M, P, Q, U
 deliberadamente vacías por diseño). Las macros de Ofertas SSCC
 (`Generar_Resumen_Ofertas_SSCC`, `Resumir_Medidores_Central_Ventana_
-Oferta_Completa`) están replicadas a partir del código VBA original; sus
-resultados (lo que en la planilla ocupaba `Medidores!V:Y` y `AB:AE`, que
-en realidad son tablas de otro largo, no columnas por fila) se escriben
-como hojas propias de `Hoja_Medidas.xlsx`: `Resumen Ofertas SSCC`,
-`Ofertas SSCC por Dia`, `Resumen Ventana Oferta`.
+Oferta_Completa`) están replicadas a partir del código VBA original.
+`Hoja_Medidas.xlsx` tiene tres hojas:
+
+- `Medidores` — la tabla A:U, una fila por registro.
+- `Ofertas SSCC` — las tablas auxiliares equivalentes a `Medidores!W:Y`
+  ("Ofertas SSCC por dia") y `Medidores!AB:AE` ("Resumen ventana oferta"),
+  una debajo de la otra con su propio título. El resumen intermedio
+  equivalente a la hoja "Resumen Ofertas SSCC" del `.xlsm` original es
+  puramente auxiliar y no se persiste.
+- `Log` — avisos e incidencias detectadas durante el cálculo.
 
 Validado con un caso sintético (no con datos reales todavía): ver
 `BITACORA.md` → "Pendientes abiertos" para lo que falta antes de dar por
