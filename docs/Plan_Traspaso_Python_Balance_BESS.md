@@ -1292,3 +1292,75 @@ Estas columnas quedan en `Hoja_Medidas.xlsx` como `pd.NA`, con nombre de campo t
 `_PENDIENTE_OFERTAS`, hasta que se entregue el código fuente de ambas macros. La carpeta
 `Ofertas/` bajo `<CARPETA_BASE>` ya se detecta en el checklist de la ventana (no bloqueante),
 pero todavía no se define el patrón de nombre del archivo dentro de ella ni se lee su contenido.
+
+---
+
+# 20. Implementación de Ofertas SSCC (sesión con el código VBA fuente)
+
+Se recibió `Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md`, que incluye el código VBA completo
+de `Generar_Resumen_Ofertas_SSCC` y `Resumir_Medidores_Central_Ventana_Oferta_Completa`
+(extraído de `xl/vbaProject.bin`) y, en su sección 5.1, las fórmulas de Excel de `Medidores!K`,
+`L`, `N`, `O`, `R`, `S`, `T` y `V`. Esto resuelve el pendiente de la sección 19.2: ya no falta
+el código fuente de las macros.
+
+## 20.1. Hallazgo estructural: V, W, X, Y, AB, AC, AD, AE no son columnas por fila
+
+Las fórmulas de la sección 5.1 muestran que `V3:V312` (no `V3:V26786` como el resto de las
+columnas de `Medidores`) — es decir, `V` (y `W`, `X`, `Y`, que la macro `H_Leer_Ofertas` escribe
+directamente como valores, sin fórmula) solo ocupan tantas filas como necesite la tabla
+auxiliar "central × día del mes" que arma `OSSCC_CargarResumenEnMedidores`, no una fila por
+registro de `Medidores`. Lo mismo ocurre con `AB:AE`, que ocupan tantas filas como grupos
+"central × ventana" existan (los escribe `Resumir_Medidores_Central_Ventana_Oferta_Completa`).
+En la planilla original conviven en las mismas letras de columna que el resto de `Medidores`
+porque ahí había espacio libre, no porque compartan el mismo "largo" conceptual.
+
+**Decisión de diseño:** en Python, `V`, `W`, `X`, `Y`, `AB`, `AC`, `AD`, `AE` ya no se
+representan como columnas de `pd.NA` del mismo largo que `A:U` (eso nunca fue fiel, aunque
+serviía como marcador de "pendiente"). Se calculan como tablas auxiliares de su propio largo y
+se escriben como hojas separadas de `Hoja_Medidas.xlsx`:
+
+- **"Resumen Ofertas SSCC"** — salida de `Generar_Resumen_Ofertas_SSCC` (Nombre, Año, Mes, Día,
+  una columna por servicio `_RS` encontrado, Oferta completa). Mismo nombre que la hoja
+  homónima del `.xlsm` original, para comparación directa.
+- **"Ofertas SSCC por Dia"** — equivalente a `Medidores!W:Y` (Nombre, Dia, Oferta completa),
+  una fila por central × día del mes.
+- **"Resumen Ventana Oferta"** — equivalente a `Medidores!AB:AE` (Central, Ventana T, Oferta,
+  Completa), una fila por grupo central × ventana.
+
+`V` en sí (la clave de homologación día+central usada solo para resolver `R`) no se persiste
+como tabla propia: es un paso intermedio interno de `nucleo.calcular_r()`.
+
+## 20.2. Columnas R, S, T — ahora calculadas
+
+`R`, `S` y `T` SÍ son columnas por fila (sus rangos de fórmula cubren todo `Medidores`) y se
+implementaron tal cual en `nucleo.py`:
+
+- **R** (`Oferta_Completa_Dia`) = `VLOOKUP(B&G, V:Y, 4, FALSE)`: para cada fila, busca (Día +
+  central homologada vía `Diccionario!F/G→E`) en la tabla "Ofertas SSCC por Dia" y devuelve la
+  Oferta completa de ese día.
+- **S** (`Indicador_Ventana_Oferta`) = `IF(L=L_anterior, S_anterior, IF(R=1,1,2))`: se mantiene
+  mientras la Ventana no cambie; al cambiar, toma 1 si R=1 en esa fila, si no 2. No se reinicia
+  aparte por central — la fórmula original tampoco lo hace, se apoya en que L ya cambia al
+  cambiar de central.
+- **T** (`Ventana_No_Completa`) = `1 - Completa(central=G, ventana=L)`, buscando en "Resumen
+  Ventana Oferta" (T=0 → ventana completa, T=1 → incompleta).
+
+## 20.3. Verificación
+
+Se armó un caso sintético (1 central, 2 días, `Hora` en convención 1-24 como usa la planilla
+real) con un archivo de OfertasSSCC donde la central ofertó las 24 horas del servicio `_RS`
+ambos días. Resultado: las 3 ventanas del caso (inicio, normal, última) dieron exactamente 36,
+96 y 60 filas — los valores esperados de la fórmula
+`(INICIO_VENTANA-1)*4` / `96` / `(25-INICIO_VENTANA)*4` — y las tres quedaron marcadas
+`Completa=1`; R=1 y T=0 en las 192 filas. Un segundo caso con una hora "No" en vez de "Sí"
+marcó correctamente `Oferta completa=0` para ese grupo. No se validó todavía contra un caso
+real ni contra la hoja `Medidores` de la planilla 11 (sigue sin datos reales disponibles).
+
+## 20.4. Lo que sigue pendiente
+
+- Validar contra un caso real y contra la planilla 11 (plan §13, punto 10).
+- Confirmar que la columna `V` no necesita persistirse (por ahora es puramente interna a
+  `calcular_r`); si en la validación contra Excel hiciera falta auditarla fila a fila, agregarla
+  a la hoja "Ofertas SSCC por Dia".
+- `U:AE` fuera de lo ya cubierto por `R,S,T,V,W,X,Y,AB,AC,AD,AE` no aplica: esas eran todas las
+  columnas pendientes identificadas hasta ahora (plan §9.12 original).

@@ -8,20 +8,14 @@ estado, no un historial.
 
 ## Pendientes abiertos
 
-- Conseguir el código fuente real (VBA) de `Generar_Resumen_Ofertas_SSCC` y
-  `Resumir_Medidores_Central_Ventana_Oferta_Completa`. Sin eso no se pueden
-  implementar fielmente las columnas `R, S, T, V, W, X, Y, AB, AC, AD, AE`
-  de `Medidores` (plan §16.3, §17, §19.2) — solo se conoce qué columna
-  produce cada macro, no su lógica interna.
-- Definir el patrón de nombre del archivo de OfertasSSCC dentro de
-  `<CARPETA_BASE>/Ofertas/` (la ubicación de la carpeta ya está definida,
-  plan §16.2, pero no el nombre del archivo ni su lectura).
-- Confirmar la disposición exacta por columnas de la hoja `Diccionario` de
-  `Centrales.xlsx` (qué es la columna E, F, G) para poder implementar la
-  fórmula de `V` (plan §16.3), que depende de `BUSCARX` contra esas
-  columnas.
-- Crear casos de prueba para comparar la salida Python contra la hoja
-  `Medidores` de `11_PAGOS_BESS_2607_Definitivo.xlsm` (plan §13, punto 10).
+- Crear casos de prueba con datos reales y comparar la salida Python
+  contra la hoja `Medidores` de `11_PAGOS_BESS_2607_Definitivo.xlsm`,
+  incluyendo ahora `R, S, T` y las tres hojas auxiliares de Ofertas SSCC
+  (plan §13 punto 10, §20.3). Todavía solo se validó con un caso sintético.
+- Confirmar si la columna `V` (clave de homologación día+central, interna
+  a `calcular_r`) necesita persistirse en una hoja propia para poder
+  auditarla fila a fila contra la planilla 11, o si alcanza con auditar
+  "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
 - Evaluar si `guardar_config()` necesita escritura atómica (ver
   `METODOLOGIA.md` §7).
 
@@ -111,3 +105,69 @@ Verificación: se armó un caso sintético en el scratchpad (carpeta con
 31 columnas en el orden correcto, `K` coincide con `L`, y las columnas
 vacías/pendientes quedan como `NaN`. No se probó contra un caso real ni
 contra la planilla 11 (sigue sin datos reales disponibles en el entorno).
+
+---
+
+## 2026-09-10 (3) — Ofertas SSCC implementado a partir del código VBA fuente
+
+Se recibió `Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md` con el código VBA completo de
+`Generar_Resumen_Ofertas_SSCC` y `Resumir_Medidores_Central_Ventana_Oferta_Completa`, y las
+fórmulas de Excel de `Medidores!K,L,N,O,R,S,T,V`. Esto resuelve el pendiente principal de la
+sesión anterior.
+
+**Hallazgo importante antes de programar:** las fórmulas muestran que `V` (y por macro, `W, X,
+Y, AB, AC, AD, AE`) NO son columnas por fila de `Medidores` — son tablas auxiliares de otro
+largo (central × día, central × ventana) que solo viven en esas letras de columna porque ahí
+había espacio libre en la planilla. Mantenerlas como columnas `pd.NA` del mismo largo que A:U
+(como se hizo la sesión anterior, cuando eran genuinamente "pendientes") dejó de tener sentido
+una vez que se pueden calcular: ahora se escriben como hojas propias de `Hoja_Medidas.xlsx`
+("Resumen Ofertas SSCC", "Ofertas SSCC por Dia", "Resumen Ventana Oferta"). Esto está
+documentado con más detalle en `docs/Plan_Traspaso_Python_Balance_BESS.md` §20.
+
+Cambios en `nucleo.py`:
+
+- `LETRA_A_CAMPO` ahora va de A a U (se sacaron V, W, X, Y, AB, AC, AD, AE). `COLUMNAS_VACIAS`
+  quedó en M, P, Q, U. Se eliminó `COLUMNAS_PENDIENTES_OFERTAS` (ya no queda nada pendiente).
+- Nuevas funciones que replican la macro `Generar_Resumen_Ofertas_SSCC`:
+  `construir_resumen_ofertas_sscc()` y sus auxiliares privados (`_contiene_bess_o_sae`,
+  `_servicio_termina_en_rs`, `_es_respuesta_si`, `_normalizar_periodo`, etc., prefijo `_` como
+  las de detección de SoC).
+- `cargar_resumen_en_medidores()` replica `OSSCC_CargarResumenEnMedidores` (equivalente a
+  `Medidores!W:Y`), incluyendo la homologación vía `Diccionario!E:F:G` y el aviso de nombres de
+  `Medidores!clave` no encontrados en el diccionario.
+- `calcular_r()` replica la fórmula de `R` (`VLOOKUP` contra la tabla `V:Y`), usando
+  `_mapas_homologacion_fge()`/`_homologar_fge()` para la homologación específica vía
+  `Diccionario!F/G→E` que usa la fórmula de `V` — un mapeo DISTINTO del que usa
+  `construir_homologacion()` para el SoC (una es posicional por columna, la otra trata toda la
+  fila como equivalencias simétricas). Si no hay match, `R` queda `NaN` y se registra un aviso
+  en vez de fallar (no debería pasar si `Diccionario` está completo, pero no se asume).
+- `calcular_s()` replica la fórmula de `S`, vectorizada por "corridas" de `Ventana` constante
+  (no se reinicia por central, igual que la fórmula original).
+- `construir_resumen_ventana_oferta()` replica `Resumir_Medidores_Central_Ventana_Oferta_
+  Completa` (equivalente a `Medidores!AB:AE`).
+- `calcular_t()` replica la fórmula de `T` (`1 - Completa`), vía merge contra el resumen
+  anterior.
+- `buscar_archivo_ofertas()` busca el archivo `*OfertasSSCC*` más reciente en `Ofertas/` — a
+  diferencia del SoC, si hay más de uno SÍ se elige automáticamente por fecha de modificación
+  (así lo hace la macro `OSSCC_BuscarArchivoOfertas` original).
+- `revisar_estructura()`: la fila de Ofertas SSCC pasó de `pendiente` (no bloqueaba) a `falta`
+  (bloquea Ejecutar) si no hay carpeta `Ofertas/` o no hay archivo `*OfertasSSCC*` — ahora es
+  obligatoria (plan §17-18).
+- `construir_medidores()` y `ejecutar()` quedaron con nuevos parámetros (`ruta_ofertas`,
+  `diccionario`) y devuelven además las tres tablas auxiliares. `escribir_salida()` las escribe
+  como hojas nuevas.
+
+**Trampa encontrada y corregida en la misma sesión:** el primer intento de
+`buscar_archivo_ofertas()` comparaba contra el literal `"ofertasscc"` (dos "s" seguidas), pero
+`"OfertasSSCC".lower()` da tres "s" seguidas ("Ofertas" + "SSCC"). El patrón ahora se deriva en
+tiempo de ejecución con `"OfertasSSCC".lower()` (constante `PATRON_NOMBRE_OFERTAS`) en vez de
+transcribirlo a mano, para no repetir el error. Ver `METODOLOGIA.md` §7 si se agrega ahí.
+
+**Verificación:** caso sintético con 1 central, 2 días, `Hora` en convención 1-24 (como usa la
+planilla real, confirmado porque `(INICIO_VENTANA-1)*4=36` y `(25-INICIO_VENTANA)*4=60` dieron
+exactamente los conteos de filas de las ventanas de inicio y de cierre del caso de prueba) y un
+archivo de Ofertas SSCC con oferta completa las 24 horas ambos días: las 3 ventanas (inicio,
+normal, última) quedaron `Completa=1` con 36/96/60 filas respectivamente, y R=1/T=0 en las 192
+filas de `Medidores`. Un segundo caso con una hora "No" en vez de "Sí" marcó correctamente
+`Oferta completa=0`. No se probó contra un caso real ni contra la hoja `Medidores` de la
+planilla 11 (sigue pendiente, ver arriba).

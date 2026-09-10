@@ -40,15 +40,21 @@ python Balance_BESS.py
 │        ej. SOC_2607.xlsx, "resumen soc julio 2607.xlsx">
 ├── Auxiliares/
 │   └── Centrales.xlsx       (hojas "Resumen BESS" y "Diccionario")
-├── Ofertas/                 (ubicación definida; lectura aún pendiente)
+├── Ofertas/
+│   └── <algún archivo Excel cuyo nombre contenga "OfertasSSCC">
 └── Hoja_Medidas.xlsx        <- salida generada por el programa
 ```
 
-El nombre del archivo de SoC no sigue un patrón fijo: solo debe contener
-"SOC" y el AAMM ingresado en la ventana, en cualquier posición. Si hay más
-de un archivo que cumple esa condición, el programa se detiene y pide
-dejar solo el del período que corresponde (no elige por fecha de
-modificación).
+Ni el archivo de SoC ni el de OfertasSSCC siguen un nombre fijo:
+
+- **SoC**: cualquier `.xlsx` en `Medidas/` cuyo nombre contenga "SOC" y el
+  AAMM ingresado en la ventana. Si hay más de uno, el programa se detiene y
+  pide dejar solo el del período correspondiente (no elige por fecha de
+  modificación).
+- **OfertasSSCC**: cualquier archivo Excel en `Ofertas/` cuyo nombre
+  contenga "OfertasSSCC". Si hay más de uno, a diferencia del SoC, se toma
+  automáticamente el más reciente por fecha de modificación (así lo hace
+  la macro original de la planilla).
 
 La carpeta base puede estar en cualquier ubicación (disco local, red,
 OneDrive); moverla o mover `Balance_BESS.py` a otro lugar no cambia el
@@ -66,11 +72,16 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 
 ## Estado actual
 
-Etapa Medidores: las 31 columnas A:AE están definidas según la
-especificación cerrada del plan. Implementadas y calculadas: A:J (entrada),
-K (copia de L), L, N, O. Deliberadamente vacías (diseño confirmado, no
-pendiente): M, P, Q, U, Z, AA. Pendientes porque dependen de las macros de
-Ofertas SSCC, cuyo código fuente todavía no se entregó: R, S, T, V, W, X,
-Y, AB, AC, AD, AE (ver `BITACORA.md` → "Pendientes abiertos"). La carpeta
-`Ofertas/` ya tiene ubicación definida (`<CARPETA_BASE>/Ofertas/`) pero
-todavía no se lee ningún archivo de ahí.
+Etapa Medidores completa: columnas A:U de `Medidores` implementadas
+(A:J entrada, K copia de L, L, N, O, R, S, T calculadas; M, P, Q, U
+deliberadamente vacías por diseño). Las macros de Ofertas SSCC
+(`Generar_Resumen_Ofertas_SSCC`, `Resumir_Medidores_Central_Ventana_
+Oferta_Completa`) están replicadas a partir del código VBA original; sus
+resultados (lo que en la planilla ocupaba `Medidores!V:Y` y `AB:AE`, que
+en realidad son tablas de otro largo, no columnas por fila) se escriben
+como hojas propias de `Hoja_Medidas.xlsx`: `Resumen Ofertas SSCC`,
+`Ofertas SSCC por Dia`, `Resumen Ventana Oferta`.
+
+Validado con un caso sintético (no con datos reales todavía): ver
+`BITACORA.md` → "Pendientes abiertos" para lo que falta antes de dar por
+cerrada la etapa (validación contra un caso real y contra la planilla 11).
