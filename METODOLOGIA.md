@@ -162,6 +162,40 @@ contra él.
   primera réplica no corrige ni reinterpreta homologaciones aunque parezcan
   desplazadas; cualquier inconsistencia se reporta como aviso/incidencia,
   no se "arregla" en silencio.
+- **Período del caso (AAMM):** lo ingresa el usuario en un campo de texto
+  de la ventana (4 dígitos, ej. `2607`), no se infiere del nombre de ningún
+  archivo. `nucleo.validar_aamm()` es la única función que valida el
+  formato; todo lo demás (`buscar_soc`, `revisar_estructura`, `ejecutar`)
+  recibe el AAMM ya como parámetro. El archivo de SoC dentro de `Medidas/`
+  tampoco tiene un nombre fijo: solo debe contener "SOC" y el AAMM en
+  cualquier posición del nombre (`_es_archivo_de_soc()`); el archivo en sí
+  siempre es `.xlsx` (confirmado con el usuario — un CSV con "SOC"+AAMM en
+  el nombre puede ser un archivo completamente distinto sin relación con
+  el SoC, ver `METODOLOGIA.md` §7).
+- **Columnas de `Medidores` (A:U):** el orden final de columnas sale de
+  `LETRA_A_CAMPO`, cuyo **orden de inserción** es el orden de Excel.
+  `COLUMNAS_VACIAS` (M, P, Q, U) son diseño confirmado, no trabajo
+  pendiente. `V, W, X, Y, AB, AC, AD, AE` **no están en `LETRA_A_CAMPO`**:
+  en la planilla original no son una columna por fila de `Medidores`, son
+  tablas auxiliares de otro largo (central × día, central × ventana) que
+  comparten esas letras de columna solo porque ahí había espacio libre. Se
+  calculan y se escriben como hojas propias de `Hoja_Medidas.xlsx` en vez
+  de forzarlas a columnas `pd.NA` del mismo largo que A:U (ver plan de
+  migración §20.1). `R`, `S`, `T` sí son columnas por fila y están
+  implementadas: dependen de las macros de Ofertas SSCC
+  (`Generar_Resumen_Ofertas_SSCC`, `Resumir_Medidores_Central_Ventana_
+  Oferta_Completa`), replicadas fielmente a partir del código VBA y las
+  fórmulas de Excel entregados (plan §20).
+- **Ofertas SSCC:** archivo obligatorio (plan §17-18), se busca en
+  `<CARPETA_BASE>/Ofertas/` con `buscar_archivo_ofertas()` — nombre debe
+  contener "OfertasSSCC" (sin importar mayúsculas); a diferencia del SoC,
+  si hay más de uno se toma el más reciente por fecha de modificación
+  (replica exacta de `OSSCC_BuscarArchivoOfertas`, no una decisión nueva).
+  Homologación de nombres para Ofertas SSCC usa específicamente
+  `Diccionario!E/F/G` (índices 4/5/6 del DataFrame `header=None`) vía
+  `_mapas_homologacion_fge()`/`_homologar_fge()` — es un mapeo DISTINTO del
+  que usa `construir_homologacion()` para el SoC (que trata toda la fila
+  como equivalencias simétricas); no confundir ni fusionar ambos.
 - **Errores de entrada vs. errores inesperados:** un problema de datos de
   entrada (archivo faltante, ambigüedad de SOC, columnas faltantes, bloque
   sin `Time Stamp`/`Value`) se señaliza con `nucleo.ErrorEntrada`, con un
@@ -197,6 +231,11 @@ causa raíz deje de existir en el código.
 | Si `Medidas/` tiene más de un archivo `SOC_AAMM.xlsx`, `buscar_soc()` lanza `ErrorEntrada` a propósito — no elige el más reciente. | No "arreglar" esto para que elija automáticamente por fecha de modificación: es una decisión deliberada del plan (§3.4) para no tomar en silencio el mes equivocado. |
 | Las columnas `K, M, P, Q, R, S, T` de `Medidores` están en `COLUMNAS_PENDIENTES` como `pd.NA` porque su lógica exacta o su fuente (Ofertas SSCC) todavía no está definida. | No inventar una fórmula para completarlas "para que quede bonito". Cerrar primero la regla exacta en `docs/Plan_Traspaso_Python_Balance_BESS.md` §9, con el humano que conoce la planilla 11, y recién ahí implementar. |
 | `calcular_ventana()` reinicia el contador por **bloque de filas consecutivas con la misma clave**, no por `groupby` sobre toda la central. | Si los datos de entrada no vienen ordenados por `clave` e `intervalo` antes de llamar a esta función, el resultado no coincide con la fórmula de Excel. `construir_medidores()` ya ordena con `sort_values(["clave", "intervalo"])` antes de calcularla; no quitar ese paso ni reordenar después. |
+| El orden final de columnas usa `list(LETRA_A_CAMPO.values())` (el dict ya está declarado en el orden correcto de Excel). | Si en el futuro se necesitara reintroducir alguna letra de dos caracteres (AA, AB...) en `LETRA_A_CAMPO`, nunca ordenar sus claves con `sorted()`: "AA" < "B" como texto, lo que rompería el orden real de columnas de Excel. Ya pasó una vez en esta migración (ver `docs/Plan_Traspaso_Python_Balance_BESS.md` §19/§20). |
+| La fórmula de `Medidores!V` usa `Diccionario!F` y `Diccionario!G` como alias hacia `Diccionario!E` (columnas 5,6,7 del sheet, índices 4,5,6 en el DataFrame `header=None`) — un mapeo posicional específico, distinto de `construir_homologacion()` (que usa toda la fila, sin posición fija). | No usar `construir_homologacion()` para resolver Ofertas SSCC ni `_mapas_homologacion_fge()` para el SoC: son dos bloques distintos de la misma hoja `Diccionario`, con reglas de lectura distintas. |
+| `calcular_s()` no se reinicia por central: sigue siendo "igual a la fila anterior mientras `Ventana` no cambie" incluso cruzando de una central a otra. | Es fiel a la fórmula de Excel (`IF(L3=L2,S2,...)`, sin comparar `G`). Si dos centrales consecutivas terminan/empiezan con la misma `Ventana`, `S` no se reinicia — así es también en la planilla original, no es un bug a corregir. |
+| Que un archivo se llame `SOC_2607.csv` (o cualquier nombre que contenga "SOC"+AAMM) no garantiza que sea el archivo de SoC de la etapa Medidores. Ya apareció un CSV con ese patrón de nombre que en realidad era un archivo de pagos/liquidación (columnas `Fecha_Hora, CONFIGURACION, Central, Pago, Tipo_pago, Bloque_15min`, sin ninguna columna de SoC), sin relación con `Medidores!J`. | El archivo de SoC real siempre es `.xlsx`, con la estructura de bloques horizontales `Status/Questionable/Time Stamp/Value` (ver `extraer_soc()`). Si un archivo que matchea el patrón de nombre no tiene esa estructura, **no asumir que el formato cambió**: es señal de que no es el archivo correcto. Preguntar antes de adaptar el parser a una estructura nueva. |
+| `"OfertasSSCC"` tiene **tres** "s" seguidas al pasarlo a minúsculas (`"Ofertas"` termina en "s" + `"SSCC"` empieza con dos "s" más = `"...tas" + "sscc"` = `"...tasssc c"`). Un primer intento transcribió el literal a mano con solo dos "s" (`"ofertasscc"`) y `buscar_archivo_ofertas()` nunca encontraba ningún archivo real. | No transcribir a mano un literal derivado de un nombre con letras dobles/triples repetidas: calcularlo en tiempo de ejecución (`"OfertasSSCC".lower()`, constante `PATRON_NOMBRE_OFERTAS` en `nucleo.py`) y comparar contra eso. Se detectó con un test sintético antes de llegar a producción; si vuelve a fallar la detección del archivo de Ofertas, este es el primer sospechoso a descartar. |
 
 ---
 
@@ -224,3 +263,17 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   versionado.** Se genera por caso en la carpeta base del usuario y se
   ignora en git (ver `.gitignore`); el repositorio no guarda salidas de
   casos concretos.
+- **`V, W, X, Y, AB, AC, AD, AE` no son columnas de `Medidores` en Python.**
+  Las fórmulas de Excel (`V3:V312`, no `V3:V26786`) muestran que son tablas
+  auxiliares de otro largo que solo comparten letra de columna con
+  `Medidores` porque ahí había espacio libre en la planilla. Forzarlas a
+  columnas `pd.NA` del mismo largo que A:U (como se hizo antes de tener el
+  código VBA) ya no es una aproximación razonable una vez que se pueden
+  calcular de verdad: se escriben como hojas propias de `Hoja_Medidas.xlsx`
+  (ver plan §20.1).
+- **El período AAMM lo escribe el usuario, no se adivina del nombre de un
+  archivo.** `SOC_AAMM.xlsx` era solo un patrón conceptual en el plan
+  original; en la práctica el archivo de SoC llega con nombres variables.
+  Confiar en un regex sobre el nombre para extraer el período era frágil;
+  pedirlo explícitamente en la ventana es la fuente de verdad y además
+  sirve para validar el archivo de SoC encontrado (debe contener ese AAMM).

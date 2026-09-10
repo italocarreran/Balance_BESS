@@ -1113,10 +1113,10 @@ No se avanzará a simplificar la arquitectura hasta disponer de una réplica fun
 `Medidores`
 
 ## Estado
-**Diseño de entradas/salidas y lógica implementado en `nucleo.py`/`Balance_BESS.py` para las columnas A:J, L, N, O. K, M, P, Q, R, S, T pendientes (ver `BITACORA.md`).**
+**Diseño de entradas/salidas y lógica. Sin implementación todavía.**
 
 ## Próximo paso recomendado
-Completar el inventario columna por columna de `Medidores`, utilizando la planilla 11 únicamente como referencia, y cerrar las reglas exactas de K, M, P, Q, R, S, T antes de implementarlas.
+Completar el inventario columna por columna de `Medidores`, utilizando la planilla 11 únicamente como referencia, y cerrar las reglas exactas antes de comenzar a programar.
 
 
 ---
@@ -1139,3 +1139,245 @@ Hojas actuales:
 - `Diccionario`: homologaciones entre nombres utilizados por FD, Subastas y Ofertas.
 
 Este archivo pasa a formar parte de las entradas maestras oficiales del nuevo proceso Python.
+
+
+# 16. Especificación cerrada de columnas de `Medidores`
+
+Esta sección consolida las reglas confirmadas para replicar la hoja `Medidores` en Python.
+
+## 16.1. Regla de cruce para SoC
+
+La columna `J` se alimentará desde `SOC_AAMM.xlsx`.
+
+La asociación entre cada registro de SoC y cada fila de `Medidores` se realizará usando:
+
+- central;
+- fecha;
+- hora;
+- cuarto de hora.
+
+La extracción del archivo `SOC_AAMM.xlsx` seguirá la lógica ya definida de detección dinámica de bloques por la fila de nombres de centrales y búsqueda de encabezados `Time Stamp` / `Value` dentro de cada bloque.
+
+---
+
+## 16.2. Ubicación de Ofertas SSCC
+
+La entrada externa de Ofertas SSCC se ubicará en:
+
+```text
+<CARPETA_BASE>/Ofertas/
+```
+
+El programa deberá buscar ahí el archivo correspondiente al período.
+
+---
+
+## 16.3. Regla exacta por columna
+
+| Columna | Estado | Regla / fuente |
+|---|---|---|
+| A:I | Copiadas | Provienen de `Medidas/Medidas_SAE.xlsx`, hoja `Medidas`. |
+| J | Copiada / cruzada | SoC desde `Medidas/SOC_AAMM.xlsx`, asociado por central + fecha + hora + cuarto de hora. |
+| K | Calculada | Copia de `L` fila a fila. |
+| L | Calculada | Contador/ventana. Parte con `L inicial = 0`. Mantener la lógica actual usando `INICIO_VENTANA = 10`. |
+| M | Vacía | Debe quedar vacía. |
+| N | Calculada | Clave auxiliar. `N = B & "&" & E`. |
+| O | Calculada | Indicador por SoC con `UMBRAL_SOC = 0.06`. Conceptualmente `O = 1 * (J > 0.06)`. |
+| P | Vacía | Debe quedar vacía. |
+| Q | Vacía | Debe quedar vacía. |
+| R | Calculada | Resultado de búsqueda contra el resumen de Ofertas SSCC generado en Python. |
+| S | Calculada | Mantener lógica secuencial actual dependiente de L y R. |
+| T | Calculada | Mantener lógica actual contra el resumen central + ventana + oferta completa. |
+| U | Vacía | Debe quedar vacía. |
+| V | Calculada | ID auxiliar. Fórmula de referencia: `=X3&BUSCARX(W3;Diccionario!F:F;Diccionario!E:E;BUSCARX(W3;Diccionario!G:G;Diccionario!E:E;0;0);0)` |
+| W | Calculada por lógica de Ofertas | Central. |
+| X | Calculada por lógica de Ofertas | Día. |
+| Y | Calculada por lógica de Ofertas | Oferta completa: bandera de si tiene o no oferta completa. |
+| Z | Vacía | Debe quedar vacía. |
+| AA | Vacía | Debe quedar vacía. |
+| AB | Calculada por lógica de Ofertas | Central. |
+| AC | Calculada por lógica de Ofertas | Ventana T. |
+| AD | Calculada por lógica de Ofertas | Oferta. |
+| AE | Calculada por lógica de Ofertas | Completa. |
+
+---
+
+# 17. Traspaso obligatorio de macros de Ofertas SSCC
+
+Las macros de Ofertas SSCC **sí forman parte obligatoria de la réplica en Python**.
+
+No deben reemplazarse por columnas vacías ni por placeholders `_PENDIENTE`.
+
+## 17.1. `Generar_Resumen_Ofertas_SSCC`
+
+Python deberá reproducir fielmente la lógica de:
+
+```text
+Generar_Resumen_Ofertas_SSCC
+```
+
+Su salida corresponde a:
+
+| Columna | Significado |
+|---|---|
+| W | Central |
+| X | Día |
+| Y | Oferta completa |
+
+---
+
+## 17.2. `Resumir_Medidores_Central_Ventana_Oferta_Completa`
+
+Python deberá reproducir fielmente la lógica de:
+
+```text
+Resumir_Medidores_Central_Ventana_Oferta_Completa
+```
+
+Su salida corresponde a:
+
+| Columna | Significado |
+|---|---|
+| AB | Central |
+| AC | Ventana T |
+| AD | Oferta |
+| AE | Completa |
+
+Estas columnas alimentan posteriormente la lógica de `T`.
+
+---
+
+# 18. Regla de réplica fiel
+
+Para esta primera versión:
+
+- no eliminar columnas auxiliares;
+- no simplificar macros;
+- no reemplazar lógica conocida por placeholders;
+- replicar primero el comportamiento del Excel;
+- validar contra la hoja `Medidores` original;
+- simplificar únicamente después de lograr equivalencia.
+
+---
+
+# 19. Nota de implementación — período AAMM y columnas de Ofertas SSCC (sesión de organización del repo)
+
+## 19.1. AAMM como entrada explícita del usuario
+
+`SOC_AAMM.xlsx` es un patrón conceptual (§3.4), no un nombre de archivo literal: en la práctica el archivo de SoC puede llegar con otro nombre siempre que contenga `SOC` y el período. Por eso el período **AAMM ya no se infiere del nombre del archivo**: la ventana pide al usuario ingresarlo en un campo de texto (4 dígitos, ej. `2607`), y ese valor es la fuente de verdad para:
+
+- calcular año/mes (`periodo_desde_aamm`);
+- buscar el archivo de SoC dentro de `Medidas/` (debe contener `SOC` y el AAMM ingresado en el nombre, en cualquier posición/separador — ya no una regex estricta de la forma `SOC_AAMM.xlsx`).
+
+Si el AAMM no se ingresa o no son 4 dígitos, el checklist de la ventana lo marca como `FALTA` y bloquea la ejecución.
+
+## 19.2. Qué se implementó de §16.3 y qué sigue pendiente
+
+Implementado en `nucleo.py` en esta sesión:
+
+- `K` = copia de `L` fila a fila (`Copia_Ventana`).
+- `M`, `P`, `Q`, `U`, `Z`, `AA` quedan explícitamente vacías (`pd.NA`) — es diseño confirmado, no una tarea pendiente.
+
+Sigue pendiente, porque el texto de las macros VBA (`Generar_Resumen_Ofertas_SSCC` y
+`Resumir_Medidores_Central_Ventana_Oferta_Completa`) todavía no fue entregado a esta sesión —
+solo se conoce el nombre de las macros y qué columnas producen, no la lógica interna —, y por
+lo tanto no se pueden replicar fielmente sin adivinar (viola la regla de réplica fiel, §18):
+
+- `R`, `S`, `T` (dependen del resumen de Ofertas SSCC);
+- `V` (la fórmula de Excel es conocida, pero depende de `W`/`X`, que son salida de una macro pendiente, y de la disposición exacta por columnas de la hoja `Diccionario`, todavía no confirmada);
+- `W`, `X`, `Y` (salida de `Generar_Resumen_Ofertas_SSCC`);
+- `AB`, `AC`, `AD`, `AE` (salida de `Resumir_Medidores_Central_Ventana_Oferta_Completa`).
+
+Estas columnas quedan en `Hoja_Medidas.xlsx` como `pd.NA`, con nombre de campo terminado en
+`_PENDIENTE_OFERTAS`, hasta que se entregue el código fuente de ambas macros. La carpeta
+`Ofertas/` bajo `<CARPETA_BASE>` ya se detecta en el checklist de la ventana (no bloqueante),
+pero todavía no se define el patrón de nombre del archivo dentro de ella ni se lee su contenido.
+
+---
+
+# 20. Implementación de Ofertas SSCC (sesión con el código VBA fuente)
+
+Se recibió `Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md`, que incluye el código VBA completo
+de `Generar_Resumen_Ofertas_SSCC` y `Resumir_Medidores_Central_Ventana_Oferta_Completa`
+(extraído de `xl/vbaProject.bin`) y, en su sección 5.1, las fórmulas de Excel de `Medidores!K`,
+`L`, `N`, `O`, `R`, `S`, `T` y `V`. Esto resuelve el pendiente de la sección 19.2: ya no falta
+el código fuente de las macros.
+
+## 20.1. Hallazgo estructural: V, W, X, Y, AB, AC, AD, AE no son columnas por fila
+
+Las fórmulas de la sección 5.1 muestran que `V3:V312` (no `V3:V26786` como el resto de las
+columnas de `Medidores`) — es decir, `V` (y `W`, `X`, `Y`, que la macro `H_Leer_Ofertas` escribe
+directamente como valores, sin fórmula) solo ocupan tantas filas como necesite la tabla
+auxiliar "central × día del mes" que arma `OSSCC_CargarResumenEnMedidores`, no una fila por
+registro de `Medidores`. Lo mismo ocurre con `AB:AE`, que ocupan tantas filas como grupos
+"central × ventana" existan (los escribe `Resumir_Medidores_Central_Ventana_Oferta_Completa`).
+En la planilla original conviven en las mismas letras de columna que el resto de `Medidores`
+porque ahí había espacio libre, no porque compartan el mismo "largo" conceptual.
+
+**Decisión de diseño:** en Python, `V`, `W`, `X`, `Y`, `AB`, `AC`, `AD`, `AE` ya no se
+representan como columnas de `pd.NA` del mismo largo que `A:U` (eso nunca fue fiel, aunque
+serviía como marcador de "pendiente"). Se calculan como tablas auxiliares de su propio largo y
+se escriben como hojas separadas de `Hoja_Medidas.xlsx`:
+
+- **"Resumen Ofertas SSCC"** — salida de `Generar_Resumen_Ofertas_SSCC` (Nombre, Año, Mes, Día,
+  una columna por servicio `_RS` encontrado, Oferta completa). Mismo nombre que la hoja
+  homónima del `.xlsm` original, para comparación directa.
+- **"Ofertas SSCC por Dia"** — equivalente a `Medidores!W:Y` (Nombre, Dia, Oferta completa),
+  una fila por central × día del mes.
+- **"Resumen Ventana Oferta"** — equivalente a `Medidores!AB:AE` (Central, Ventana T, Oferta,
+  Completa), una fila por grupo central × ventana.
+
+`V` en sí (la clave de homologación día+central usada solo para resolver `R`) no se persiste
+como tabla propia: es un paso intermedio interno de `nucleo.calcular_r()`.
+
+## 20.2. Columnas R, S, T — ahora calculadas
+
+`R`, `S` y `T` SÍ son columnas por fila (sus rangos de fórmula cubren todo `Medidores`) y se
+implementaron tal cual en `nucleo.py`:
+
+- **R** (`Oferta_Completa_Dia`) = `VLOOKUP(B&G, V:Y, 4, FALSE)`: para cada fila, busca (Día +
+  central homologada vía `Diccionario!F/G→E`) en la tabla "Ofertas SSCC por Dia" y devuelve la
+  Oferta completa de ese día.
+- **S** (`Indicador_Ventana_Oferta`) = `IF(L=L_anterior, S_anterior, IF(R=1,1,2))`: se mantiene
+  mientras la Ventana no cambie; al cambiar, toma 1 si R=1 en esa fila, si no 2. No se reinicia
+  aparte por central — la fórmula original tampoco lo hace, se apoya en que L ya cambia al
+  cambiar de central.
+- **T** (`Ventana_No_Completa`) = `1 - Completa(central=G, ventana=L)`, buscando en "Resumen
+  Ventana Oferta" (T=0 → ventana completa, T=1 → incompleta).
+
+## 20.3. Verificación
+
+Se armó un caso sintético (1 central, 2 días, `Hora` en convención 1-24 como usa la planilla
+real) con un archivo de OfertasSSCC donde la central ofertó las 24 horas del servicio `_RS`
+ambos días. Resultado: las 3 ventanas del caso (inicio, normal, última) dieron exactamente 36,
+96 y 60 filas — los valores esperados de la fórmula
+`(INICIO_VENTANA-1)*4` / `96` / `(25-INICIO_VENTANA)*4` — y las tres quedaron marcadas
+`Completa=1`; R=1 y T=0 en las 192 filas. Un segundo caso con una hora "No" en vez de "Sí"
+marcó correctamente `Oferta completa=0` para ese grupo. No se validó todavía contra un caso
+real ni contra la hoja `Medidores` de la planilla 11 (sigue sin datos reales disponibles).
+
+## 20.4. Lo que sigue pendiente
+
+- Validar contra un caso real y contra la planilla 11 (plan §13, punto 10).
+- Confirmar que la columna `V` no necesita persistirse (por ahora es puramente interna a
+  `calcular_r`); si en la validación contra Excel hiciera falta auditarla fila a fila, agregarla
+  a la hoja "Ofertas SSCC por Dia".
+- `U:AE` fuera de lo ya cubierto por `R,S,T,V,W,X,Y,AB,AC,AD,AE` no aplica: esas eran todas las
+  columnas pendientes identificadas hasta ahora (plan §9.12 original).
+
+---
+
+# 21. El archivo de SoC — corrección: sigue siendo siempre `.xlsx`
+
+Una sesión anterior agregó soporte para que el archivo de SoC llegara como `.csv`, a partir de
+una aclaración del usuario que resultó estar equivocada (confundió el archivo de SoC con otro
+CSV de pagos/liquidación que por coincidencia también tenía "SOC" y el AAMM en el nombre —
+columnas `Fecha_Hora, CONFIGURACION, Central, Pago, Tipo_pago, Bloque_15min`, sin ninguna
+columna de SoC). El usuario confirmó después que el archivo de SoC real siempre es `.xlsx`.
+
+Se revirtió el soporte de `.csv`: `nucleo.buscar_soc()` vuelve a exigir `.xlsx`, y se eliminó
+`leer_soc_crudo()` (la sección 20/19 de este documento ya describía correctamente la estructura
+de bloques horizontales por central — eso no cambió, solo el contenedor sí volvió a ser
+únicamente Excel). Ver `METODOLOGIA.md` §7 (trampas conocidas) para la regla que evita repetir
+esta confusión: un archivo que matchea el patrón de nombre pero no tiene la estructura de
+bloques esperada no es el archivo de SoC, aunque comparta "SOC"+AAMM en el nombre.

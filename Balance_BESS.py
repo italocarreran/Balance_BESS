@@ -8,9 +8,11 @@ resuelve solas todas las entradas por ruta relativa.
     <CARPETA_BASE>/
         Medidas/
             Medidas_SAE.xlsx
-            SOC_AAMM.xlsx
+            <algo>SOC<algo>AAMM<algo>.xlsx
         Auxiliares/
             Centrales.xlsx
+        Ofertas/
+            <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Hoja_Medidas.xlsx      <- salida
 
 La ubicacion de este .py no influye en nada salvo en donde se
@@ -126,6 +128,9 @@ def main():
     var_base = tk.StringVar(
         value=cfg.get("carpeta_base", "")
     )
+    var_aamm = tk.StringVar(
+        value=cfg.get("aamm", "")
+    )
     var_estado = tk.StringVar(value="Listo")
     var_tiempo = tk.StringVar(value="00:00:00")
 
@@ -198,6 +203,46 @@ def main():
             else None
         ),
     )
+
+    # --------------------------------------------------------
+    # PERIODO DEL CASO (AAMM)
+    # --------------------------------------------------------
+
+    frame_periodo = tk.LabelFrame(
+        contenedor,
+        text="Periodo del caso (AAMM)",
+        padx=10,
+        pady=8,
+    )
+    frame_periodo.pack(fill="x", padx=20, pady=6)
+
+    validador_aamm = (
+        root.register(lambda s: s == "" or (s.isdigit() and len(s) <= 4)),
+        "%P",
+    )
+
+    entry_aamm = tk.Entry(
+        frame_periodo,
+        textvariable=var_aamm,
+        width=10,
+        justify="center",
+        font=("Segoe UI", 10, "bold"),
+        validate="key",
+        validatecommand=validador_aamm,
+    )
+    entry_aamm.pack(side="left")
+
+    tk.Label(
+        frame_periodo,
+        text=(
+            "4 digitos: año+mes simplificado. Ej. 2607 para julio "
+            "de 2026. Se usa para ubicar el SoC del periodo."
+        ),
+        fg=COLOR_NEUTRO,
+        font=("Segoe UI", 8),
+        wraplength=700,
+        justify="left",
+    ).pack(side="left", padx=(10, 0))
 
     # --------------------------------------------------------
     # PANEL DE VALIDACION
@@ -339,7 +384,9 @@ def main():
         lbl_base.config(fg="#1a4fb0")
 
         try:
-            _, filas = nucleo.revisar_estructura(ruta)
+            _, filas = nucleo.revisar_estructura(
+                ruta, var_aamm.get().strip()
+            )
         except Exception as error:
             pintar_checklist(
                 [("Error al revisar", "falta", str(error))]
@@ -384,6 +431,13 @@ def main():
         frame_carpeta, text="Examinar", command=seleccionar
     ).pack(pady=(6, 0))
 
+    def aamm_cambiado(*_):
+        guardar_config({"aamm": var_aamm.get().strip()})
+        revisar()
+
+    entry_aamm.bind("<FocusOut>", aamm_cambiado)
+    entry_aamm.bind("<Return>", aamm_cambiado)
+
     # --------------------------------------------------------
     # EJECUCION
     # --------------------------------------------------------
@@ -414,6 +468,7 @@ def main():
 
                 nucleo.ejecutar(
                     var_base.get(),
+                    var_aamm.get().strip(),
                     registrar=lambda m: root.after(0, log, m),
                     progreso=lambda v: root.after(
                         0, barra.configure, {"value": v}
@@ -493,7 +548,10 @@ def main():
     # --------------------------------------------------------
 
     pintar_checklist([])
-    log("Selecciona la carpeta base del caso.")
+    log("Selecciona la carpeta base del caso e ingresa el periodo (AAMM).")
+
+    if var_aamm.get():
+        log(f"Periodo recordado: {var_aamm.get()}")
 
     if var_base.get():
         log(f"Carpeta recordada: {var_base.get()}")

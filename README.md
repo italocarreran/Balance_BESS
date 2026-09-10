@@ -21,9 +21,13 @@ python Balance_BESS.py
 
 1. Elegir la **carpeta base** del caso (ver estructura abajo). El programa
    recuerda la última carpeta usada, por PC/usuario, en `config.json`.
-2. La ventana detecta automáticamente las entradas y muestra un checklist
+2. Ingresar el **período (AAMM)** en el recuadro de la ventana: 4 dígitos,
+   año+mes simplificado (ej. `2607` para julio de 2026). No se adivina del
+   nombre de ningún archivo — es el dato que el programa usa para ubicar el
+   SoC del período dentro de `Medidas/`.
+3. La ventana detecta automáticamente las entradas y muestra un checklist
    (`OK` / `FALTA` / `PENDIENTE`).
-3. El botón **Ejecutar** se habilita cuando no falta nada requerido y genera
+4. El botón **Ejecutar** se habilita cuando no falta nada requerido y genera
    `Hoja_Medidas.xlsx` directamente en la carpeta base.
 
 ## Estructura de carpeta de un caso
@@ -32,11 +36,25 @@ python Balance_BESS.py
 <CARPETA_BASE>/
 ├── Medidas/
 │   ├── Medidas_SAE.xlsx
-│   └── SOC_AAMM.xlsx        (ej. SOC_2607.xlsx — debe haber exactamente uno)
+│   └── <algún archivo .xlsx cuyo nombre contenga "SOC" y el AAMM,
+│        ej. SOC_2607.xlsx, "resumen soc julio 2607.xlsx">
 ├── Auxiliares/
 │   └── Centrales.xlsx       (hojas "Resumen BESS" y "Diccionario")
+├── Ofertas/
+│   └── <algún archivo Excel cuyo nombre contenga "OfertasSSCC">
 └── Hoja_Medidas.xlsx        <- salida generada por el programa
 ```
+
+Ni el archivo de SoC ni el de OfertasSSCC siguen un nombre fijo:
+
+- **SoC**: cualquier `.xlsx` en `Medidas/` cuyo nombre contenga "SOC" y el
+  AAMM ingresado en la ventana. Si hay más de un archivo que cumple la
+  condición, el programa se detiene y pide dejar solo el del período
+  correspondiente (no elige por fecha de modificación).
+- **OfertasSSCC**: cualquier archivo Excel en `Ofertas/` cuyo nombre
+  contenga "OfertasSSCC". Si hay más de uno, a diferencia del SoC, se toma
+  automáticamente el más reciente por fecha de modificación (así lo hace
+  la macro original de la planilla).
 
 La carpeta base puede estar en cualquier ubicación (disco local, red,
 OneDrive); moverla o mover `Balance_BESS.py` a otro lugar no cambia el
@@ -54,7 +72,16 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 
 ## Estado actual
 
-Etapa Medidores: columnas A:J, L, N, O implementadas. Las columnas K, M, P,
-Q, R, S, T quedan pendientes (ver `BITACORA.md` → "Pendientes abiertos").
-`OfertasSSCC` todavía no tiene ubicación definida dentro de la carpeta del
-caso.
+Etapa Medidores completa: columnas A:U de `Medidores` implementadas
+(A:J entrada, K copia de L, L, N, O, R, S, T calculadas; M, P, Q, U
+deliberadamente vacías por diseño). Las macros de Ofertas SSCC
+(`Generar_Resumen_Ofertas_SSCC`, `Resumir_Medidores_Central_Ventana_
+Oferta_Completa`) están replicadas a partir del código VBA original; sus
+resultados (lo que en la planilla ocupaba `Medidores!V:Y` y `AB:AE`, que
+en realidad son tablas de otro largo, no columnas por fila) se escriben
+como hojas propias de `Hoja_Medidas.xlsx`: `Resumen Ofertas SSCC`,
+`Ofertas SSCC por Dia`, `Resumen Ventana Oferta`.
+
+Validado con un caso sintético (no con datos reales todavía): ver
+`BITACORA.md` → "Pendientes abiertos" para lo que falta antes de dar por
+cerrada la etapa (validación contra un caso real y contra la planilla 11).

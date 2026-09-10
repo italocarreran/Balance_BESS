@@ -6,6 +6,7 @@ Sin dependencias de interfaz: todo lo de aca se puede correr y
 testear sin abrir la ventana.
 """
 
+import calendar
 import re
 import unicodedata
 from pathlib import Path
@@ -30,6 +31,7 @@ UMBRAL_SOC = 0.06
 
 CARPETA_MEDIDAS = "Medidas"
 CARPETA_AUXILIARES = "Auxiliares"
+CARPETA_OFERTAS = "Ofertas"
 
 ARCHIVO_MEDIDAS_SAE = "Medidas_SAE.xlsx"
 HOJA_MEDIDAS_SAE = "Medidas"
@@ -40,7 +42,18 @@ HOJA_DICCIONARIO = "Diccionario"
 
 ARCHIVO_SALIDA = "Hoja_Medidas.xlsx"
 
-PATRON_SOC = re.compile(r"^SOC[_\-\s]?(\d{4})\.xlsx$", re.IGNORECASE)
+# El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
+# lo ingresa el usuario en la ventana. El archivo de SoC solo debe
+# contener "SOC" y el AAMM en su nombre (plan, seccion 19.1) - no existe
+# un nombre de archivo literal fijo.
+PATRON_AAMM = re.compile(r"^\d{4}$")
+
+# El archivo de OfertasSSCC tampoco tiene nombre fijo: basta con que
+# el nombre contenga "OfertasSSCC" (macro OSSCC_BuscarArchivoOfertas).
+# Se deriva con .lower() en vez de transcribir el literal a mano: con
+# tres "s" seguidas ("Ofertas" + "SSCC") es facil perder una al tipear.
+EXTENSIONES_OFERTAS = {".xlsx", ".xlsm", ".xlsb", ".xls"}
+PATRON_NOMBRE_OFERTAS = "OfertasSSCC".lower()
 
 
 # ============================================================
@@ -60,8 +73,16 @@ COLUMNAS_AI = [
     "Gen_Unidad",
 ]
 
-# Nombre logico de cada letra de Excel, para poder comparar
-# contra la hoja original columna por columna.
+# Nombre logico de cada letra de Excel, para poder comparar contra la
+# hoja original columna por columna. El orden de insercion de este
+# dict ES el orden final de columnas de Medidores.
+#
+# V, W, X, Y, AB, AC, AD, AE NO estan aca: en la planilla original no
+# son una columna por fila de Medidores, son tablas auxiliares de otro
+# largo (una fila por central x dia, o por central x ventana) que solo
+# viven en esas letras de columna porque ahi habia espacio libre. En
+# Python se escriben como hojas propias de Hoja_Medidas.xlsx en vez de
+# forzarlas a columnas del mismo largo que A:U (ver ejecutar()).
 LETRA_A_CAMPO = {
     "A": "Mes",
     "B": "Dia",
@@ -73,28 +94,26 @@ LETRA_A_CAMPO = {
     "H": "intervalo",
     "I": "Gen_Unidad",
     "J": "SoC",
-    "K": "K_PENDIENTE",
+    "K": "Copia_Ventana",
     "L": "Ventana",
-    "M": "M_PENDIENTE",
+    "M": "M_VACIA",
     "N": "Clave_Dia_HoraMes",
     "O": "Indicador_SoC",
-    "P": "P_PENDIENTE",
-    "Q": "Q_PENDIENTE",
-    "R": "R_PENDIENTE_OFERTAS",
-    "S": "S_PENDIENTE_OFERTAS",
-    "T": "T_PENDIENTE_OFERTAS",
+    "P": "P_VACIA",
+    "Q": "Q_VACIA",
+    "R": "Oferta_Completa_Dia",
+    "S": "Indicador_Ventana_Oferta",
+    "T": "Ventana_No_Completa",
+    "U": "U_VACIA",
 }
 
-# Columnas que todavia no se pueden calcular porque su regla
-# no esta documentada o dependen de Ofertas SSCC.
-COLUMNAS_PENDIENTES = [
-    "K_PENDIENTE",
-    "M_PENDIENTE",
-    "P_PENDIENTE",
-    "Q_PENDIENTE",
-    "R_PENDIENTE_OFERTAS",
-    "S_PENDIENTE_OFERTAS",
-    "T_PENDIENTE_OFERTAS",
+# Columnas que el plan define como deliberadamente vacias (plan
+# seccion 16.3): no son trabajo pendiente, es el diseño confirmado.
+COLUMNAS_VACIAS = [
+    "M_VACIA",
+    "P_VACIA",
+    "Q_VACIA",
+    "U_VACIA",
 ]
 
 
@@ -144,20 +163,48 @@ def resolver_rutas(carpeta_base):
 
     medidas_dir = base / CARPETA_MEDIDAS
     auxiliares_dir = base / CARPETA_AUXILIARES
+    ofertas_dir = base / CARPETA_OFERTAS
 
     return {
         "base": base,
         "medidas_dir": medidas_dir,
         "auxiliares_dir": auxiliares_dir,
+        "ofertas_dir": ofertas_dir,
         "medidas_sae": medidas_dir / ARCHIVO_MEDIDAS_SAE,
         "centrales": auxiliares_dir / ARCHIVO_CENTRALES,
         "salida": base / ARCHIVO_SALIDA,
     }
 
 
-def buscar_soc(medidas_dir):
+def validar_aamm(aamm):
+    """Levanta ErrorEntrada si aamm no son 4 digitos (ej. '2607')."""
+
+    if not aamm or not PATRON_AAMM.match(str(aamm).strip()):
+        raise ErrorEntrada(
+            "Ingresa el periodo AAMM en la ventana (4 digitos, "
+            "por ejemplo 2607 para julio de 2026)."
+        )
+    return str(aamm).strip()
+
+
+def _es_archivo_de_soc(nombre_archivo, aamm):
     """
-    Busca SOC_AAMM.xlsx dentro de Medidas/.
+    El nombre del archivo de SoC no sigue un patron fijo (no es
+    literalmente 'SOC_AAMM.xlsx'): basta con que contenga 'SOC' y el
+    AAMM del periodo, en cualquier posicion y con cualquier separador
+    (plan de migracion, seccion 19.1). El archivo en si siempre es
+    .xlsx (ver buscar_soc) - no confundir con otros archivos del caso
+    que puedan compartir "SOC"+AAMM en el nombre sin serlo.
+    """
+
+    nombre = normalizar(Path(nombre_archivo).stem)
+    return "soc" in nombre and aamm in nombre
+
+
+def buscar_soc(medidas_dir, aamm):
+    """
+    Busca dentro de Medidas/ el archivo de SoC del periodo AAMM
+    indicado por el usuario.
 
     Ninguno   -> error
     Uno       -> se usa
@@ -165,6 +212,7 @@ def buscar_soc(medidas_dir):
     """
 
     medidas_dir = Path(medidas_dir)
+    aamm = validar_aamm(aamm)
 
     if not medidas_dir.is_dir():
         raise ErrorEntrada(
@@ -176,31 +224,62 @@ def buscar_soc(medidas_dir):
         for archivo in medidas_dir.iterdir()
         if archivo.is_file()
         and not archivo.name.startswith("~$")
-        and PATRON_SOC.match(archivo.name)
+        and archivo.suffix.lower() == ".xlsx"
+        and _es_archivo_de_soc(archivo.name, aamm)
     ]
 
     if not candidatos:
         raise ErrorEntrada(
-            f"No se encontro ningun archivo SOC_AAMM.xlsx en "
-            f"{medidas_dir}\n"
-            f"Ejemplos validos: SOC_2607.xlsx, SOC_2608.xlsx"
+            f"No se encontro ningun archivo de SoC del periodo {aamm} "
+            f"en {medidas_dir}\n"
+            f"El nombre debe contener 'SOC' y '{aamm}', por ejemplo "
+            f"SOC_{aamm}.xlsx"
         )
 
     if len(candidatos) > 1:
         nombres = ", ".join(sorted(c.name for c in candidatos))
         raise ErrorEntrada(
-            f"Hay {len(candidatos)} archivos SOC en "
-            f"{medidas_dir}:\n"
+            f"Hay {len(candidatos)} archivos de SoC del periodo {aamm} "
+            f"en {medidas_dir}:\n"
             f"  {nombres}\n"
             f"Deja solo el del periodo que vas a procesar. "
             f"No se elige automaticamente para no tomar en "
-            f"silencio el mes equivocado."
+            f"silencio el archivo equivocado."
         )
 
-    archivo = candidatos[0]
-    aamm = PATRON_SOC.match(archivo.name).group(1)
+    return candidatos[0]
 
-    return archivo, aamm
+
+def buscar_archivo_ofertas(ofertas_dir):
+    """
+    Replica OSSCC_BuscarArchivoOfertas: busca dentro de Ofertas/
+    cualquier archivo Excel cuyo nombre contenga "OfertasSSCC".
+
+    A diferencia del SoC, si hay mas de uno SI se elige automaticamente
+    el mas reciente por fecha de modificacion - asi lo hace la macro
+    original (OSSCC_BuscarArchivoOfertas), no es una decision nueva.
+
+    Devuelve None si la carpeta no existe o no hay ningun candidato.
+    """
+
+    ofertas_dir = Path(ofertas_dir)
+
+    if not ofertas_dir.is_dir():
+        return None
+
+    candidatos = [
+        archivo
+        for archivo in ofertas_dir.iterdir()
+        if archivo.is_file()
+        and not archivo.name.startswith("~$")
+        and archivo.suffix.lower() in EXTENSIONES_OFERTAS
+        and PATRON_NOMBRE_OFERTAS in archivo.stem.lower()
+    ]
+
+    if not candidatos:
+        return None
+
+    return max(candidatos, key=lambda a: a.stat().st_mtime)
 
 
 def periodo_desde_aamm(aamm):
@@ -221,10 +300,13 @@ def periodo_desde_aamm(aamm):
 # VALIDACION DE ESTRUCTURA
 # ============================================================
 
-def revisar_estructura(carpeta_base):
+def revisar_estructura(carpeta_base, aamm=None):
     """
     Revisa la carpeta base y devuelve una lista de
     (etiqueta, estado, detalle) para pintar en la ventana.
+
+    aamm: periodo ingresado por el usuario en la ventana (4 digitos,
+    ej. '2607'). Sin un AAMM valido no se puede buscar el SoC.
 
     estado: 'ok' | 'falta' | 'pendiente'
     """
@@ -257,24 +339,45 @@ def revisar_estructura(carpeta_base):
         rutas["medidas_sae"].is_file(),
     )
 
-    # SOC
+    # Periodo AAMM: lo ingresa el usuario, no se infiere de un nombre
+    # de archivo (ver PATRON_AAMM / validar_aamm).
     try:
-        archivo_soc, aamm = buscar_soc(rutas["medidas_dir"])
+        aamm_valido = validar_aamm(aamm)
+        filas.append(("Periodo (AAMM)", "ok", aamm_valido))
+    except ErrorEntrada as error:
+        aamm_valido = None
+        filas.append(
+            ("Periodo (AAMM)", "falta", str(error).split("\n")[0])
+        )
+
+    rutas["aamm"] = aamm_valido
+
+    # SOC del periodo indicado
+    if aamm_valido:
+        try:
+            archivo_soc = buscar_soc(rutas["medidas_dir"], aamm_valido)
+            filas.append(
+                (archivo_soc.name, "ok", f"periodo {aamm_valido}")
+            )
+            rutas["soc"] = archivo_soc
+        except ErrorEntrada as error:
+            filas.append(
+                (
+                    f"SoC periodo {aamm_valido}",
+                    "falta",
+                    str(error).split("\n")[0],
+                )
+            )
+            rutas["soc"] = None
+    else:
         filas.append(
             (
-                archivo_soc.name,
-                "ok",
-                f"periodo {aamm}",
+                "SoC del periodo",
+                "falta",
+                "ingresa el AAMM para poder buscarlo",
             )
         )
-        rutas["soc"] = archivo_soc
-        rutas["aamm"] = aamm
-    except ErrorEntrada as error:
-        filas.append(
-            ("SOC_AAMM.xlsx", "falta", str(error).split("\n")[0])
-        )
         rutas["soc"] = None
-        rutas["aamm"] = None
 
     agregar(
         f"{CARPETA_AUXILIARES}/",
@@ -309,14 +412,30 @@ def revisar_estructura(carpeta_base):
                 ("  hojas de Centrales.xlsx", "falta", str(error))
             )
 
-    # Ofertas SSCC: ubicacion aun no definida en el plan
-    filas.append(
-        (
-            "OfertasSSCC",
-            "pendiente",
-            "ubicacion por definir en el plan",
-        )
+    # Ofertas SSCC: ubicacion definida en <CARPETA_BASE>/Ofertas/ (plan
+    # seccion 16.2). Las macros de Ofertas SSCC son obligatorias (plan
+    # seccion 17-18), asi que esto SI bloquea Ejecutar si falta.
+    agregar(
+        f"{CARPETA_OFERTAS}/",
+        rutas["ofertas_dir"].is_dir(),
     )
+
+    archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
+    rutas["ofertas"] = archivo_ofertas
+
+    if archivo_ofertas:
+        filas.append(
+            (archivo_ofertas.name, "ok", f"en {CARPETA_OFERTAS}/")
+        )
+    else:
+        filas.append(
+            (
+                "Archivo *OfertasSSCC*",
+                "falta",
+                f"ningun archivo en {CARPETA_OFERTAS}/ contiene "
+                f"'OfertasSSCC' en el nombre",
+            )
+        )
 
     return rutas, filas
 
@@ -668,6 +787,670 @@ def extraer_soc(ruta_soc, mapa_homologacion=None):
 
 
 # ============================================================
+# OFERTAS SSCC
+#
+# Replica, en este orden, las macros y formulas de la planilla 11:
+#   1. Generar_Resumen_Ofertas_SSCC        -> construir_resumen_ofertas_sscc
+#   2. OSSCC_CargarResumenEnMedidores      -> cargar_resumen_en_medidores
+#   3. Formula de Medidores!V y R          -> calcular_r
+#   4. Formula de Medidores!S              -> calcular_s
+#   5. Resumir_Medidores_Central_Ventana_
+#      Oferta_Completa                     -> construir_resumen_ventana_oferta
+#   6. Formula de Medidores!T              -> calcular_t
+# ============================================================
+
+def _texto_seguro(valor):
+    """Replica OSSCC_TextoSeguro / RESOF: '' para vacio/NaN, si no str().strip()."""
+
+    if valor is None:
+        return ""
+
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+
+    return str(valor).strip()
+
+
+def _tiene_valor(valor):
+    """Replica OSSCC_TieneValor / RESOF_TieneValor."""
+
+    return len(_texto_seguro(valor)) > 0
+
+
+def _es_numero(valor):
+    if not _tiene_valor(valor):
+        return False
+
+    try:
+        float(valor)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _valor_clave(valor):
+    """
+    Replica OSSCC_ValorClave / RESOF_ValorClave: formatea un numero
+    sin ceros/decimales sobrantes, o el texto tal cual si no es numero.
+    """
+
+    if not _es_numero(valor):
+        return _texto_seguro(valor)
+
+    numero = float(valor)
+
+    if numero == int(numero):
+        return str(int(numero))
+
+    return repr(numero)
+
+
+def _limpiar_nombre_mostrar(valor):
+    """Replica OSSCC_LimpiarNombreMostrar: NBSP->espacio, trim, espacios colapsados."""
+
+    if not _tiene_valor(valor):
+        return ""
+
+    texto = str(valor).replace("\xa0", " ").strip()
+
+    while "  " in texto:
+        texto = texto.replace("  ", " ")
+
+    return texto
+
+
+def _normalizar_nombre_clave(valor):
+    """Replica OSSCC_NormalizarNombreClave: LimpiarNombreMostrar + mayusculas."""
+
+    return _limpiar_nombre_mostrar(valor).upper()
+
+
+def _contiene_bess_o_sae(texto):
+    """Replica OSSCC_ContieneBESSoSAE."""
+
+    texto = texto.upper()
+    return "BESS" in texto or "SAE" in texto or "BAT" in texto
+
+
+def _servicio_termina_en_rs(servicio):
+    """Replica OSSCC_ServicioTerminaEnRS."""
+
+    return servicio.strip().upper().endswith("_RS")
+
+
+def _es_respuesta_si(valor):
+    """Replica OSSCC_EsRespuestaSi: normaliza y compara contra 'SI'."""
+
+    if not _tiene_valor(valor):
+        return False
+
+    texto = str(valor).strip().upper()
+    texto = texto.replace("\xa0", "").replace(" ", "").replace("\t", "")
+
+    for con_tilde, sin_tilde in (
+        ("Í", "I"), ("Ì", "I"), ("Ï", "I"), ("Î", "I"),
+    ):
+        texto = texto.replace(con_tilde, sin_tilde)
+
+    for signo in ".,;:":
+        texto = texto.replace(signo, "")
+
+    return texto == "SI"
+
+
+def _normalizar_periodo(valor):
+    """
+    Replica OSSCC_NormalizarPeriodo: interpreta 'valor' como un
+    periodo horario 1..24. Acepta enteros 1..24, fracciones de dia
+    estilo Excel, '24:00' y texto de hora/fecha reconocible. None si
+    no se puede interpretar.
+    """
+
+    if not _tiene_valor(valor):
+        return None
+
+    if _es_numero(valor):
+        numero = float(valor)
+
+        if numero == int(numero) and 1 <= numero <= 24:
+            return int(numero)
+
+        if 0 <= numero < 1:
+            total_segundos = round(numero * 86400)
+            hora = (total_segundos // 3600) % 24
+            return int(hora) + 1
+
+        return None
+
+    texto = str(valor).strip()
+
+    if texto in ("24:00", "24:00:00"):
+        return 24
+
+    try:
+        marca = pd.to_datetime(texto)
+        return int(marca.hour) + 1
+    except (ValueError, TypeError):
+        return None
+
+
+def _valor_oferta_binario(valor):
+    """Replica OSSCC_ValorOfertaBinario: 1 solo si el valor es exactamente 1."""
+
+    if not _tiene_valor(valor):
+        return 0
+
+    if _es_numero(valor):
+        return 1 if float(valor) == 1 else 0
+
+    return 1 if str(valor).strip() == "1" else 0
+
+
+def construir_resumen_ofertas_sscc(ruta_ofertas, registrar=print):
+    """
+    Replica Generar_Resumen_Ofertas_SSCC.
+
+    Lee TODAS las hojas de ruta_ofertas (columnas A:I, desde la fila
+    2), filtra filas cuyo nombre (A) contenga BESS/SAE/BAT y cuyo
+    servicio (H) termine en "_RS", y agrupa por (Nombre, Año, Mes,
+    Día). Para cada grupo, una columna por cada servicio _RS
+    encontrado en TODO el archivo (1 si en ese grupo el servicio tiene
+    ofertado ("Sí") las 24 horas, 0 si no) y una columna final "Oferta
+    completa" (1 solo si todos los servicios del grupo estan
+    completos).
+
+    Devuelve un DataFrame ordenado por Nombre, Año, Mes, Día.
+    """
+
+    hojas = pd.read_excel(ruta_ofertas, sheet_name=None, header=None)
+
+    grupos = {}
+    datos_grupo = {}
+    servicios_globales = set()
+
+    for df_hoja in hojas.values():
+
+        if df_hoja.shape[0] < 2 or df_hoja.shape[1] < 9:
+            continue
+
+        for _, fila in df_hoja.iloc[1:, 0:9].iterrows():
+
+            nombre = _texto_seguro(fila.iloc[0])
+            anio, mes, dia = fila.iloc[1], fila.iloc[2], fila.iloc[3]
+            servicio = _texto_seguro(fila.iloc[7])
+            indicador = fila.iloc[8]
+
+            if not _contiene_bess_o_sae(nombre):
+                continue
+
+            if not _servicio_termina_en_rs(servicio):
+                continue
+
+            if not (
+                _tiene_valor(anio)
+                and _tiene_valor(mes)
+                and _tiene_valor(dia)
+            ):
+                continue
+
+            clave_grupo = (
+                nombre,
+                _valor_clave(anio),
+                _valor_clave(mes),
+                _valor_clave(dia),
+            )
+
+            if clave_grupo not in grupos:
+                grupos[clave_grupo] = {}
+                datos_grupo[clave_grupo] = (nombre, anio, mes, dia)
+
+            servicios_globales.add(servicio)
+
+            horas_servicio = grupos[clave_grupo].setdefault(
+                servicio, set()
+            )
+
+            if _es_respuesta_si(indicador):
+                periodo = _normalizar_periodo(fila.iloc[4])
+                if periodo is not None:
+                    horas_servicio.add(periodo)
+
+    if not grupos:
+        raise ErrorEntrada(
+            "No se encontraron registros que cumplan las condiciones "
+            "BESS/SAE/BAT y servicio terminado en _RS en "
+            f"{Path(ruta_ofertas).name}"
+        )
+
+    lista_servicios = sorted(servicios_globales, key=str.upper)
+
+    filas_salida = []
+
+    for clave_grupo, servicios_grupo in grupos.items():
+
+        nombre, anio, mes, dia = datos_grupo[clave_grupo]
+        fila_salida = {
+            "Nombre": nombre,
+            "Año": anio,
+            "Mes": mes,
+            "Día": dia,
+        }
+
+        todos_completos = True
+
+        for servicio in lista_servicios:
+            completo = len(servicios_grupo.get(servicio, set())) == 24
+            fila_salida[servicio] = 1 if completo else 0
+            if not completo:
+                todos_completos = False
+
+        fila_salida["Oferta completa"] = (
+            1 if todos_completos and lista_servicios else 0
+        )
+
+        filas_salida.append(fila_salida)
+
+    columnas = (
+        ["Nombre", "Año", "Mes", "Día"]
+        + lista_servicios
+        + ["Oferta completa"]
+    )
+
+    df_resumen = pd.DataFrame(filas_salida, columns=columnas)
+
+    df_resumen["_orden_nombre"] = df_resumen["Nombre"].str.upper()
+    df_resumen = (
+        df_resumen
+        .sort_values(by=["_orden_nombre", "Año", "Mes", "Día"])
+        .drop(columns="_orden_nombre")
+        .reset_index(drop=True)
+    )
+
+    registrar(
+        f"  Resumen Ofertas SSCC: {len(df_resumen):,} registros, "
+        f"{len(lista_servicios)} servicio(s) _RS: "
+        f"{', '.join(lista_servicios)}"
+    )
+
+    return df_resumen
+
+
+def cargar_resumen_en_medidores(
+    df_resumen, claves_medidores, diccionario, registrar=print
+):
+    """
+    Replica OSSCC_CargarResumenEnMedidores.
+
+    Arma la tabla equivalente a Medidores!W:Y (Nombre, Dia, Oferta
+    completa) con una fila por central x dia del mes: toma los
+    nombres y ofertas de df_resumen, y agrega ademas -con oferta 0
+    para todos sus dias- cualquier central de Medidores!clave que no
+    este representada ahi ni mediante una equivalencia de
+    Diccionario!E:F:G.
+
+    claves_medidores: valores unicos de la columna 'clave' de Medidores.
+
+    Devuelve (df_wxy, (anio, mes), avisos).
+    """
+
+    if "Oferta completa" not in df_resumen.columns:
+        raise ErrorEntrada(
+            "El resumen de Ofertas SSCC no tiene la columna "
+            "'Oferta completa'."
+        )
+
+    dic_nombres = {}
+    dic_ofertas = {}
+    periodos = set()
+
+    for _, fila in df_resumen.iterrows():
+
+        nombre_mostrar = _limpiar_nombre_mostrar(fila["Nombre"])
+        if not nombre_mostrar:
+            continue
+
+        anio, mes, dia = fila["Año"], fila["Mes"], fila["Día"]
+
+        if not (_es_numero(anio) and _es_numero(mes) and _es_numero(dia)):
+            continue
+
+        anio_i, mes_i, dia_i = int(anio), int(mes), int(dia)
+
+        if not 1 <= mes_i <= 12:
+            continue
+
+        periodos.add((anio_i, mes_i))
+
+        clave_nombre = _normalizar_nombre_clave(nombre_mostrar)
+        dic_nombres.setdefault(clave_nombre, nombre_mostrar)
+
+        oferta = _valor_oferta_binario(fila["Oferta completa"])
+        dic_ofertas[(clave_nombre, dia_i)] = oferta
+
+    if len(periodos) == 0:
+        raise ErrorEntrada(
+            "No fue posible determinar el año y mes del resumen de "
+            "Ofertas SSCC."
+        )
+
+    if len(periodos) > 1:
+        raise ErrorEntrada(
+            "El resumen de Ofertas SSCC contiene mas de un año o "
+            f"mes: {sorted(periodos)}. No es posible construir "
+            "Medidores!W:Y porque el destino solo admite un periodo "
+            "por vez."
+        )
+
+    anio, mes = next(iter(periodos))
+    dias_del_mes = calendar.monthrange(anio, mes)[1]
+
+    # Equivalencias Diccionario!E:F:G (columnas 5,6,7 -> indices 4,5,6)
+    dic_equivalencias = {}
+
+    if diccionario.shape[1] > 6:
+        for _, fila in diccionario.iterrows():
+            alias = []
+            for indice in (4, 5, 6):
+                valor = _normalizar_nombre_clave(fila.iloc[indice])
+                if valor and valor not in alias:
+                    alias.append(valor)
+            for valor in alias:
+                dic_equivalencias[valor] = set(alias)
+
+    dic_no_encontrados = {}
+
+    for nombre_crudo in claves_medidores:
+
+        nombre_mostrar = _limpiar_nombre_mostrar(nombre_crudo)
+        if not nombre_mostrar:
+            continue
+
+        clave_nombre = _normalizar_nombre_clave(nombre_mostrar)
+
+        if clave_nombre in dic_nombres:
+            continue
+
+        equivalentes = dic_equivalencias.get(clave_nombre)
+        ya_representado = False
+
+        if equivalentes:
+            ya_representado = any(
+                alias in dic_nombres for alias in equivalentes
+            )
+        else:
+            dic_no_encontrados.setdefault(clave_nombre, nombre_mostrar)
+
+        if not ya_representado:
+            dic_nombres.setdefault(clave_nombre, nombre_mostrar)
+
+    if not dic_nombres:
+        raise ErrorEntrada(
+            "No se encontraron nombres en el resumen de Ofertas SSCC "
+            "ni en Medidores (columna clave)."
+        )
+
+    avisos = []
+
+    if dic_no_encontrados:
+        nombres_avisados = sorted(
+            dic_no_encontrados.values(), key=str.upper
+        )
+        cola = (
+            f" ... y {len(nombres_avisados) - 30} mas."
+            if len(nombres_avisados) > 30 else ""
+        )
+        avisos.append(
+            f"{len(nombres_avisados)} nombre(s) de Medidores!clave no "
+            "se encontraron en Diccionario!E:F:G. Se incorporaron con "
+            "oferta 0: " + ", ".join(nombres_avisados[:30]) + cola
+        )
+
+    nombres_ordenados = sorted(
+        dic_nombres.items(), key=lambda kv: kv[1].upper()
+    )
+
+    filas_salida = []
+    for clave_nombre, nombre in nombres_ordenados:
+        for dia in range(1, dias_del_mes + 1):
+            oferta = dic_ofertas.get((clave_nombre, dia), 0)
+            filas_salida.append((nombre, dia, oferta))
+
+    df_wxy = pd.DataFrame(
+        filas_salida, columns=["Nombre", "Dia", "Oferta completa"]
+    )
+
+    registrar(
+        f"  Ofertas SSCC por dia (equivalente a Medidores!W:Y): "
+        f"{len(df_wxy):,} filas ({len(nombres_ordenados)} "
+        f"central(es) x {dias_del_mes} dias)"
+    )
+
+    return df_wxy, (anio, mes), avisos
+
+
+def _mapas_homologacion_fge(diccionario):
+    """
+    Precalcula, desde Diccionario!F y Diccionario!G (columnas 6 y 7,
+    indices 5 y 6), el mapa hacia Diccionario!E (columna 5, indice 4)
+    que usa la formula de Medidores!V. Ante nombres repetidos se
+    conserva el primero, igual que XLOOKUP con la primera coincidencia.
+    """
+
+    mapa_f = {}
+    mapa_g = {}
+
+    if diccionario.shape[1] > 6:
+        for _, fila in diccionario.iterrows():
+            valor_e = _texto_seguro(fila.iloc[4])
+            clave_f = _normalizar_nombre_clave(fila.iloc[5])
+            clave_g = _normalizar_nombre_clave(fila.iloc[6])
+
+            if clave_f and clave_f not in mapa_f:
+                mapa_f[clave_f] = valor_e
+
+            if clave_g and clave_g not in mapa_g:
+                mapa_g[clave_g] = valor_e
+
+    return mapa_f, mapa_g
+
+
+def _homologar_fge(nombre, mapa_f, mapa_g):
+    """
+    Replica el homologador de Medidores!V:
+    XLOOKUP(nombre, Diccionario!F, Diccionario!E,
+        XLOOKUP(nombre, Diccionario!G, Diccionario!E, 0, 0), 0)
+    """
+
+    clave = _normalizar_nombre_clave(nombre)
+
+    if clave in mapa_f:
+        return mapa_f[clave]
+
+    if clave in mapa_g:
+        return mapa_g[clave]
+
+    return "0"
+
+
+def calcular_r(df_medidores, df_wxy, diccionario, registrar=print):
+    """
+    Replica Medidores!R = VLOOKUP(B&G, V:Y, 4, FALSE).
+
+    V (la tabla auxiliar, aca solo en memoria) es Dia & homologado(W)
+    via Diccionario!F/G->E, construida a partir de df_wxy (equivalente
+    a Medidores!W:Y). El cruce se hace por Dia + nombre homologado en
+    mayusculas, separados por '|' (Excel concatena sin separador; acá
+    se agrega uno para no confundir, p.ej., dia=1+'0ABC' con
+    dia=10+'ABC' - un caso limite que en Excel tampoco se distingue).
+
+    Devuelve (serie_r, avisos).
+    """
+
+    mapa_f, mapa_g = _mapas_homologacion_fge(diccionario)
+
+    tabla_v = {}
+    for _, fila in df_wxy.iterrows():
+        homologado = _homologar_fge(fila["Nombre"], mapa_f, mapa_g)
+        clave_v = f"{int(fila['Dia'])}|{homologado.upper()}"
+        tabla_v.setdefault(clave_v, fila["Oferta completa"])
+
+    claves_medidores = (
+        df_medidores["Dia"].astype("Int64").astype(str)
+        + "|"
+        + df_medidores["clave"].astype(str).str.strip().str.upper()
+    )
+
+    r = claves_medidores.map(tabla_v).astype("Int64")
+
+    avisos = []
+    no_encontrados = int(r.isna().sum())
+
+    if no_encontrados:
+        avisos.append(
+            f"{no_encontrados:,} fila(s) de Medidores no encontraron "
+            "coincidencia (Dia + central homologada) en la tabla de "
+            "Ofertas SSCC al calcular la columna R. Revisar que todas "
+            "las centrales de Medidores!clave esten homologadas en "
+            "Diccionario!E:F:G."
+        )
+
+    registrar(f"  Columna R (Oferta_Completa_Dia): {no_encontrados:,} sin match")
+
+    return r, avisos
+
+
+def calcular_s(ventana, r_valor):
+    """
+    Replica Medidores!S:
+        =IF(L3=L2, S2, IF(R3=1, 1, 2))
+
+    S se mantiene igual a la fila anterior mientras la Ventana (L) no
+    cambie; al cambiar, se recalcula segun si R vale 1. No se reinicia
+    aparte por central: en la planilla original tampoco lo hace, se
+    apoya en que L ya cambia al cambiar de central.
+    """
+
+    ventana = pd.Series(ventana).reset_index(drop=True)
+    r_valor = pd.Series(r_valor).reset_index(drop=True)
+
+    cambia_ventana = ventana.ne(ventana.shift())
+
+    # R sin match (ver calcular_r) se trata como "no es 1", igual que
+    # cualquier valor de R distinto de 1 en la formula de Excel.
+    es_uno = r_valor.fillna(-1).eq(1)
+    valor_si_cambia = es_uno.map({True: 1, False: 2})
+
+    s = valor_si_cambia.where(cambia_ventana)
+
+    return s.ffill().astype("Int64")
+
+
+def construir_resumen_ventana_oferta(
+    clave, ventana, oferta_r, inicio_ventana=INICIO_VENTANA, registrar=print
+):
+    """
+    Replica Resumir_Medidores_Central_Ventana_Oferta_Completa.
+
+    Agrupa Medidores por (clave=Central, Ventana=L), suma R, y marca
+    "Completa" segun la oferta esperada para esa ventana: 96 en las
+    ventanas normales, (inicio_ventana-1)*4 en la ventana 0, y
+    (25-inicio_ventana)*4 en la ultima ventana del mes (la de mayor
+    valor numerico encontrado en L).
+
+    Devuelve un DataFrame con columnas Central, Ventana T, Oferta,
+    Completa.
+    """
+
+    if not 1 <= inicio_ventana <= 24:
+        raise ErrorEntrada(
+            "INICIO_VENTANA debe ser una hora entre 1 y 24."
+        )
+
+    oferta_esperada_inicial = (inicio_ventana - 1) * 4
+    oferta_esperada_final = (25 - inicio_ventana) * 4
+
+    ventana_numerica = pd.to_numeric(pd.Series(ventana), errors="coerce")
+    ultima_ventana = ventana_numerica.max()
+
+    if pd.isna(ultima_ventana):
+        raise ErrorEntrada(
+            "No se encontraron valores numericos en la columna "
+            "Ventana (L) para resumir Ofertas SSCC."
+        )
+
+    df = pd.DataFrame(
+        {
+            "Central": pd.Series(clave).reset_index(drop=True),
+            "Ventana T": ventana_numerica.reset_index(drop=True),
+            "Oferta": pd.to_numeric(
+                pd.Series(oferta_r), errors="coerce"
+            ).reset_index(drop=True),
+        }
+    )
+    df = df.dropna(subset=["Central", "Ventana T"])
+
+    resumen = (
+        df.groupby(["Central", "Ventana T"], as_index=False)["Oferta"]
+        .sum()
+    )
+
+    def oferta_esperada(v):
+        if abs(v) < 1e-6:
+            return oferta_esperada_inicial
+        if abs(v - ultima_ventana) < 1e-6:
+            return oferta_esperada_final
+        return 96
+
+    esperada = resumen["Ventana T"].map(oferta_esperada)
+    resumen["Completa"] = (
+        (resumen["Oferta"] - esperada).abs() < 1e-6
+    ).astype("int64")
+
+    resumen = (
+        resumen
+        .sort_values(by=["Central", "Ventana T"])
+        .reset_index(drop=True)
+    )
+
+    registrar(
+        f"  Resumen Ventana Oferta: {len(resumen):,} grupo(s) "
+        f"central x ventana; ultima ventana detectada "
+        f"{ultima_ventana:g}"
+    )
+
+    return resumen
+
+
+def calcular_t(clave, ventana, resumen_ventana_oferta):
+    """
+    Replica Medidores!T = 1 - Completa(central=G, ventana=L), buscando
+    en el resumen central+ventana+oferta completa (AB:AE).
+
+    Devuelve (serie_t, cantidad_sin_match).
+    """
+
+    df = pd.DataFrame(
+        {
+            "Central": pd.Series(clave).reset_index(drop=True),
+            "Ventana T": pd.Series(ventana).reset_index(drop=True),
+        }
+    )
+
+    cruzado = df.merge(
+        resumen_ventana_oferta[["Central", "Ventana T", "Completa"]],
+        on=["Central", "Ventana T"],
+        how="left",
+    )
+
+    t = (1 - cruzado["Completa"]).astype("Int64")
+
+    return t, int(t.isna().sum())
+
+
+# ============================================================
 # COLUMNAS CALCULADAS
 # ============================================================
 
@@ -763,12 +1546,22 @@ def construir_medidores(
     df_soc,
     anio,
     mes,
+    ruta_ofertas,
+    diccionario,
     registrar=print,
 ):
     """
-    Arma la tabla equivalente a Medidores.
+    Arma la tabla equivalente a Medidores, incluyendo las columnas R,
+    S y T (dependientes de Ofertas SSCC).
 
-    Devuelve (df_medidores, avisos).
+    ruta_ofertas: archivo *OfertasSSCC* encontrado en Ofertas/.
+    diccionario:  hoja Diccionario de Centrales.xlsx (header=None), la
+                  misma que se usa para homologar el SoC.
+
+    Devuelve (df_medidores, avisos, df_resumen_ofertas, df_wxy,
+    df_resumen_ventana). Estas ultimas tres son las tablas auxiliares
+    equivalentes a la hoja "Resumen Ofertas SSCC", a Medidores!W:Y y a
+    Medidores!AB:AE respectivamente (ver comentario de LETRA_A_CAMPO).
     """
 
     avisos = []
@@ -864,6 +1657,9 @@ def construir_medidores(
         df["Hora"],
     )
 
+    # K es copia de L fila a fila (plan, seccion 16.3).
+    df["Copia_Ventana"] = df["Ventana"]
+
     df["Clave_Dia_HoraMes"] = calcular_clave_auxiliar(
         df["Dia"],
         df["Hora Mes"],
@@ -872,33 +1668,95 @@ def construir_medidores(
     df["Indicador_SoC"] = calcular_indicador_soc(df["SoC"])
 
     # --------------------------------------------------------
-    # COLUMNAS TODAVIA NO DEFINIDAS
+    # COLUMNAS DELIBERADAMENTE VACIAS (diseño confirmado, no pendiente)
     # --------------------------------------------------------
 
-    for columna in COLUMNAS_PENDIENTES:
+    for columna in COLUMNAS_VACIAS:
         df[columna] = pd.NA
 
     # --------------------------------------------------------
-    # ORDEN FINAL DE COLUMNAS
+    # OFERTAS SSCC: R, S, T (plan seccion 17-18, obligatorias)
     # --------------------------------------------------------
 
-    orden = [
-        LETRA_A_CAMPO[letra]
-        for letra in sorted(LETRA_A_CAMPO)
-    ]
+    registrar(f"  Leyendo {Path(ruta_ofertas).name}...")
+    df_resumen_ofertas = construir_resumen_ofertas_sscc(
+        ruta_ofertas, registrar=registrar
+    )
 
-    df = df[orden]
+    df_wxy, periodo_ofertas, avisos_wxy = cargar_resumen_en_medidores(
+        df_resumen_ofertas,
+        df["clave"].unique(),
+        diccionario,
+        registrar=registrar,
+    )
+    avisos.extend(avisos_wxy)
+
+    if periodo_ofertas != (anio, mes):
+        avisos.append(
+            f"El resumen de Ofertas SSCC indica el periodo "
+            f"{periodo_ofertas[0]}-{periodo_ofertas[1]:02d}, pero el "
+            f"caso corresponde a {anio}-{mes:02d}."
+        )
+
+    r_valor, avisos_r = calcular_r(
+        df, df_wxy, diccionario, registrar=registrar
+    )
+    avisos.extend(avisos_r)
+    df["Oferta_Completa_Dia"] = r_valor
+
+    df["Indicador_Ventana_Oferta"] = calcular_s(
+        df["Ventana"], df["Oferta_Completa_Dia"]
+    )
+
+    df_resumen_ventana = construir_resumen_ventana_oferta(
+        df["clave"],
+        df["Ventana"],
+        df["Oferta_Completa_Dia"],
+        registrar=registrar,
+    )
+
+    t_valor, sin_match_t = calcular_t(
+        df["clave"], df["Ventana"], df_resumen_ventana
+    )
+    df["Ventana_No_Completa"] = t_valor
+
+    if sin_match_t:
+        avisos.append(
+            f"{sin_match_t:,} fila(s) de Medidores no encontraron su "
+            "grupo central+ventana en el resumen de Ofertas SSCC al "
+            "calcular la columna T."
+        )
+
+    # --------------------------------------------------------
+    # ORDEN FINAL DE COLUMNAS (A -> U, en el orden de insercion de
+    # LETRA_A_CAMPO)
+    # --------------------------------------------------------
+
+    df = df[list(LETRA_A_CAMPO.values())]
 
     registrar(
         f"Medidores construido: {len(df):,} filas x "
         f"{len(df.columns)} columnas"
     )
 
-    return df, avisos
+    return df, avisos, df_resumen_ofertas, df_wxy, df_resumen_ventana
 
 
-def escribir_salida(df, ruta_salida, avisos, incidencias):
-    """Escribe Hoja_Medidas.xlsx con la tabla y un log."""
+def escribir_salida(
+    df,
+    ruta_salida,
+    avisos,
+    incidencias,
+    df_resumen_ofertas=None,
+    df_wxy=None,
+    df_resumen_ventana=None,
+):
+    """
+    Escribe Hoja_Medidas.xlsx: la tabla Medidores (A:U, una fila por
+    registro), las tablas auxiliares de Ofertas SSCC -de otro largo,
+    ver comentario de LETRA_A_CAMPO- cada una en su propia hoja, y un
+    Log.
+    """
 
     ruta_salida = Path(ruta_salida)
 
@@ -920,6 +1778,27 @@ def escribir_salida(df, ruta_salida, avisos, incidencias):
             index=False,
         )
 
+        if df_resumen_ofertas is not None:
+            df_resumen_ofertas.to_excel(
+                writer,
+                sheet_name="Resumen Ofertas SSCC",
+                index=False,
+            )
+
+        if df_wxy is not None:
+            df_wxy.to_excel(
+                writer,
+                sheet_name="Ofertas SSCC por Dia",
+                index=False,
+            )
+
+        if df_resumen_ventana is not None:
+            df_resumen_ventana.to_excel(
+                writer,
+                sheet_name="Resumen Ventana Oferta",
+                index=False,
+            )
+
         df_log.to_excel(
             writer,
             sheet_name="Log",
@@ -933,10 +1812,12 @@ def escribir_salida(df, ruta_salida, avisos, incidencias):
 # PROCESO COMPLETO
 # ============================================================
 
-def ejecutar(carpeta_base, registrar=print, progreso=None):
+def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
     """
     Corre la etapa Medidores de punta a punta.
 
+    aamm:      periodo ingresado por el usuario en la ventana (4
+               digitos, ej. '2607').
     registrar: funcion para mensajes.
     progreso:  funcion que recibe 0..100.
     """
@@ -945,7 +1826,9 @@ def ejecutar(carpeta_base, registrar=print, progreso=None):
         if progreso:
             progreso(valor)
 
-    rutas, _ = revisar_estructura(carpeta_base)
+    aamm = validar_aamm(aamm)
+
+    rutas, _ = revisar_estructura(carpeta_base, aamm)
 
     if not rutas["medidas_sae"].is_file():
         raise ErrorEntrada(
@@ -957,10 +1840,17 @@ def ejecutar(carpeta_base, registrar=print, progreso=None):
             f"No se encontro {rutas['centrales']}"
         )
 
-    archivo_soc, aamm = buscar_soc(rutas["medidas_dir"])
+    archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
+    if not archivo_ofertas:
+        raise ErrorEntrada(
+            f"No se encontro ningun archivo *OfertasSSCC* en "
+            f"{rutas['ofertas_dir']}"
+        )
+
+    archivo_soc = buscar_soc(rutas["medidas_dir"], aamm)
     anio, mes = periodo_desde_aamm(aamm)
 
-    registrar(f"Periodo detectado: {anio}-{mes:02d} ({aamm})")
+    registrar(f"Periodo indicado: {anio}-{mes:02d} ({aamm})")
     avanzar(5)
 
     registrar("Leyendo Centrales.xlsx...")
@@ -988,11 +1878,19 @@ def ejecutar(carpeta_base, registrar=print, progreso=None):
     avanzar(70)
 
     registrar("Construyendo Medidores...")
-    df_medidores, avisos = construir_medidores(
+    (
+        df_medidores,
+        avisos,
+        df_resumen_ofertas,
+        df_wxy,
+        df_resumen_ventana,
+    ) = construir_medidores(
         df_sae,
         df_soc,
         anio,
         mes,
+        archivo_ofertas,
+        diccionario,
         registrar=registrar,
     )
 
@@ -1007,6 +1905,9 @@ def ejecutar(carpeta_base, registrar=print, progreso=None):
         rutas["salida"],
         avisos,
         incidencias,
+        df_resumen_ofertas,
+        df_wxy,
+        df_resumen_ventana,
     )
 
     avanzar(100)
