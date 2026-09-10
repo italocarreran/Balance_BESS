@@ -36,8 +36,8 @@ python Balance_BESS.py
 <CARPETA_BASE>/
 ├── Medidas/
 │   ├── Medidas_SAE.xlsx
-│   └── <algún archivo .xlsx o .csv cuyo nombre contenga "SOC" y el
-│        AAMM, ej. SOC_2607.xlsx, "resumen soc julio 2607.csv">
+│   └── <algún archivo .xlsx cuyo nombre contenga "SOC" y el AAMM,
+│        ej. SOC_2607.xlsx, "resumen soc julio 2607.xlsx">
 ├── Auxiliares/
 │   └── Centrales.xlsx       (hojas "Resumen BESS" y "Diccionario")
 ├── Ofertas/
@@ -47,13 +47,10 @@ python Balance_BESS.py
 
 Ni el archivo de SoC ni el de OfertasSSCC siguen un nombre fijo:
 
-- **SoC**: cualquier `.xlsx` o `.csv` en `Medidas/` cuyo nombre contenga
-  "SOC" y el AAMM ingresado en la ventana. Puede venir en cualquiera de
-  los dos formatos — la estructura interna (bloques horizontales por
-  central: `Status | Questionable | Time Stamp | Value`) es la misma en
-  ambos casos. Si hay más de un archivo que cumple la condición, el
-  programa se detiene y pide dejar solo el del período correspondiente
-  (no elige por fecha de modificación).
+- **SoC**: cualquier `.xlsx` en `Medidas/` cuyo nombre contenga "SOC" y el
+  AAMM ingresado en la ventana. Si hay más de un archivo que cumple la
+  condición, el programa se detiene y pide dejar solo el del período
+  correspondiente (no elige por fecha de modificación).
 - **OfertasSSCC**: cualquier archivo Excel en `Ofertas/` cuyo nombre
   contenga "OfertasSSCC". Si hay más de uno, a diferencia del SoC, se toma
   automáticamente el más reciente por fecha de modificación (así lo hace

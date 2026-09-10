@@ -168,15 +168,10 @@ contra él.
   formato; todo lo demás (`buscar_soc`, `revisar_estructura`, `ejecutar`)
   recibe el AAMM ya como parámetro. El archivo de SoC dentro de `Medidas/`
   tampoco tiene un nombre fijo: solo debe contener "SOC" y el AAMM en
-  cualquier posición del nombre (`_es_archivo_de_soc()`), y puede ser
-  `.xlsx` o `.csv` (`EXTENSIONES_SOC`) — la estructura de bloques
-  horizontales por central es la misma en ambos formatos, solo cambia
-  cómo se abre el archivo (`leer_soc_crudo()` elige `pd.read_csv` o
-  `pd.read_excel` según la extensión). Al agregar un formato de
-  contenedor nuevo para el SoC, tocar `leer_soc_crudo()` y
-  `EXTENSIONES_SOC`; `detectar_fila_nombres()`/`detectar_bloques()` no
-  cambian, ya trabajan sobre el DataFrame resultante sin importar de
-  dónde vino.
+  cualquier posición del nombre (`_es_archivo_de_soc()`); el archivo en sí
+  siempre es `.xlsx` (confirmado con el usuario — un CSV con "SOC"+AAMM en
+  el nombre puede ser un archivo completamente distinto sin relación con
+  el SoC, ver `METODOLOGIA.md` §7).
 - **Columnas de `Medidores` (A:U):** el orden final de columnas sale de
   `LETRA_A_CAMPO`, cuyo **orden de inserción** es el orden de Excel.
   `COLUMNAS_VACIAS` (M, P, Q, U) son diseño confirmado, no trabajo
@@ -239,6 +234,7 @@ causa raíz deje de existir en el código.
 | El orden final de columnas usa `list(LETRA_A_CAMPO.values())` (el dict ya está declarado en el orden correcto de Excel). | Si en el futuro se necesitara reintroducir alguna letra de dos caracteres (AA, AB...) en `LETRA_A_CAMPO`, nunca ordenar sus claves con `sorted()`: "AA" < "B" como texto, lo que rompería el orden real de columnas de Excel. Ya pasó una vez en esta migración (ver `docs/Plan_Traspaso_Python_Balance_BESS.md` §19/§20). |
 | La fórmula de `Medidores!V` usa `Diccionario!F` y `Diccionario!G` como alias hacia `Diccionario!E` (columnas 5,6,7 del sheet, índices 4,5,6 en el DataFrame `header=None`) — un mapeo posicional específico, distinto de `construir_homologacion()` (que usa toda la fila, sin posición fija). | No usar `construir_homologacion()` para resolver Ofertas SSCC ni `_mapas_homologacion_fge()` para el SoC: son dos bloques distintos de la misma hoja `Diccionario`, con reglas de lectura distintas. |
 | `calcular_s()` no se reinicia por central: sigue siendo "igual a la fila anterior mientras `Ventana` no cambie" incluso cruzando de una central a otra. | Es fiel a la fórmula de Excel (`IF(L3=L2,S2,...)`, sin comparar `G`). Si dos centrales consecutivas terminan/empiezan con la misma `Ventana`, `S` no se reinicia — así es también en la planilla original, no es un bug a corregir. |
+| Que un archivo se llame `SOC_2607.csv` (o cualquier nombre que contenga "SOC"+AAMM) no garantiza que sea el archivo de SoC de la etapa Medidores. Ya apareció un CSV con ese patrón de nombre que en realidad era un archivo de pagos/liquidación (columnas `Fecha_Hora, CONFIGURACION, Central, Pago, Tipo_pago, Bloque_15min`, sin ninguna columna de SoC), sin relación con `Medidores!J`. | El archivo de SoC real siempre es `.xlsx`, con la estructura de bloques horizontales `Status/Questionable/Time Stamp/Value` (ver `extraer_soc()`). Si un archivo que matchea el patrón de nombre no tiene esa estructura, **no asumir que el formato cambió**: es señal de que no es el archivo correcto. Preguntar antes de adaptar el parser a una estructura nueva. |
 | `"OfertasSSCC"` tiene **tres** "s" seguidas al pasarlo a minúsculas (`"Ofertas"` termina en "s" + `"SSCC"` empieza con dos "s" más = `"...tas" + "sscc"` = `"...tasssc c"`). Un primer intento transcribió el literal a mano con solo dos "s" (`"ofertasscc"`) y `buscar_archivo_ofertas()` nunca encontraba ningún archivo real. | No transcribir a mano un literal derivado de un nombre con letras dobles/triples repetidas: calcularlo en tiempo de ejecución (`"OfertasSSCC".lower()`, constante `PATRON_NOMBRE_OFERTAS` en `nucleo.py`) y comparar contra eso. Se detectó con un test sintético antes de llegar a producción; si vuelve a fallar la detección del archivo de Ofertas, este es el primer sospechoso a descartar. |
 
 ---

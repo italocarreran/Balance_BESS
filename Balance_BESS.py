@@ -8,7 +8,7 @@ resuelve solas todas las entradas por ruta relativa.
     <CARPETA_BASE>/
         Medidas/
             Medidas_SAE.xlsx
-            <algo>SOC<algo>AAMM<algo>.xlsx o .csv
+            <algo>SOC<algo>AAMM<algo>.xlsx
         Auxiliares/
             Centrales.xlsx
         Ofertas/

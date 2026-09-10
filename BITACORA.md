@@ -196,3 +196,35 @@ coma, UTF-8): `extraer_soc()` lo lee igual que un `.xlsx` equivalente, sin incid
 
 No se tocó el formato del archivo de OfertasSSCC (sigue siendo Excel, como confirma el propio
 VBA que filtra por extensiones `.xlsx/.xlsm/.xlsb/.xls`) ni el de `Medidas_SAE.xlsx`.
+
+---
+
+## 2026-09-10 (5) — Corrección: el archivo de SoC no era .csv, era otro archivo
+
+El usuario subió un `SOC_2607.csv` real para probar el soporte agregado en la entrada anterior,
+y falló: `extraer_soc()` no encontró los encabezados `Time Stamp`/`Value`. Al inspeccionar el
+archivo, resultó ser una tabla larga con columnas `Fecha_Hora, CONFIGURACION, Central, Pago,
+Tipo_pago, Bloque_15min` — un archivo de pagos/liquidación, sin ninguna columna de SoC, que
+solo coincidía por casualidad con el patrón de nombre "SOC"+AAMM.
+
+Se preguntó al usuario antes de tocar más código (no se adaptó el parser a esta estructura
+nueva a ciegas). Confirmó: era el archivo equivocado, "dejalo como antes es un xlsx" — el
+archivo de SoC real siempre es `.xlsx`, con la estructura de bloques horizontales que
+`extraer_soc()` ya soportaba desde el principio.
+
+Se revirtió el soporte de `.csv` para el SoC agregado en la entrada anterior:
+
+- `nucleo.buscar_soc()` vuelve a exigir `.xlsx` exclusivamente.
+- Se eliminó `nucleo.leer_soc_crudo()`; `extraer_soc()` vuelve a llamar `pd.read_excel`
+  directamente, como antes de esa sesión.
+- Se revirtieron las menciones a "SoC puede ser .csv" en `README.md`, `MAPA.md` y
+  `METODOLOGIA.md` §5 (documentos de estado actual, no de historial).
+- Se agregó una trampa en `METODOLOGIA.md` §7: un archivo que matchea el patrón de nombre
+  "SOC"+AAMM pero no tiene la estructura de bloques esperada no es el archivo de SoC, aunque
+  comparta el nombre — no adaptar el parser a ciegas, preguntar primero.
+- `docs/Plan_Traspaso_Python_Balance_BESS.md` sección 21 se corrigió en el mismo lugar (no se
+  duplicó una sección nueva) para reflejar que el archivo sigue siendo siempre `.xlsx`.
+
+Esta entrada de bitácora no borra ni edita la entrada anterior (2026-09-10 (4)) según la regla
+de solo-agregar; queda como registro de que esa sesión partió de una premisa equivocada y esta
+la corrigió.

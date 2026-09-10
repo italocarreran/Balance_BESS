@@ -48,11 +48,6 @@ ARCHIVO_SALIDA = "Hoja_Medidas.xlsx"
 # un nombre de archivo literal fijo.
 PATRON_AAMM = re.compile(r"^\d{4}$")
 
-# El archivo de SoC puede llegar como .xlsx o como .csv; la estructura
-# de bloques horizontales por central (Status/Questionable/Time Stamp/
-# Value) es la misma en ambos casos, solo cambia el contenedor.
-EXTENSIONES_SOC = {".xlsx", ".csv"}
-
 # El archivo de OfertasSSCC tampoco tiene nombre fijo: basta con que
 # el nombre contenga "OfertasSSCC" (macro OSSCC_BuscarArchivoOfertas).
 # Se deriva con .lower() en vez de transcribir el literal a mano: con
@@ -195,11 +190,11 @@ def validar_aamm(aamm):
 def _es_archivo_de_soc(nombre_archivo, aamm):
     """
     El nombre del archivo de SoC no sigue un patron fijo (no es
-    literalmente 'SOC_AAMM.xlsx' ni '.csv'): basta con que contenga
-    'SOC' y el AAMM del periodo, en cualquier posicion y con cualquier
-    separador (plan de migracion, seccion 19.1). Puede ser .xlsx o
-    .csv (ver EXTENSIONES_SOC); esta funcion solo mira el nombre, no
-    la extension.
+    literalmente 'SOC_AAMM.xlsx'): basta con que contenga 'SOC' y el
+    AAMM del periodo, en cualquier posicion y con cualquier separador
+    (plan de migracion, seccion 19.1). El archivo en si siempre es
+    .xlsx (ver buscar_soc) - no confundir con otros archivos del caso
+    que puedan compartir "SOC"+AAMM en el nombre sin serlo.
     """
 
     nombre = normalizar(Path(nombre_archivo).stem)
@@ -229,7 +224,7 @@ def buscar_soc(medidas_dir, aamm):
         for archivo in medidas_dir.iterdir()
         if archivo.is_file()
         and not archivo.name.startswith("~$")
-        and archivo.suffix.lower() in EXTENSIONES_SOC
+        and archivo.suffix.lower() == ".xlsx"
         and _es_archivo_de_soc(archivo.name, aamm)
     ]
 
@@ -237,8 +232,8 @@ def buscar_soc(medidas_dir, aamm):
         raise ErrorEntrada(
             f"No se encontro ningun archivo de SoC del periodo {aamm} "
             f"en {medidas_dir}\n"
-            f"El nombre debe contener 'SOC' y '{aamm}' y ser .xlsx o "
-            f".csv, por ejemplo SOC_{aamm}.xlsx o SOC_{aamm}.csv"
+            f"El nombre debe contener 'SOC' y '{aamm}', por ejemplo "
+            f"SOC_{aamm}.xlsx"
         )
 
     if len(candidatos) > 1:
@@ -683,21 +678,6 @@ def detectar_bloques(df_crudo, fila_nombres, fila_encabezados):
     return bloques, incidencias
 
 
-def leer_soc_crudo(ruta_soc):
-    """
-    Lee el archivo de SoC (.xlsx o .csv) sin encabezado, preservando
-    la disposicion de bloques horizontales por central. El formato de
-    contenedor no cambia esa estructura, solo como se abre el archivo.
-    """
-
-    ruta_soc = Path(ruta_soc)
-
-    if ruta_soc.suffix.lower() == ".csv":
-        return pd.read_csv(ruta_soc, header=None)
-
-    return pd.read_excel(ruta_soc, sheet_name=0, header=None)
-
-
 def extraer_soc(ruta_soc, mapa_homologacion=None):
     """
     Lee el archivo SOC y devuelve (df_soc, incidencias).
@@ -705,7 +685,11 @@ def extraer_soc(ruta_soc, mapa_homologacion=None):
     df_soc: central | timestamp | soc | nombre_scada_original
     """
 
-    df_crudo = leer_soc_crudo(ruta_soc)
+    df_crudo = pd.read_excel(
+        ruta_soc,
+        sheet_name=0,
+        header=None,
+    )
 
     fila_nombres, fila_encabezados = detectar_fila_nombres(
         df_crudo

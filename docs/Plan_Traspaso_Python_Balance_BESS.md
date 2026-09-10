@@ -1367,14 +1367,17 @@ real ni contra la hoja `Medidores` de la planilla 11 (sigue sin datos reales dis
 
 ---
 
-# 21. El archivo de SoC puede ser `.xlsx` o `.csv`
+# 21. El archivo de SoC — corrección: sigue siendo siempre `.xlsx`
 
-Se confirmó que el archivo de SoC (buscado en `Medidas/` por contener "SOC" y el AAMM, sección
-19.1) puede llegar como `.csv`, no solo como `.xlsx`. La estructura interna — bloques
-horizontales por central (`Status | Questionable | Time Stamp | Value` repetidos lado a lado) —
-es la misma en ambos formatos; solo cambia el contenedor.
+Una sesión anterior agregó soporte para que el archivo de SoC llegara como `.csv`, a partir de
+una aclaración del usuario que resultó estar equivocada (confundió el archivo de SoC con otro
+CSV de pagos/liquidación que por coincidencia también tenía "SOC" y el AAMM en el nombre —
+columnas `Fecha_Hora, CONFIGURACION, Central, Pago, Tipo_pago, Bloque_15min`, sin ninguna
+columna de SoC). El usuario confirmó después que el archivo de SoC real siempre es `.xlsx`.
 
-`nucleo.buscar_soc()` acepta ambas extensiones (`EXTENSIONES_SOC = {".xlsx", ".csv"}`) y
-`nucleo.leer_soc_crudo()` elige `pd.read_csv` o `pd.read_excel` según corresponda antes de
-pasarle el resultado a la misma lógica de detección de bloques (`detectar_fila_nombres`,
-`detectar_bloques`), que no necesitó cambios.
+Se revirtió el soporte de `.csv`: `nucleo.buscar_soc()` vuelve a exigir `.xlsx`, y se eliminó
+`leer_soc_crudo()` (la sección 20/19 de este documento ya describía correctamente la estructura
+de bloques horizontales por central — eso no cambió, solo el contenedor sí volvió a ser
+únicamente Excel). Ver `METODOLOGIA.md` §7 (trampas conocidas) para la regla que evita repetir
+esta confusión: un archivo que matchea el patrón de nombre pero no tiene la estructura de
+bloques esperada no es el archivo de SoC, aunque comparta "SOC"+AAMM en el nombre.
