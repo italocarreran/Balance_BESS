@@ -30,6 +30,7 @@ UMBRAL_SOC = 0.06
 
 CARPETA_MEDIDAS = "Medidas"
 CARPETA_AUXILIARES = "Auxiliares"
+CARPETA_OFERTAS = "Ofertas"
 
 ARCHIVO_MEDIDAS_SAE = "Medidas_SAE.xlsx"
 HOJA_MEDIDAS_SAE = "Medidas"
@@ -40,7 +41,11 @@ HOJA_DICCIONARIO = "Diccionario"
 
 ARCHIVO_SALIDA = "Hoja_Medidas.xlsx"
 
-PATRON_SOC = re.compile(r"^SOC[_\-\s]?(\d{4})\.xlsx$", re.IGNORECASE)
+# El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
+# lo ingresa el usuario en la ventana. El archivo de SoC solo debe
+# contener "SOC" y el AAMM en su nombre (plan, seccion 19.1) - no existe
+# un nombre de archivo literal fijo.
+PATRON_AAMM = re.compile(r"^\d{4}$")
 
 
 # ============================================================
@@ -61,7 +66,10 @@ COLUMNAS_AI = [
 ]
 
 # Nombre logico de cada letra de Excel, para poder comparar
-# contra la hoja original columna por columna.
+# contra la hoja original columna por columna. El orden de insercion
+# de este dict ES el orden final de columnas de Medidores (A -> AE):
+# no ordenar sus claves alfabeticamente, porque "AA" < "B" como texto
+# rompe el orden real de columnas de Excel.
 LETRA_A_CAMPO = {
     "A": "Mes",
     "B": "Dia",
@@ -73,28 +81,57 @@ LETRA_A_CAMPO = {
     "H": "intervalo",
     "I": "Gen_Unidad",
     "J": "SoC",
-    "K": "K_PENDIENTE",
+    "K": "Copia_Ventana",
     "L": "Ventana",
-    "M": "M_PENDIENTE",
+    "M": "M_VACIA",
     "N": "Clave_Dia_HoraMes",
     "O": "Indicador_SoC",
-    "P": "P_PENDIENTE",
-    "Q": "Q_PENDIENTE",
+    "P": "P_VACIA",
+    "Q": "Q_VACIA",
     "R": "R_PENDIENTE_OFERTAS",
     "S": "S_PENDIENTE_OFERTAS",
     "T": "T_PENDIENTE_OFERTAS",
+    "U": "U_VACIA",
+    "V": "V_PENDIENTE_OFERTAS",
+    "W": "W_PENDIENTE_OFERTAS",
+    "X": "X_PENDIENTE_OFERTAS",
+    "Y": "Y_PENDIENTE_OFERTAS",
+    "Z": "Z_VACIA",
+    "AA": "AA_VACIA",
+    "AB": "AB_PENDIENTE_OFERTAS",
+    "AC": "AC_PENDIENTE_OFERTAS",
+    "AD": "AD_PENDIENTE_OFERTAS",
+    "AE": "AE_PENDIENTE_OFERTAS",
 }
 
-# Columnas que todavia no se pueden calcular porque su regla
-# no esta documentada o dependen de Ofertas SSCC.
-COLUMNAS_PENDIENTES = [
-    "K_PENDIENTE",
-    "M_PENDIENTE",
-    "P_PENDIENTE",
-    "Q_PENDIENTE",
+# Columnas que el plan define como deliberadamente vacias (plan
+# seccion 16.3): no son trabajo pendiente, es el diseño confirmado.
+COLUMNAS_VACIAS = [
+    "M_VACIA",
+    "P_VACIA",
+    "Q_VACIA",
+    "U_VACIA",
+    "Z_VACIA",
+    "AA_VACIA",
+]
+
+# Columnas que dependen de las macros de Ofertas SSCC
+# (Generar_Resumen_Ofertas_SSCC / Resumir_Medidores_Central_Ventana_
+# Oferta_Completa). Se conoce que columna producen (plan seccion 16.3,
+# 17) pero no el codigo fuente de las macros, asi que no se pueden
+# replicar fielmente todavia sin adivinar la logica (plan seccion 18).
+COLUMNAS_PENDIENTES_OFERTAS = [
     "R_PENDIENTE_OFERTAS",
     "S_PENDIENTE_OFERTAS",
     "T_PENDIENTE_OFERTAS",
+    "V_PENDIENTE_OFERTAS",
+    "W_PENDIENTE_OFERTAS",
+    "X_PENDIENTE_OFERTAS",
+    "Y_PENDIENTE_OFERTAS",
+    "AB_PENDIENTE_OFERTAS",
+    "AC_PENDIENTE_OFERTAS",
+    "AD_PENDIENTE_OFERTAS",
+    "AE_PENDIENTE_OFERTAS",
 ]
 
 
@@ -144,20 +181,46 @@ def resolver_rutas(carpeta_base):
 
     medidas_dir = base / CARPETA_MEDIDAS
     auxiliares_dir = base / CARPETA_AUXILIARES
+    ofertas_dir = base / CARPETA_OFERTAS
 
     return {
         "base": base,
         "medidas_dir": medidas_dir,
         "auxiliares_dir": auxiliares_dir,
+        "ofertas_dir": ofertas_dir,
         "medidas_sae": medidas_dir / ARCHIVO_MEDIDAS_SAE,
         "centrales": auxiliares_dir / ARCHIVO_CENTRALES,
         "salida": base / ARCHIVO_SALIDA,
     }
 
 
-def buscar_soc(medidas_dir):
+def validar_aamm(aamm):
+    """Levanta ErrorEntrada si aamm no son 4 digitos (ej. '2607')."""
+
+    if not aamm or not PATRON_AAMM.match(str(aamm).strip()):
+        raise ErrorEntrada(
+            "Ingresa el periodo AAMM en la ventana (4 digitos, "
+            "por ejemplo 2607 para julio de 2026)."
+        )
+    return str(aamm).strip()
+
+
+def _es_archivo_de_soc(nombre_archivo, aamm):
     """
-    Busca SOC_AAMM.xlsx dentro de Medidas/.
+    El nombre del archivo de SoC no sigue un patron fijo (no es
+    literalmente 'SOC_AAMM.xlsx'): basta con que contenga 'SOC' y el
+    AAMM del periodo, en cualquier posicion y con cualquier separador
+    (plan de migracion, seccion 19.1).
+    """
+
+    nombre = normalizar(Path(nombre_archivo).stem)
+    return "soc" in nombre and aamm in nombre
+
+
+def buscar_soc(medidas_dir, aamm):
+    """
+    Busca dentro de Medidas/ el archivo de SoC del periodo AAMM
+    indicado por el usuario.
 
     Ninguno   -> error
     Uno       -> se usa
@@ -165,6 +228,7 @@ def buscar_soc(medidas_dir):
     """
 
     medidas_dir = Path(medidas_dir)
+    aamm = validar_aamm(aamm)
 
     if not medidas_dir.is_dir():
         raise ErrorEntrada(
@@ -176,31 +240,30 @@ def buscar_soc(medidas_dir):
         for archivo in medidas_dir.iterdir()
         if archivo.is_file()
         and not archivo.name.startswith("~$")
-        and PATRON_SOC.match(archivo.name)
+        and archivo.suffix.lower() == ".xlsx"
+        and _es_archivo_de_soc(archivo.name, aamm)
     ]
 
     if not candidatos:
         raise ErrorEntrada(
-            f"No se encontro ningun archivo SOC_AAMM.xlsx en "
-            f"{medidas_dir}\n"
-            f"Ejemplos validos: SOC_2607.xlsx, SOC_2608.xlsx"
+            f"No se encontro ningun archivo de SoC del periodo {aamm} "
+            f"en {medidas_dir}\n"
+            f"El nombre debe contener 'SOC' y '{aamm}', por ejemplo "
+            f"SOC_{aamm}.xlsx"
         )
 
     if len(candidatos) > 1:
         nombres = ", ".join(sorted(c.name for c in candidatos))
         raise ErrorEntrada(
-            f"Hay {len(candidatos)} archivos SOC en "
-            f"{medidas_dir}:\n"
+            f"Hay {len(candidatos)} archivos de SoC del periodo {aamm} "
+            f"en {medidas_dir}:\n"
             f"  {nombres}\n"
             f"Deja solo el del periodo que vas a procesar. "
             f"No se elige automaticamente para no tomar en "
-            f"silencio el mes equivocado."
+            f"silencio el archivo equivocado."
         )
 
-    archivo = candidatos[0]
-    aamm = PATRON_SOC.match(archivo.name).group(1)
-
-    return archivo, aamm
+    return candidatos[0]
 
 
 def periodo_desde_aamm(aamm):
@@ -221,10 +284,13 @@ def periodo_desde_aamm(aamm):
 # VALIDACION DE ESTRUCTURA
 # ============================================================
 
-def revisar_estructura(carpeta_base):
+def revisar_estructura(carpeta_base, aamm=None):
     """
     Revisa la carpeta base y devuelve una lista de
     (etiqueta, estado, detalle) para pintar en la ventana.
+
+    aamm: periodo ingresado por el usuario en la ventana (4 digitos,
+    ej. '2607'). Sin un AAMM valido no se puede buscar el SoC.
 
     estado: 'ok' | 'falta' | 'pendiente'
     """
@@ -257,24 +323,45 @@ def revisar_estructura(carpeta_base):
         rutas["medidas_sae"].is_file(),
     )
 
-    # SOC
+    # Periodo AAMM: lo ingresa el usuario, no se infiere de un nombre
+    # de archivo (ver PATRON_AAMM / validar_aamm).
     try:
-        archivo_soc, aamm = buscar_soc(rutas["medidas_dir"])
+        aamm_valido = validar_aamm(aamm)
+        filas.append(("Periodo (AAMM)", "ok", aamm_valido))
+    except ErrorEntrada as error:
+        aamm_valido = None
+        filas.append(
+            ("Periodo (AAMM)", "falta", str(error).split("\n")[0])
+        )
+
+    rutas["aamm"] = aamm_valido
+
+    # SOC del periodo indicado
+    if aamm_valido:
+        try:
+            archivo_soc = buscar_soc(rutas["medidas_dir"], aamm_valido)
+            filas.append(
+                (archivo_soc.name, "ok", f"periodo {aamm_valido}")
+            )
+            rutas["soc"] = archivo_soc
+        except ErrorEntrada as error:
+            filas.append(
+                (
+                    f"SoC periodo {aamm_valido}",
+                    "falta",
+                    str(error).split("\n")[0],
+                )
+            )
+            rutas["soc"] = None
+    else:
         filas.append(
             (
-                archivo_soc.name,
-                "ok",
-                f"periodo {aamm}",
+                "SoC del periodo",
+                "falta",
+                "ingresa el AAMM para poder buscarlo",
             )
         )
-        rutas["soc"] = archivo_soc
-        rutas["aamm"] = aamm
-    except ErrorEntrada as error:
-        filas.append(
-            ("SOC_AAMM.xlsx", "falta", str(error).split("\n")[0])
-        )
         rutas["soc"] = None
-        rutas["aamm"] = None
 
     agregar(
         f"{CARPETA_AUXILIARES}/",
@@ -309,12 +396,17 @@ def revisar_estructura(carpeta_base):
                 ("  hojas de Centrales.xlsx", "falta", str(error))
             )
 
-    # Ofertas SSCC: ubicacion aun no definida en el plan
+    # Ofertas SSCC: la ubicacion ya esta definida (<CARPETA_BASE>/Ofertas/,
+    # plan seccion 16.2), pero todavia no hay patron de nombre de archivo
+    # ni logica de lectura implementada (falta el codigo fuente de las
+    # macros a replicar, ver plan seccion 19.2). No bloquea Ejecutar.
     filas.append(
         (
-            "OfertasSSCC",
-            "pendiente",
-            "ubicacion por definir en el plan",
+            f"{CARPETA_OFERTAS}/",
+            "ok" if rutas["ofertas_dir"].is_dir() else "pendiente",
+            "carpeta detectada" if rutas["ofertas_dir"].is_dir()
+            else "aun no se crea; falta ademas el patron del archivo "
+                 "y el codigo de las macros de Ofertas SSCC",
         )
     )
 
@@ -864,6 +956,9 @@ def construir_medidores(
         df["Hora"],
     )
 
+    # K es copia de L fila a fila (plan, seccion 16.3).
+    df["Copia_Ventana"] = df["Ventana"]
+
     df["Clave_Dia_HoraMes"] = calcular_clave_auxiliar(
         df["Dia"],
         df["Hora Mes"],
@@ -872,22 +967,26 @@ def construir_medidores(
     df["Indicador_SoC"] = calcular_indicador_soc(df["SoC"])
 
     # --------------------------------------------------------
-    # COLUMNAS TODAVIA NO DEFINIDAS
+    # COLUMNAS DELIBERADAMENTE VACIAS (diseño confirmado, no pendiente)
     # --------------------------------------------------------
 
-    for columna in COLUMNAS_PENDIENTES:
+    for columna in COLUMNAS_VACIAS:
         df[columna] = pd.NA
 
     # --------------------------------------------------------
-    # ORDEN FINAL DE COLUMNAS
+    # COLUMNAS PENDIENTES: dependen de las macros de Ofertas SSCC,
+    # cuyo codigo fuente todavia no se entrego (ver plan seccion 19.2).
     # --------------------------------------------------------
 
-    orden = [
-        LETRA_A_CAMPO[letra]
-        for letra in sorted(LETRA_A_CAMPO)
-    ]
+    for columna in COLUMNAS_PENDIENTES_OFERTAS:
+        df[columna] = pd.NA
 
-    df = df[orden]
+    # --------------------------------------------------------
+    # ORDEN FINAL DE COLUMNAS (A -> AE, en el orden de insercion de
+    # LETRA_A_CAMPO; NO usar sorted() aca, "AA" < "B" como texto)
+    # --------------------------------------------------------
+
+    df = df[list(LETRA_A_CAMPO.values())]
 
     registrar(
         f"Medidores construido: {len(df):,} filas x "
@@ -933,10 +1032,12 @@ def escribir_salida(df, ruta_salida, avisos, incidencias):
 # PROCESO COMPLETO
 # ============================================================
 
-def ejecutar(carpeta_base, registrar=print, progreso=None):
+def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
     """
     Corre la etapa Medidores de punta a punta.
 
+    aamm:      periodo ingresado por el usuario en la ventana (4
+               digitos, ej. '2607').
     registrar: funcion para mensajes.
     progreso:  funcion que recibe 0..100.
     """
@@ -945,7 +1046,9 @@ def ejecutar(carpeta_base, registrar=print, progreso=None):
         if progreso:
             progreso(valor)
 
-    rutas, _ = revisar_estructura(carpeta_base)
+    aamm = validar_aamm(aamm)
+
+    rutas, _ = revisar_estructura(carpeta_base, aamm)
 
     if not rutas["medidas_sae"].is_file():
         raise ErrorEntrada(
@@ -957,10 +1060,10 @@ def ejecutar(carpeta_base, registrar=print, progreso=None):
             f"No se encontro {rutas['centrales']}"
         )
 
-    archivo_soc, aamm = buscar_soc(rutas["medidas_dir"])
+    archivo_soc = buscar_soc(rutas["medidas_dir"], aamm)
     anio, mes = periodo_desde_aamm(aamm)
 
-    registrar(f"Periodo detectado: {anio}-{mes:02d} ({aamm})")
+    registrar(f"Periodo indicado: {anio}-{mes:02d} ({aamm})")
     avanzar(5)
 
     registrar("Leyendo Centrales.xlsx...")

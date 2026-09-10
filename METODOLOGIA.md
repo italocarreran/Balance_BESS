@@ -162,6 +162,22 @@ contra él.
   primera réplica no corrige ni reinterpreta homologaciones aunque parezcan
   desplazadas; cualquier inconsistencia se reporta como aviso/incidencia,
   no se "arregla" en silencio.
+- **Período del caso (AAMM):** lo ingresa el usuario en un campo de texto
+  de la ventana (4 dígitos, ej. `2607`), no se infiere del nombre de ningún
+  archivo. `nucleo.validar_aamm()` es la única función que valida el
+  formato; todo lo demás (`buscar_soc`, `revisar_estructura`, `ejecutar`)
+  recibe el AAMM ya como parámetro. El archivo de SoC dentro de `Medidas/`
+  tampoco tiene un nombre fijo: solo debe contener "SOC" y el AAMM en
+  cualquier posición del nombre (`_es_archivo_de_soc()`).
+- **Columnas de `Medidores` (A:AE):** el orden final de columnas sale de
+  `LETRA_A_CAMPO`, cuyo **orden de inserción** es el orden de Excel — nunca
+  ordenar sus claves con `sorted()`, porque con letras de dos caracteres
+  ("AA", "AB"...) el orden alfabético de texto no coincide con el orden de
+  columnas de Excel. `COLUMNAS_VACIAS` (M, P, Q, U, Z, AA) son diseño
+  confirmado, no trabajo pendiente. `COLUMNAS_PENDIENTES_OFERTAS` (R, S, T,
+  V, W, X, Y, AB, AC, AD, AE) dependen de las macros de Ofertas SSCC; no se
+  implementan por adivinanza — se necesita el código fuente real de esas
+  macros (ver plan de migración §19.2).
 - **Errores de entrada vs. errores inesperados:** un problema de datos de
   entrada (archivo faltante, ambigüedad de SOC, columnas faltantes, bloque
   sin `Time Stamp`/`Value`) se señaliza con `nucleo.ErrorEntrada`, con un
@@ -197,6 +213,8 @@ causa raíz deje de existir en el código.
 | Si `Medidas/` tiene más de un archivo `SOC_AAMM.xlsx`, `buscar_soc()` lanza `ErrorEntrada` a propósito — no elige el más reciente. | No "arreglar" esto para que elija automáticamente por fecha de modificación: es una decisión deliberada del plan (§3.4) para no tomar en silencio el mes equivocado. |
 | Las columnas `K, M, P, Q, R, S, T` de `Medidores` están en `COLUMNAS_PENDIENTES` como `pd.NA` porque su lógica exacta o su fuente (Ofertas SSCC) todavía no está definida. | No inventar una fórmula para completarlas "para que quede bonito". Cerrar primero la regla exacta en `docs/Plan_Traspaso_Python_Balance_BESS.md` §9, con el humano que conoce la planilla 11, y recién ahí implementar. |
 | `calcular_ventana()` reinicia el contador por **bloque de filas consecutivas con la misma clave**, no por `groupby` sobre toda la central. | Si los datos de entrada no vienen ordenados por `clave` e `intervalo` antes de llamar a esta función, el resultado no coincide con la fórmula de Excel. `construir_medidores()` ya ordena con `sort_values(["clave", "intervalo"])` antes de calcularla; no quitar ese paso ni reordenar después. |
+| Las claves de `LETRA_A_CAMPO` llegan hasta "AE" (dos caracteres). `sorted(LETRA_A_CAMPO)` ordena como texto y pone "AA" antes que "B", rompiendo el orden real de columnas de Excel. | El orden final de columnas usa `list(LETRA_A_CAMPO.values())` tal cual (el dict ya está declarado en orden A→AE); no reintroducir un `sorted()` sobre las claves. |
+| `R, S, T, V, W, X, Y, AB, AC, AD, AE` de `Medidores` dependen de las macros `Generar_Resumen_Ofertas_SSCC` y `Resumir_Medidores_Central_Ventana_Oferta_Completa`, de las que solo se conoce el nombre y qué columna producen, no su lógica interna (VBA). | No inventar la fórmula para "completar" estas columnas: eso violaría la regla de réplica fiel del plan (§18) y produciría números que parecen correctos pero no lo son. Se implementan recién cuando alguien entregue el código fuente real de esas macros. |
 
 ---
 
@@ -224,3 +242,9 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   versionado.** Se genera por caso en la carpeta base del usuario y se
   ignora en git (ver `.gitignore`); el repositorio no guarda salidas de
   casos concretos.
+- **El período AAMM lo escribe el usuario, no se adivina del nombre de un
+  archivo.** `SOC_AAMM.xlsx` era solo un patrón conceptual en el plan
+  original; en la práctica el archivo de SoC llega con nombres variables.
+  Confiar en un regex sobre el nombre para extraer el período era frágil;
+  pedirlo explícitamente en la ventana es la fuente de verdad y además
+  sirve para validar el archivo de SoC encontrado (debe contener ese AAMM).
