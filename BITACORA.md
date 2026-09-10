@@ -9,13 +9,21 @@ estado, no un historial.
 ## Pendientes abiertos
 
 - Crear casos de prueba con datos reales y comparar la salida Python
-  contra la hoja `Medidores` de `11_PAGOS_BESS_2607_Definitivo.xlsm`,
-  incluyendo ahora `R, S, T` y las tres hojas auxiliares de Ofertas SSCC
-  (plan §13 punto 10, §20.3). Todavía solo se validó con un caso sintético.
+  contra `11_PAGOS_BESS_2607_Definitivo.xlsm` (Medidores, Ofertas SSCC,
+  CMg, FD, Subastas) (plan §13 punto 10, §20.3). Todo se validó hasta
+  ahora solo con casos sintéticos.
 - Confirmar si la columna `V` (clave de homologación día+central, interna
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
+- Implementar la etapa `Calculo E Costos`/`Calculo RE545` (macros
+  `Asignar_CMg_a_Calculos_Turbo`, `Actualizar_Calculos_Columnas`), de la
+  que depende `Subastas!N` (hoy vacía) y el consumo real de CMg/FD/
+  Subastas/Medidores.
+- Confirmar si la carpeta `Subastas/` (creada esta sesión, no existe en
+  la planilla original) es el nombre/ubicación que se quiere mantener, o
+  si se prefiere buscar el archivo directamente en `<CARPETA_BASE>` como
+  hacía la macro original (ver plan §23.3).
 - Evaluar si `guardar_config()` necesita escritura atómica (ver
   `METODOLOGIA.md` §7).
 
@@ -255,3 +263,69 @@ Cambios en `nucleo.py`:
 Probado con el mismo caso sintético de sesiones anteriores: la hoja combinada queda con el
 título+tabla de "Ofertas SSCC por dia" (31 filas) seguido de una fila en blanco y el
 título+tabla de "Resumen ventana oferta" (3 filas), en el orden y con los valores esperados.
+
+---
+
+## 2026-09-10 (7) — Hojas CMg, FD, Subastas + renombre del archivo de salida
+
+Pedido del usuario: agregar las hojas CMg, FD y Subastas, replicando las macros
+`Cargar_CMg_Desde_Archivo`, `Cargar_SSCC_Desempeno_En_FD` y `Cargar_Remuneracion_Subastas_Rapido`
+del documento de trazabilidad VBA, y renombrar el archivo de salida de `Hoja_Medidas.xlsx` a
+`Consolidado_entradas.xlsx`.
+
+Se leyó el código VBA completo de las tres macros y de sus funciones auxiliares
+(`UltimaFilaEntreColumnasCMg`, `FiltrarFilasBESSoSAE`/`EsBESSoSAE`, `AjustarBloqueFormulas`,
+`BuscarArchivoSSCCMasReciente`, `AbrirConexionExcelSubastas`/`AjustarFormulasMNSubastasRapido`/
+`BuscarArchivoSubastasMasRecienteRapido`), más la sección de fórmulas del libro (`5.2 FD`,
+`5.3 Subastas`) del documento de trazabilidad, ya usado en sesiones anteriores para Ofertas SSCC.
+
+**Hallazgo estructural (igual patrón que V:Y/AB:AE de Medidores, pero por columnas):** en `FD`,
+el bloque CSF (A:M, viene de `CSF Horario`) y el bloque CPF (Q:AE, viene de `CPF Horario`) son
+dos tablas independientes de distinto largo que comparten la hoja en rangos de columnas
+distintos, no de filas. Se escriben lado a lado (`escribir_salida()` usa `startcol` en
+`df.to_excel()`), cada una con su propio número de filas.
+
+Cambios en `nucleo.py`:
+
+- Nuevas carpetas/archivos: `CARPETA_CMG="Cmg"` (+ `ARCHIVO_CMG="cmg.xlsx"`, nombre literal fijo,
+  a diferencia de todos los demás archivos externos del proyecto), `CARPETA_SSCC_DESEMPENO=
+  "SSCC_Desempeño"`, `CARPETA_SUBASTAS="Subastas"`.
+- `_buscar_archivo_excel_mas_reciente()`: generaliza `buscar_archivo_ofertas()` (antes solo
+  servía para Ofertas) para reusarse también en `buscar_archivo_sscc_desempeno()` y
+  `buscar_archivo_subastas()`, con un flag `desde_inicio` porque Ofertas busca el patrón en
+  cualquier posición del nombre, mientras que SSCC_Desempeño y Subastas exigen que el nombre
+  *empiece* con el patrón (así lo hacen sus macros originales, con `Dir("patron*.*")`).
+  `EXTENSIONES_OFERTAS` se renombra a `EXTENSIONES_EXCEL` (ya no es solo de Ofertas).
+- `leer_cmg()`: replica `Cargar_CMg_Desde_Archivo` — hoja `CMg` o la primera si no existe,
+  columnas A:I con su encabezado real (no se inventan nombres), ordenadas por columna D
+  ascendente y luego H ascendente.
+- `construir_fd()` + `_construir_bloque_fd_csf()`/`_construir_bloque_fd_cpf()`: replican
+  `Cargar_SSCC_Desempeno_En_FD` y las fórmulas de FD (`A=str(B)&F`, `B=(DAY(D)-1)*24+E+1+
+  IF(DAY(D)>100,1,0)`, `C=DAY(D)`, `K=J`, `L=K`, `M=B` para el bloque CSF; análogo con
+  Q,R,S,T,U,V,AA,AC,AD,AE para el bloque CPF). El término `IF(DAY(fecha)>100,...)` se conserva
+  tal cual aunque nunca sea cierto para un día real (fiel a la fórmula original, no se "limpia").
+  Filtro BESS/SAE **sin** BAT (`_contiene_bess_o_sae_sin_bat()`, distinta de la de Ofertas SSCC
+  que sí incluye BAT — son dos filtros reales distintos, no se fusionaron).
+- `construir_subastas()`: replica `Cargar_Remuneracion_Subastas_Rapido` (que en VBA usa ADO/SQL
+  contra la hoja `DB`; en Python se lee directo con pandas aplicando el mismo filtro/selección,
+  sin necesitar ADO). Arma B:L (copia), M (fórmula `=K&H&I`), O/P/Q (copias de P/Y/V). `N` queda
+  `pd.NA` documentada como pendiente: su fórmula real depende de `'Calculo E Costos'`, una hoja
+  de una etapa posterior sin implementar — no se adivina.
+- `revisar_estructura()`, `ejecutar()`, `escribir_salida()`: extendidos para validar, leer y
+  escribir las tres hojas nuevas. Las tres entradas son obligatorias (bloquean Ejecutar si
+  faltan), igual criterio que Ofertas SSCC.
+- `ARCHIVO_SALIDA` cambia de `"Hoja_Medidas.xlsx"` a `"Consolidado_entradas.xlsx"`.
+
+**Decisión de arquitectura (a confirmar con el usuario, ver "Pendientes abiertos"):** la macro
+original de Subastas buscaba su archivo directamente en la carpeta del `.xlsm`, sin subcarpeta.
+Se le creó una carpeta propia `Subastas/` para ser consistente con el resto de las entradas
+externas de este proyecto (cada una con su carpeta bajo la carpeta base del caso), no porque la
+planilla original lo hiciera así.
+
+**Verificación:** caso sintético con datos para las 6 entradas (Medidas_SAE, SoC, Centrales,
+OfertasSSCC, cmg.xlsx, SSCC_Desempeño_\*, 3_REMUNERACIÓN_SUBASTAS_E_ID_\*). Se verificaron a
+mano los valores esperados de las fórmulas de FD (A, B, C, K, L, M del bloque CSF; Q, R, S, AC,
+AD, AE del bloque CPF) y de Subastas (M, O, P, Q) contra los datos de entrada armados a
+propósito, y coincidieron exactamente. `Consolidado_entradas.xlsx` quedó con las 6 hojas
+esperadas: `Medidores`, `Ofertas SSCC`, `CMg`, `FD`, `Subastas`, `Log`. No se probó contra un
+caso real ni contra la planilla 11.

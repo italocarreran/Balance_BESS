@@ -13,7 +13,13 @@ resuelve solas todas las entradas por ruta relativa.
             Centrales.xlsx
         Ofertas/
             <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
-        Hoja_Medidas.xlsx      <- salida
+        Cmg/
+            cmg.xlsx
+        SSCC_Desempeño/
+            SSCC_Desempeño_<algo>.xlsx (o .xlsm/.xlsb/.xls)
+        Subastas/
+            3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (idem)
+        Consolidado_entradas.xlsx      <- salida
 
 La ubicacion de este .py no influye en nada salvo en donde se
 guarda config.json.

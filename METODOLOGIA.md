@@ -186,7 +186,7 @@ contra él.
   migración §20.1, §22). El resumen intermedio equivalente a la hoja
   "Resumen Ofertas SSCC" del `.xlsm` original (con una columna por
   servicio `_RS`) es puramente auxiliar para construir la tabla W:Y — no
-  se persiste en `Hoja_Medidas.xlsx`, solo vive en memoria dentro de
+  se persiste en `Consolidado_entradas.xlsx`, solo vive en memoria dentro de
   `construir_medidores()`. `R`, `S`, `T` sí son columnas por fila y están
   implementadas: dependen de las macros de Ofertas SSCC
   (`Generar_Resumen_Ofertas_SSCC`, `Resumir_Medidores_Central_Ventana_
@@ -208,10 +208,34 @@ contra él.
   mensaje explicativo para el usuario. No usar excepciones genéricas para
   esto: `Balance_BESS.py` distingue ambos casos para mostrar un mensaje
   distinto.
-- **Columnas todavía no definidas:** se agregan igual al DataFrame de salida
-  (como `pd.NA`, listadas en `COLUMNAS_PENDIENTES`) en vez de omitirse, para
-  que la forma de `Hoja_Medidas.xlsx` sea comparable con `Medidores` de la
-  planilla 11 aunque el valor todavía no se calcule.
+- **Columnas deliberadamente vacías:** se agregan igual al DataFrame de
+  salida (como `pd.NA`, listadas en `COLUMNAS_VACIAS` para `Medidores`) en
+  vez de omitirse, para que la forma de `Consolidado_entradas.xlsx` sea
+  comparable con la planilla 11 aunque la columna no tenga valor.
+- **CMg, FD, Subastas (plan §23):** replican únicamente las macros de
+  *carga* de esas hojas (`Cargar_CMg_Desde_Archivo`,
+  `Cargar_SSCC_Desempeno_En_FD`, `Cargar_Remuneracion_Subastas_Rapido`), no
+  las que las consumen después (`Asignar_CMg_a_Calculos_Turbo`,
+  `Actualizar_Calculos_Columnas`) — esas pertenecen a la etapa `Calculo E
+  Costos`/`Calculo RE545`, todavía sin implementar. Ninguna de las tres
+  tiene un documento de dominio tan detallado como Medidores: las columnas
+  puramente copiadas (no calculadas) se nombran con su letra de Excel tal
+  cual (p. ej. `"D"`, `"E"`, `"W"`) en vez de inventarles un nombre de
+  negocio que no está documentado en ningún lado — mismo criterio de "no
+  adivinar" que el resto del proyecto.
+- **`FD` tiene el mismo patrón de "tablas de distinto largo compartiendo
+  hoja" que Ofertas SSCC, pero por columnas en vez de por filas:** el
+  bloque CSF (A:M, viene de `CSF Horario`) y el bloque CPF (Q:AE, viene de
+  `CPF Horario`) se filtran y calculan por separado (pueden tener distinta
+  cantidad de filas) y se escriben lado a lado (`escribir_salida()`, vía
+  `startcol` en `df.to_excel()`), no una debajo de la otra.
+- **Filtro BESS/SAE de FD y Subastas vs. el de Ofertas SSCC:**
+  `_contiene_bess_o_sae_sin_bat()` (FD, Subastas) NO incluye "BAT";
+  `_contiene_bess_o_sae()` (Ofertas SSCC) sí. Son dos filtros distintos que
+  se parecen — no fusionarlos en una sola función aunque parezca tentador.
+- **Subastas!N queda vacía a propósito:** su fórmula real depende de
+  `'Calculo E Costos'!D/G/P`, una hoja que todavía no existe en esta
+  migración. No se adivina su valor.
 
 ---
 
@@ -265,10 +289,13 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   fija.** Confirmado en el plan §16.1: ni letras de columna ni offsets
   constantes entre el nombre de la central y `Time Stamp`/`Value`, porque
   esa distancia varía entre archivos mensuales.
-- **`Hoja_Medidas.xlsx` es un artefacto de validación, no un archivo
-  versionado.** Se genera por caso en la carpeta base del usuario y se
-  ignora en git (ver `.gitignore`); el repositorio no guarda salidas de
-  casos concretos.
+- **`Consolidado_entradas.xlsx` (antes `Hoja_Medidas.xlsx`) es un artefacto
+  de validación, no un archivo versionado.** Se genera por caso en la
+  carpeta base del usuario y se ignora en git (ver `.gitignore`); el
+  repositorio no guarda salidas de casos concretos. Se renombró porque ya
+  no es solo la etapa Medidores: consolida varias entradas materializadas
+  (Medidores, CMg, FD, Subastas) que alimentan las siguientes etapas del
+  balance.
 - **`V, W, X, Y, AB, AC, AD, AE` no son columnas de `Medidores` en Python.**
   Las fórmulas de Excel (`V3:V312`, no `V3:V26786`) muestran que son tablas
   auxiliares de otro largo que solo comparten letra de columna con
