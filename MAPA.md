@@ -56,11 +56,12 @@ de.
   patrón de "dos tablas de distinto largo compartiendo hoja" que Ofertas
   SSCC, pero por **columnas** en vez de por filas: el bloque CSF (A:M) y el
   CPF (Q:AE) van lado a lado, cada uno con su propio número de filas.
-  `Subastas!N` queda vacía y documentada como pendiente (depende de
-  `'Calculo E Costos'`, una hoja de la etapa siguiente). Ninguna de las
-  tres tiene un documento de dominio tan detallado como Medidores: las
-  columnas puramente copiadas se nombran con su letra de Excel tal cual, no
-  se les inventa un nombre de negocio no documentado.
+  `Subastas!N` ("Energía SSCC") queda vacía y documentada como pendiente
+  (depende de `'Calculo E Costos'`, una hoja de la etapa siguiente). Los
+  nombres de columna de `FD` y `Subastas` (`NOMBRES_FD_CSF`,
+  `NOMBRES_FD_CPF`, `NOMBRES_SUBASTAS`) fueron confirmados por el usuario
+  contra un caso real (plan §24), no inventados — antes de eso se usaba la
+  letra de Excel tal cual por no tener esa información.
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
@@ -81,9 +82,10 @@ de.
     varios; carpeta propia — la macro original lo buscaba junto al .xlsm,
     ver plan §23.3), hoja `DB`
 - **Produce:** `<CARPETA_BASE>/Consolidado_entradas.xlsx`, hojas:
-  `Medidores`, `Ofertas SSCC` (las tablas W:Y y AB:AE equivalentes, una
-  debajo de la otra — ver `_escribir_tabla_con_titulo()`), `CMg`, `FD` (los
-  bloques CSF y CPF lado a lado, columnas A:M y Q:AE), `Subastas`, `Log`.
+  `Medidores`, `Ofertas SSCC` (las tablas W:Y y AB:AE equivalentes, una al
+  lado de la otra — ver `_escribir_tabla_con_titulo()`), `CMg`, `FD` (los
+  bloques CSF y CPF lado a lado, columnas A:M y Q:AE, con sus nombres
+  reales), `Subastas` (con sus nombres reales), `Log`.
 - **Expone (funciones clave agregadas hasta ahora, además de las básicas
   de E/S y homologación):**
   - Ofertas SSCC: `buscar_archivo_ofertas`, `construir_resumen_ofertas_sscc`,

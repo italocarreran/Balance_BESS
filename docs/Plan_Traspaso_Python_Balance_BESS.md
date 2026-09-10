@@ -1489,3 +1489,94 @@ posterior todavía sin implementar):
 ## 23.4. Hojas resultantes de `Consolidado_entradas.xlsx`
 
 `Medidores`, `Ofertas SSCC`, `CMg`, `FD`, `Subastas`, `Log`.
+
+---
+
+# 24. Encabezados reales de FD y Subastas, y ajuste de la hoja Ofertas SSCC
+
+El usuario entregó un Excel con los encabezados reales de `FD` y `Subastas`, confirmando (y
+corrigiendo el nombre genérico por letra que se había usado en la sección 23) las columnas que
+solo se copian:
+
+## 24.1. `FD` — encabezados confirmados
+
+Bloque CSF (A:M):
+
+| Letra | Nombre |
+|---|---|
+| A | `id` |
+| B | `Hora Mes` |
+| C | `Dia` |
+| D | `Fecha` |
+| E | `Hora` |
+| F | `Unidad` |
+| G | `Respuesta CSF (Fact_CSF)` |
+| H | `Disponibilidad (Fdis_CSF)` |
+| I | `Desempeño (DCSF)` |
+| J | `Factor de Desempeño (Fd_CSF)` |
+| K | `CSF(+)` |
+| L | `CSF(-)` |
+| M | `Hora Mes` (repite el nombre de B; también repite su valor — `M = B`, confirmado antes) |
+
+Bloque CPF (Q:AE), mismo patrón:
+
+| Letra | Nombre |
+|---|---|
+| Q | `id` |
+| R | `Hora Mes` |
+| S | `Dia` |
+| T | `Fecha` |
+| U | `Hora` |
+| V | `Unidad` |
+| W | `Respuesta CPF+ (Fact_CPF+)` |
+| X | `Respuesta CPF- (Fact_CPF-)` |
+| Y | `Disponibilidad (Fdis_CPF)` |
+| Z | `Desempeño (DCPF)` |
+| AA | `Factor de Desempeño (Fd_CPF)` |
+| AB | `Cuenta con equipo registrador validado` |
+| AC | `CPF(+)` |
+| AD | `CPF(-)` |
+| AE | `Hora Mes` (repite el nombre de R; repite su valor — `AE = R`) |
+
+N:P siguen vacías/fuera de alcance (el archivo de ejemplo tampoco tiene encabezado ahí).
+
+Confirma, de paso, todas las fórmulas ya implementadas en la sesión anterior: `K = J` con
+`K="CSF(+)"`, `J="Factor de Desempeño (Fd_CSF)"` — es decir, la columna "positiva" simplemente
+copia el factor de desempeño sin condición de signo (y `L="CSF(-)"` copia a su vez el valor de
+`K`). Aunque el nombre sugiera una lógica de signo, la fórmula extraída del `.xlsm` real es una
+copia directa; no se "corrige" para que tenga más sentido semántico — replicar primero.
+
+## 24.2. `Subastas` — encabezados confirmados
+
+| Letra | Nombre | Origen |
+|---|---|---|
+| B | `Control` | copiado de `DB!B` |
+| C | `Sub_Baj` | copiado de `DB!C` |
+| D | `Fecha` | copiado de `DB!D` |
+| E | `Año` | copiado de `DB!E` |
+| F | `Mes` | copiado de `DB!F` |
+| G | `Dia` | copiado de `DB!G` |
+| H | `Hora_dia` | copiado de `DB!H` |
+| I | `Hora_mes` | copiado de `DB!I` |
+| J | `Configuración` | copiado de `DB!J` |
+| K | `Propietario` | copiado de `DB!K` — **esta es la columna que se filtra por BESS/SAE** |
+| L | `Clave horaria` | copiado de `DB!L` |
+| M | `Ciclo` | fórmula: `= Propietario & Hora_dia & Hora_mes` (`K&H&I`) |
+| N | `Energía SSCC` | **pendiente** — depende de `'Calculo E Costos'`, etapa sin implementar |
+| O | `FD` | copiado de `DB!P` |
+| P | `FMA` | copiado de `DB!Y` |
+| Q | *(sin nombre en el archivo real)* | copiado de `DB!V` |
+
+`A` (`Concepto`) no forma parte de lo que escribe `Cargar_Remuneracion_Subastas_Rapido`, y
+`R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`, `BAJADA`) tampoco: son columnas de otra
+lógica (probablemente relacionada con las fórmulas `U:W` ya descartadas como fuera de alcance
+en la sección 23.3).
+
+## 24.3. Hoja "Ofertas SSCC": las dos tablas van lado a lado, no una debajo de la otra
+
+Ajuste pedido por el usuario: "Ofertas SSCC por dia" y "Resumen ventana oferta" (sección 22)
+pasan de estar apiladas verticalmente a estar **una al lado de la otra**, con una separación de
+2 columnas en blanco entre ambas. `_escribir_tabla_con_titulo()` ahora acepta `columna_inicio`
+además de `fila_inicio`, y devuelve tanto la fila como la columna donde podría continuar el
+siguiente bloque (cada llamada usa el dato que corresponda a cómo se estén acomodando los
+bloques en ese momento).

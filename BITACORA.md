@@ -329,3 +329,36 @@ AD, AE del bloque CPF) y de Subastas (M, O, P, Q) contra los datos de entrada ar
 propósito, y coincidieron exactamente. `Consolidado_entradas.xlsx` quedó con las 6 hojas
 esperadas: `Medidores`, `Ofertas SSCC`, `CMg`, `FD`, `Subastas`, `Log`. No se probó contra un
 caso real ni contra la planilla 11.
+
+---
+
+## 2026-09-10 (8) — Encabezados reales de FD/Subastas + Ofertas SSCC lado a lado
+
+El usuario entregó un Excel (`Libro1.xlsx`) con los encabezados reales de `FD` y `Subastas`, y
+pidió que las dos tablas de la hoja "Ofertas SSCC" (sesión anterior, apiladas verticalmente)
+queden una al lado de la otra en vez de una debajo de la otra.
+
+**Encabezados FD/Subastas (plan §24):** confirman exactamente las fórmulas ya implementadas la
+sesión anterior — nada cambió en los VALORES calculados, solo se reemplazaron los nombres de
+columna por letra (`"A"`, `"B"`, ...) por los nombres reales (`NOMBRES_FD_CSF`, `NOMBRES_FD_CPF`,
+`NOMBRES_SUBASTAS` en `nucleo.py`). Detalle interesante: los encabezados reales confirman que
+`FD!M` y `FD!AE` repiten literalmente el nombre "Hora Mes" de `FD!B`/`FD!R` — coincide con que
+también repiten su valor (`M=B`, `AE=R`), así que no hay contradicción. Como Python no permite
+indexar sin ambigüedad un DataFrame con nombres de columna duplicados, el renombre se aplica con
+`set_axis()` al final de cada función (`_construir_bloque_fd_csf`/`_construir_bloque_fd_cpf`),
+después de terminar todos los cálculos con nombres de letra únicos — nunca antes.
+
+También se detectó que `Subastas!K` (la columna que se filtra por BESS/SAE) se llama
+"Propietario" en la vida real, y `Subastas!M` ("Ciclo") es literalmente
+`Propietario & Hora_dia & Hora_mes` — nombres mucho más claros que "K", "H", "I". `Subastas!Q`
+no tiene encabezado en el archivo real: se dejó sin nombre (columna `""`), no se le inventó uno.
+
+**Ofertas SSCC lado a lado:** `_escribir_tabla_con_titulo()` ahora acepta `columna_inicio`
+además de `fila_inicio`, y devuelve `(fila_siguiente, columna_siguiente)` en vez de solo la
+fila — cada llamada usa el que corresponda según cómo se estén acomodando los bloques
+(`escribir_salida()` ahora encadena por columna para esta hoja en particular).
+
+Probado con el mismo caso sintético de sesiones anteriores: los encabezados de `FD` y
+`Subastas` en el archivo generado coinciden letra por letra con los del `Libro1.xlsx` entregado,
+y la hoja "Ofertas SSCC" quedó con "Ofertas SSCC por dia" en A1:C... y "Resumen ventana oferta"
+arrancando 2 columnas después (F1:I...), ambas en la fila 1.

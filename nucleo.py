@@ -1697,6 +1697,46 @@ def leer_cmg(ruta_cmg, registrar=print):
 # FD
 # --------------------------------------------------------------
 
+# Encabezados reales de FD (confirmados por el usuario contra un caso
+# real, no inventados). Se aplican al final de cada bloque, despues de
+# calcular todo con los nombres de letra (asi se evitan columnas
+# duplicadas en el DataFrame mientras se opera con el, ya que "Hora
+# Mes" se repite dos veces en cada bloque real - B y M en el CSF, R y
+# AE en el CPF - igual que en el archivo original).
+NOMBRES_FD_CSF = {
+    "A": "id",
+    "B": "Hora Mes",
+    "C": "Dia",
+    "D": "Fecha",
+    "E": "Hora",
+    "F": "Unidad",
+    "G": "Respuesta CSF\n (Fact_CSF)",
+    "H": "Disponibilidad\n(Fdis_CSF)",
+    "I": "Desempeño\n(DCSF)",
+    "J": "Factor de Desempeño\n (Fd_CSF)",
+    "K": "CSF(+)",
+    "L": "CSF(-)",
+    "M": "Hora Mes",
+}
+
+NOMBRES_FD_CPF = {
+    "Q": "id",
+    "R": "Hora Mes",
+    "S": "Dia",
+    "T": "Fecha",
+    "U": "Hora",
+    "V": "Unidad",
+    "W": "Respuesta CPF+\n(Fact_CPF+)",
+    "X": "Respuesta CPF-\n(Fact_CPF-)",
+    "Y": "Disponibilidad\n(Fdis_CPF)",
+    "Z": "Desempeño\n(DCPF)",
+    "AA": "Factor de Desempeño\n(Fd_CPF)",
+    "AB": "Cuenta con equipo\nregistrador validado",
+    "AC": "CPF(+)",
+    "AD": "CPF(-)",
+    "AE": "Hora Mes",
+}
+
 def _filtrar_bess_sae_posicional(df_bloque, indice_columna_filtro):
     """
     Replica FiltrarFilasBESSoSAE: conserva las filas donde la columna
@@ -1732,7 +1772,13 @@ def _construir_bloque_fd_csf(df_filtrado):
     df["L"] = df["K"]
     df["M"] = df["B"]
 
-    return df[list("ABCDEFGHIJKLM")]
+    df = df[list("ABCDEFGHIJKLM")]
+
+    # Los nombres reales duplican "Hora Mes" (B y M): se renombra al
+    # final, ya con las columnas en su posicion definitiva.
+    return df.set_axis(
+        [NOMBRES_FD_CSF[letra] for letra in df.columns], axis=1
+    )
 
 
 def _construir_bloque_fd_cpf(df_filtrado):
@@ -1756,7 +1802,13 @@ def _construir_bloque_fd_cpf(df_filtrado):
     df["AD"] = df["AC"]
     df["AE"] = df["R"]
 
-    return df[list("QRSTUVWXYZ") + ["AA", "AB", "AC", "AD", "AE"]]
+    df = df[list("QRSTUVWXYZ") + ["AA", "AB", "AC", "AD", "AE"]]
+
+    # Los nombres reales duplican "Hora Mes" (R y AE): se renombra al
+    # final, ya con las columnas en su posicion definitiva.
+    return df.set_axis(
+        [NOMBRES_FD_CPF[letra] for letra in df.columns], axis=1
+    )
 
 
 def construir_fd(ruta_sscc, registrar=print):
@@ -1767,7 +1819,9 @@ def construir_fd(ruta_sscc, registrar=print):
     Horario" desde la fila 12, filtra por BESS/SAE en la columna D de
     cada una, y arma dos bloques independientes (distinto largo cada
     uno, igual que en la planilla): A:M (desde CSF) y Q:AE (desde
-    CPF). N:P quedan fuera de alcance (la macro no las toca).
+    CPF), con sus nombres de columna reales (NOMBRES_FD_CSF/
+    NOMBRES_FD_CPF, confirmados por el usuario). N:P quedan fuera de
+    alcance (la macro no las toca).
 
     Devuelve (df_csf, df_cpf).
     """
@@ -1813,6 +1867,30 @@ def construir_fd(ruta_sscc, registrar=print):
 # SUBASTAS
 # --------------------------------------------------------------
 
+# Encabezados reales de Subastas!B:Q (confirmados por el usuario). "A"
+# (Concepto) no esta: la macro Cargar_Remuneracion_Subastas_Rapido no
+# la toca. "Q" no tiene encabezado en el archivo real (queda como
+# columna sin nombre, no se le inventa uno).
+NOMBRES_SUBASTAS = {
+    "B": "Control",
+    "C": "Sub_Baj",
+    "D": "Fecha",
+    "E": "Año",
+    "F": "Mes",
+    "G": "Dia",
+    "H": "Hora_dia",
+    "I": "Hora_mes",
+    "J": "Configuración",
+    "K": "Propietario",
+    "L": "Clave horaria",
+    "M": "Ciclo",
+    "N": "Energía SSCC",
+    "O": "FD",
+    "P": "FMA",
+    "Q": "",
+}
+
+
 def construir_subastas(ruta_subastas, registrar=print):
     """
     Replica Cargar_Remuneracion_Subastas_Rapido.
@@ -1822,14 +1900,17 @@ def construir_subastas(ruta_subastas, registrar=print):
     tabla); aca se lee directamente con pandas y se aplica el mismo
     filtro y la misma seleccion de columnas.
 
-    Arma las columnas B:Q de Subastas:
-      - B:L: copia directa de DB!B:L (filtrado por DB!K contiene
-        BESS/SAE).
-      - M: formula (=K&H&I).
-      - N: PENDIENTE - depende de la hoja "Calculo E Costos", una
-        etapa posterior que todavia no se implementa (no se adivina).
-      - O, P, Q: copias de DB!P, DB!Y, DB!V respectivamente (asi lo
-        indica la macro original).
+    Arma las columnas B:Q de Subastas (nombres reales en
+    NOMBRES_SUBASTAS, confirmados por el usuario):
+      - Control:Clave horaria (B:L): copia directa de DB!B:L
+        (filtrado por Propietario/DB!K contiene BESS/SAE).
+      - Ciclo (M, formula): = Propietario & Hora_dia & Hora_mes
+        (K&H&I).
+      - Energía SSCC (N): PENDIENTE - depende de la hoja "Calculo E
+        Costos", una etapa posterior que todavia no se implementa (no
+        se adivina).
+      - FD, FMA (O, P) y la columna sin nombre (Q): copias de DB!P,
+        DB!Y, DB!V respectivamente (asi lo indica la macro original).
     """
 
     ruta_subastas = Path(ruta_subastas)
@@ -1870,10 +1951,11 @@ def construir_subastas(ruta_subastas, registrar=print):
     df["Q"] = filtrado.iloc[:, 20].reset_index(drop=True)
 
     df = df[list("BCDEFGHIJKLMNOPQ")]
+    df = df.rename(columns=NOMBRES_SUBASTAS)
 
     registrar(
-        f"  Subastas: {len(df):,} fila(s) (filtro DB!K contiene "
-        f"BESS/SAE)"
+        f"  Subastas: {len(df):,} fila(s) (filtro Propietario "
+        f"contiene BESS/SAE)"
     )
 
     return df
@@ -2177,11 +2259,17 @@ def construir_medidores(
 HOJA_OFERTAS_SSCC = "Ofertas SSCC"
 
 
-def _escribir_tabla_con_titulo(writer, hoja, df, titulo, fila_inicio):
+def _escribir_tabla_con_titulo(
+    writer, hoja, df, titulo, fila_inicio=0, columna_inicio=0
+):
     """
     Escribe 'titulo' en una fila y 'df' (con su propio encabezado)
-    justo debajo, dentro de la hoja 'hoja', empezando en fila_inicio.
-    Devuelve la fila donde debería empezar el siguiente bloque.
+    justo debajo, dentro de la hoja 'hoja', empezando en fila_inicio y
+    columna_inicio.
+
+    Devuelve (fila_siguiente, columna_siguiente): donde empezaria el
+    proximo bloque si se apila debajo, o si se pone al lado,
+    respectivamente (cada llamada solo usa el que necesite).
     """
 
     pd.DataFrame([[titulo]]).to_excel(
@@ -2190,6 +2278,7 @@ def _escribir_tabla_con_titulo(writer, hoja, df, titulo, fila_inicio):
         index=False,
         header=False,
         startrow=fila_inicio,
+        startcol=columna_inicio,
     )
 
     df.to_excel(
@@ -2197,15 +2286,21 @@ def _escribir_tabla_con_titulo(writer, hoja, df, titulo, fila_inicio):
         sheet_name=hoja,
         index=False,
         startrow=fila_inicio + 1,
+        startcol=columna_inicio,
     )
 
     celda_titulo = writer.sheets[hoja].cell(
-        row=fila_inicio + 1, column=1
+        row=fila_inicio + 1, column=columna_inicio + 1
     )
     celda_titulo.font = celda_titulo.font.copy(bold=True)
 
-    # +1 titulo, +1 encabezado de df, +len(df) filas, +2 de separacion
-    return fila_inicio + len(df) + 4
+    # Debajo: +1 titulo, +1 encabezado de df, +len(df) filas, +2 de separacion.
+    fila_siguiente = fila_inicio + len(df) + 4
+
+    # Al lado: +len(df.columns) del bloque, +2 columnas de separacion.
+    columna_siguiente = columna_inicio + len(df.columns) + 2
+
+    return fila_siguiente, columna_siguiente
 
 
 # Columna Q en indice 0 (A=0): usada para ubicar el bloque CPF de FD
@@ -2254,15 +2349,15 @@ def escribir_salida(
             index=False,
         )
 
-        fila = 0
+        columna = 0
 
         if df_wxy is not None:
-            fila = _escribir_tabla_con_titulo(
+            _, columna = _escribir_tabla_con_titulo(
                 writer,
                 HOJA_OFERTAS_SSCC,
                 df_wxy,
                 "Ofertas SSCC por dia (equivalente a Medidores!W:Y)",
-                fila,
+                columna_inicio=columna,
             )
 
         if df_resumen_ventana is not None:
@@ -2271,7 +2366,7 @@ def escribir_salida(
                 HOJA_OFERTAS_SSCC,
                 df_resumen_ventana,
                 "Resumen ventana oferta (equivalente a Medidores!AB:AE)",
-                fila,
+                columna_inicio=columna,
             )
 
         if df_cmg is not None:

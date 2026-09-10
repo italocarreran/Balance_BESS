@@ -180,10 +180,11 @@ contra él.
   tablas auxiliares de otro largo (central × día, central × ventana) que
   comparten esas letras de columna solo porque ahí había espacio libre. Se
   calculan y se escriben juntas en una sola hoja auxiliar
-  (`HOJA_OFERTAS_SSCC = "Ofertas SSCC"`, una tabla debajo de la otra con
-  su propio título vía `_escribir_tabla_con_titulo()`) en vez de
-  forzarlas a columnas `pd.NA` del mismo largo que A:U (ver plan de
-  migración §20.1, §22). El resumen intermedio equivalente a la hoja
+  (`HOJA_OFERTAS_SSCC = "Ofertas SSCC"`, una tabla al lado de la otra con
+  su propio título vía `_escribir_tabla_con_titulo()`, que acepta tanto
+  `fila_inicio` como `columna_inicio`) en vez de forzarlas a columnas
+  `pd.NA` del mismo largo que A:U (ver plan de migración §20.1, §22, §24.3).
+  El resumen intermedio equivalente a la hoja
   "Resumen Ofertas SSCC" del `.xlsm` original (con una columna por
   servicio `_RS`) es puramente auxiliar para construir la tabla W:Y — no
   se persiste en `Consolidado_entradas.xlsx`, solo vive en memoria dentro de
@@ -218,11 +219,17 @@ contra él.
   las que las consumen después (`Asignar_CMg_a_Calculos_Turbo`,
   `Actualizar_Calculos_Columnas`) — esas pertenecen a la etapa `Calculo E
   Costos`/`Calculo RE545`, todavía sin implementar. Ninguna de las tres
-  tiene un documento de dominio tan detallado como Medidores: las columnas
-  puramente copiadas (no calculadas) se nombran con su letra de Excel tal
-  cual (p. ej. `"D"`, `"E"`, `"W"`) en vez de inventarles un nombre de
-  negocio que no está documentado en ningún lado — mismo criterio de "no
-  adivinar" que el resto del proyecto.
+  tiene un documento de dominio tan detallado como Medidores; sus nombres
+  de columna (`NOMBRES_FD_CSF`, `NOMBRES_FD_CPF`, `NOMBRES_SUBASTAS`, plan
+  §24) los confirmó el usuario contra un caso real, no se inventaron. Si
+  aparece una columna sin ese respaldo, usar su letra de Excel tal cual
+  (p. ej. `"N"`) en vez de inventarle un nombre de negocio no documentado —
+  mismo criterio de "no adivinar" que el resto del proyecto. Ojo con
+  nombres duplicados dentro de un mismo bloque (p. ej. `FD` repite "Hora
+  Mes" en B y M, y en R y AE): se renombra con `set_axis()` recién al
+  final, después de calcular todo con nombres de letra únicos — Python no
+  prohíbe columnas duplicadas, pero indexar por ese nombre durante el
+  cálculo sería ambiguo.
 - **`FD` tiene el mismo patrón de "tablas de distinto largo compartiendo
   hoja" que Ofertas SSCC, pero por columnas en vez de por filas:** el
   bloque CSF (A:M, viene de `CSF Horario`) y el bloque CPF (Q:AE, viene de

@@ -89,19 +89,20 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
   calculadas; M, P, Q, U deliberadamente vacías por diseño).
 - `Ofertas SSCC` — las tablas auxiliares equivalentes a `Medidores!W:Y`
   ("Ofertas SSCC por dia") y `Medidores!AB:AE` ("Resumen ventana oferta"),
-  una debajo de la otra. El resumen intermedio equivalente a la hoja
+  una al lado de la otra. El resumen intermedio equivalente a la hoja
   "Resumen Ofertas SSCC" del `.xlsm` original es puramente auxiliar y no se
   persiste.
 - `CMg` — copia ordenada de `Cmg/cmg.xlsx` (replica
   `Cargar_CMg_Desde_Archivo`).
 - `FD` — datos de `CPF Horario`/`CSF Horario` filtrados por BESS/SAE, más
-  sus columnas calculadas (replica `Cargar_SSCC_Desempeno_En_FD`). Los
-  bloques CSF (A:M) y CPF (Q:AE) son dos tablas de distinto largo, lado a
-  lado en la misma hoja.
-- `Subastas` — datos de la hoja `DB` filtrados por BESS/SAE en la columna K,
-  más la columna M calculada (replica `Cargar_Remuneracion_Subastas_Rapido`).
-  La columna N queda vacía: depende de `Calculo E Costos`, una etapa
-  posterior todavía sin implementar.
+  sus columnas calculadas, con sus nombres reales de columna (replica
+  `Cargar_SSCC_Desempeno_En_FD`). Los bloques CSF (A:M) y CPF (Q:AE) son dos
+  tablas de distinto largo, lado a lado en la misma hoja.
+- `Subastas` — datos de la hoja `DB` filtrados por "Propietario" (BESS/SAE),
+  más la columna "Ciclo" calculada, con sus nombres reales de columna
+  (replica `Cargar_Remuneracion_Subastas_Rapido`). La columna "Energía
+  SSCC" queda vacía: depende de `Calculo E Costos`, una etapa posterior
+  todavía sin implementar.
 - `Log` — avisos e incidencias detectadas durante el cálculo.
 
 Las macros de Ofertas SSCC, CMg, FD y Subastas replicadas son solo las de
