@@ -54,6 +54,15 @@ estado, no un historial.
   hasta ahora, los nombres de la fila 2 ya vienen idénticos a
   `Medidas_SAE.xlsx` — sospechar que el `Diccionario` quizás ni haga falta
   para el SoC, pero falta confirmarlo con otro período/archivo.
+- Correr una vez el botón "Actualizar" de `Medidas_SAE.xlsx` contra la API
+  real: confirmar la forma de la respuesta y que el `intervalo` de las dos
+  APIs sea el inicio del cuarto de hora en las dos (de eso depende el cruce
+  contra el calendario compartido).
+- Confirmar si la columna `Canal` de la hoja `Gen real` tiene que significar
+  algo: la API de operación real no expone canales, así que hoy se acepta
+  (para que la hoja tenga la misma forma que `homol`) pero se ignora.
+- Confirmar si la columna `Flujo` de la hoja `Gen real` hace falta o si todas
+  las centrales van con 1 (el script original no aplicaba signo).
 - Abrir la ventana en Windows y confirmar el ancho de la columna "Acción"
   (`ANCHO_ACCION`, hoy 150 px) contra los botones más largos ("Traer
   cmg_15min", "Actualizar todo") y el alto de fila (`ALTO_ACCION`, 26 px).
@@ -2071,3 +2080,179 @@ También se actualizó `docs/Estructura_Archivos_Reales.md` (que nació en la ra
 propósito es ser la referencia AL DÍA): su §5 ahora documenta los dos archivos de `Cmg/` —el CSV
 15-minutal y el `cmg.xlsx` derivado—, cómo se generan, y la trampa de que `leer_cmg()` los lee por
 posición; y las rutas `nucleo.py` pasaron a `Script/nucleo.py`.
+
+## 2026-09-11 (27) — `Medidas_SAE.xlsx` ahora lo genera el programa (paquete `Script/Medidas/`)
+
+> **Nota de integración:** las entradas (27) y (28) se escribieron en paralelo a las (24)-(26)
+> (rama `claude/dazzling-gauss-jjxo0q`) y las dos ramas las habían numerado (24) y (25). Al
+> fusionar se renumeraron al orden real en que entran a `main`. Los trabajos son independientes
+> y no se pisan: allá, los encabezados de grupo de `Pagos_BESS.xlsx`; acá, `Medidas_SAE.xlsx`.
+
+
+Misma idea que con `cmg.xlsx` (sesión 22), aplicada a la primera entrada del caso. El usuario
+entregó los cuatro scripts sueltos que se corrían a mano uno detrás de otro (autor original:
+Freddy.Arriagada) y pidió seis cosas:
+
+1. el Excel de homologación pasa a `Auxiliares/`, al lado de `Centrales.xlsx`;
+2. `Medidas_SAE.xlsx` tiene un botón "Actualizar" que corre todo de un viaje;
+3. la lista `FILTROS_TOPOLOGY` del script 3 sale del código y pasa a `Centrales.xlsx`; **deja de
+   ser un reemplazo**: esas centrales se sacan del archivo de homologación, así que el paso 3 las
+   **agrega**, con la clave que indique la lista;
+4. la hoja nueva de `Centrales.xlsx` la diseño yo y él la crea;
+5. los códigos van en `Script/Medidas/`, hermana de `Script/Cmg/`;
+6. las salidas intermedias no se ven en la ventana.
+
+**El hallazgo que ordenó todo:** el paso 2 terminaba escribiendo exactamente las 9 columnas de
+`nucleo.COLUMNAS_AI`, en el mismo orden (`Mes, Dia, Hora, Minutos, Hora Mes, Cuarto de Hora,
+clave, intervalo, Gen_Unidad`). O sea que esta cadena ya era, sin saberlo, el generador de la
+entrada que hasta ahora había que dejar a mano en `Medidas/`.
+
+**Estructura:** `Script/Medidas/` con `comun.py` (`ErrorMedidas` + helpers de texto),
+`Homologacion.py`, `Descarga_PRMTE.py`, `Claves_Balance.py` y `Generacion_Real.py` — uno por
+script original. Se mantiene la regla de `Cmg/`: un módulo de etapa **no importa `nucleo`**;
+recibe rutas y datos y levanta su propia excepción, que `nucleo` traduce a `ErrorEntrada`.
+`nucleo.generar_medidas_sae()` orquesta los cuatro pasos.
+
+**La hoja `Medidas API` de `Centrales.xlsx`** (diseñada acá, la crea el usuario): `topologyName`
+(el nombre exacto de la API), `clave` (con qué nombre aparece en `Medidas_SAE.xlsx`) y `Factor`
+(opcional, 1 por defecto; es el equivalente del `Flujo` del archivo de homologación, `-1` para los
+retiros). Dos filas pueden apuntar a la misma clave: se suman. La hoja entera es opcional — sin
+ella no se agrega ninguna central por ese camino y el resto corre igual.
+
+**Decisión de diseño que importa:** el `Cuarto de Hora` es un índice global del mes que después
+cruza contra `CMg`, así que las dos fuentes **comparten un solo calendario** (el que arma
+`Claves_Balance`, numerado por `intervaloUtc` porque la hora local se repite en el cambio de hora).
+Si cada fuente numerara por su cuenta, un día de cambio de hora las desalinearía en silencio. La
+API de operación real no entrega UTC, así que sus filas se pegan por hora local: en un día de
+cambio de hora hacia atrás hay ambigüedad real, se toma la primera ocurrencia y se avisa en el
+log. Si el cruce da 0 coincidencias, se corta con un error explícito en vez de escribir un
+`Medidas_SAE.xlsx` al que le faltan esas centrales.
+
+**Credencial:** los scripts traían el `user_key` escrito adentro (vacío en el 1, `"-"` en el 3).
+Primero lo saqué a un campo de la ventana guardado en `config.json`, señalando que al ser una
+credencial no debería quedar versionada; **el usuario decidió dejarlo en el código** y se hizo así.
+Queda en una sola constante, `USER_KEY` en `Script/Medidas/comun.py`, para las dos APIs — el
+problema real que tenía era estar repetido en dos archivos y con valores distintos. Consecuencia
+asumida, anotada en `METODOLOGIA.md` §5: queda versionada, así que el repositorio no puede volverse
+público sin rotarla antes.
+
+**Dos bugs de los scripts originales, arreglados** (no estaban en el pedido):
+
+1. **Los lotes descargados no llevaban el período en el nombre.** El paso 2 hacía
+   `glob("medidas_batch_*.parquet")` y el paso 1 anotaba los puntos ya procesados en un archivo
+   único, así que correr dos meses en la misma carpeta mezclaba los lotes de los dos y daba por
+   procesados puntos de otro mes. Ahora los dos llevan el período en el nombre. (De paso se fue el
+   `punt∟os_procesados.txt`, con un carácter raro en medio del nombre.)
+2. **El umbral de "punto de medida completo" era la constante `2976`** (= 31 × 96). Está mal para
+   cualquier mes de 30 días o menos —descartaría todos los puntos— y para los meses con cambio de
+   hora. Ahora es la cantidad de cuartos de hora que el mes descargado realmente trae
+   (`intervaloUtc` distintos), que es lo mismo que `2976` pretendía ser.
+
+**Lo que se sacó a propósito:** el `log_inconsistencias_medidas.xlsx` del script 3, que comparaba
+el criterio de desempate viejo contra el de mayor `idMeasure`. Era una investigación ya cerrada (el
+propio script titula esa sección "CRITERIO DEFINITIVO"). Lo que sí queda en el log es cuántos
+grupos venían duplicados. Los diagnósticos del paso 2 (`reporte_medidas_consolidadas.xlsx`) también
+se mudaron al log, por el punto 6 del pedido. Los lotes y la marca de reanudación viven en
+`<CARPETA_BASE>/Medidas/_trabajo/`, que la ventana no muestra.
+
+**Refactor menor:** `_leer_resumen_bess()` se generalizó en `_leer_hoja_con_encabezado(ruta, hoja,
+columnas_buscadas)` para poder leer la hoja nueva con el mismo criterio (buscar la fila de
+encabezados en vez de asumir la primera, porque las hojas reales traen un título arriba).
+`_leer_resumen_bess()` quedó como un caso particular.
+
+**Verificación:** test sintético de punta a punta con DataFrames con la forma de las dos respuestas
+de API (monkeypatch de `Descarga_PRMTE.descargar` y `Generacion_Real.descargar_mes`; el resto del
+proceso es puro pandas). Dos días, tres puntos de medida —uno incompleto a propósito—, tres
+centrales en la hoja `Medidas API` —dos apuntando a la misma clave con factores opuestos— y un
+grupo duplicado para probar el desempate. Resultados verificados a mano: el punto incompleto se
+descarta (187 vs 192 cuartos), `SAE-UNO` da −1 por cuarto (canal 1 con `Flujo` +1 menos canal 3 con
+`Flujo` −1), `SAE-ANDES-III` da 0 (inyección + retiro), `PFV-ANDES-IV` da 192 + 4 del desempate, la
+central que no está en la lista no aparece, las tres claves comparten los cuartos 1..192, y el
+archivo resultante lo relee `leer_medidas_sae()` con las columnas exactamente iguales a
+`COLUMNAS_AI`. Más el caso sin la hoja `Medidas API` (devuelve lista vacía y el proceso sigue), la
+regresión de las sesiones 22 y 23, y `py_compile` de todos los módulos.
+
+**Lo que NO se pudo probar:** las dos funciones que hablan con la API (no hay red ni credencial en
+el contenedor) y la ventana (no hay `tkinter`). Ver pendientes.
+
+**Pendientes que deja esta sesión:**
+
+- Correr el botón una vez contra la API real: confirmar la forma de la respuesta (que
+  `mediciones` traiga `intervalo`/`intervaloUtc`/`canalVal1`/`canalVal3`/`principal`, y que el
+  filtro de puntos incompletos siga descartando lo mismo que antes), y que el `intervalo` de las
+  dos APIs sea el INICIO del cuarto de hora en las dos — de eso depende el cruce contra el
+  calendario, y si no coincidiera el log lo va a decir fuerte ("ninguna fila cruza").
+- Confirmar con el usuario si `Factor` hace falta o si todas las centrales de la hoja van con 1.
+  El script original no aplicaba ningún signo; lo agregué porque, sin él, un retiro no tiene cómo
+  expresarse — pero con el archivo real puede resultar que la API ya entregue el signo.
+
+---
+
+## 2026-09-11 (28) — La homologación de Gen real se muda al archivo de homologación
+
+> **Nota de integración:** las entradas (27) y (28) se escribieron en paralelo a las (24)-(26)
+> (rama `claude/dazzling-gauss-jjxo0q`) y las dos ramas las habían numerado (24) y (25). Al
+> fusionar se renumeraron al orden real en que entran a `main`. Los trabajos son independientes
+> y no se pisan: allá, los encabezados de grupo de `Pagos_BESS.xlsx`; acá, `Medidas_SAE.xlsx`.
+
+
+El usuario entregó el `Homologacion ClavesTF y PRMTE.xlsx` real y cambió de opinión sobre dónde va
+la lista de centrales de operación real: **no** en `Centrales.xlsx` (como se había hecho en la
+sesión 24) sino en el **mismo archivo de homologación**, en una hoja `Gen real`, "con la misma info
+que ahí: clave, Punto de Medida, Canal, Flujo". Tiene sentido: es homologación igual que `homol`, y
+así se mantiene con el mismo archivo en vez de repartida en dos.
+
+**El archivo real** (útil para futuras sesiones): una sola hoja `homol`, 74 filas, columnas
+`clave | Punto de Medida | Canal | Flujo`. `Punto de Medida` es el `idPuntoMedida`
+(`DNHUMBER_033_FB1_EGP`), `Canal` es el `slugCanal` (`kWhD` / `kWhR`) y `Flujo` es ±1. 7 claves,
+37 puntos de medida. Los lectores se probaron contra él antes de tocar nada.
+
+**Lo que se movió:** `nucleo.leer_medidas_api()` y la constante `HOJA_MEDIDAS_API` desaparecen;
+ahora es `Homologacion.leer_gen_real()` + `HOJA_GEN_REAL`. `generar_medidas_sae()` ya **no necesita
+`Centrales.xlsx` para nada** (era su única dependencia con ese archivo). En el diagrama, el archivo
+de homologación se desglosa por hojas igual que `Centrales.xlsx`: `homol` (obligatoria) y
+`Gen real` (opcional, se ve PENDIENTE si no está).
+
+**La decisión que tuve que tomar solo, porque el usuario está fuera:** de las cuatro columnas, tres
+se leen solas (`clave` es la clave del balance; `Flujo` es el ±1 que en la sesión 24 se llamaba
+`Factor`; `Punto de Medida` tiene que ser el `topologyName` de la API de operación real, que es lo
+único que identifica a una central en esa API). La que no tiene lectura obvia es **`Canal`**: la
+API de operación real no expone canales. Se acepta la columna (para que la hoja tenga la misma
+forma que `homol`, que es lo que se pidió) pero **no se usa** para nada. Queda anotado como
+pendiente por si tenía que significar algo.
+
+**Verificación:** el test sintético de punta a punta de la sesión 24, con el `Gen real` ahora en el
+archivo de homologación y con las columnas en el orden real (`clave` primero): mismos resultados
+exactos que antes (`SAE-UNO` −192, `SAE-ANDES-III` 0 por inyección+retiro, `PFV-ANDES-IV` 196 con
+el desempate), o sea que mover la hoja no cambió ningún comportamiento. Más: `leer_homologacion()`
+y `leer_gen_real()` contra el archivo real subido (74 filas / hoja ausente → lista vacía), el árbol
+renderizado con ese archivo en `Auxiliares/`, y la regresión de CMg. `py_compile` de todo.
+
+**Pendiente nuevo:** confirmar si la columna `Canal` de la hoja `Gen real` tiene que significar
+algo. Hoy se ignora.
+
+---
+
+## 2026-09-11 (29) — Fusión a `main` de la rama de Medidas
+
+Se fusionó `claude/dazzling-gauss-jjxo0q` (entradas 27 y 28) a `main`, que mientras tanto había
+recibido el PR #11 (entradas 24-26).
+
+**Conflicto real: otra vez solo `BITACORA.md`**, y por la misma razón de siempre — las dos ramas
+agregan su entrada al final y las dos numeran desde donde estaba `main` cuando salieron. Las de
+esta rama se renumeraron a (27) y (28) con su nota de integración. Ninguna entrada vieja se tocó.
+Todo el código (`Script/nucleo.py` incluido, donde una rama tocó `escribir_pagos_bess` y la otra
+agregó `generar_medidas_sae`) lo fusionó git solo.
+
+**Verificado que sobrevivieron las dos mitades:** los encabezados de grupo de `Pagos_BESS.xlsx`
+(rama 24), el paquete `Script/Medidas/` (ramas 27-28), y el copiado de celdas combinadas al
+preservar una hoja (entrada 26). Los cuatro tests sintéticos pasan, incluido el de la interacción
+entre ramas (actualizar una hoja de `Pagos_BESS.xlsx` conserva los 8 rangos combinados de la otra).
+
+**`docs/Estructura_Archivos_Reales.md` actualizado** — es el documento que existe para estar al día,
+así que se le agregó lo que cambió con las entradas 27-28: `Medidas_SAE.xlsx` ahora dice cómo se
+genera, y se agregó la sección 3.b del archivo de homologación, con las dos hojas (`homol`
+confirmada contra el archivo real: 74 filas, 7 claves, 37 puntos de medida, canales `kWhD`/`kWhR`;
+`Gen real` todavía sin archivo real, estructura definida en la conversación) y la advertencia de
+que una central no puede estar en las dos hojas: el paso de operación real **agrega**, no
+reemplaza, así que se contaría dos veces.

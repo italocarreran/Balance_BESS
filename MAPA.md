@@ -16,6 +16,13 @@ Script/
     Cmg/
         __init__.py
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
+    Medidas/
+        __init__.py
+        comun.py               <- ErrorMedidas + helpers de texto
+        Homologacion.py        <- el Excel de Auxiliares/ (punto+canal -> clave)
+        Descarga_PRMTE.py      <- API de medidas, por punto de medida
+        Claves_Balance.py      <- calendario de cuartos + agrupacion por clave
+        Generacion_Real.py     <- API de operacion real (hoja "Gen real")
 ```
 
 `Script/` es un paquete: la ventana hace `from Script import nucleo` y
@@ -50,6 +57,7 @@ importable como cualquier módulo.
 
   | Fila | Botón | Qué hace |
   |---|---|---|
+  | `Medidas/Medidas_SAE.xlsx` | **Actualizar** | `nucleo.generar_medidas_sae` — corre los cuatro pasos de Medidas de un viaje |
   | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
   | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
   | `Consolidado_entradas.xlsx` | **Actualizar todo** | `generar_consolidado` con todas las secciones |
@@ -69,7 +77,8 @@ importable como cualquier módulo.
   deshabilitados (`corriendo`/`habilitar_botones`). Como el árbol se
   repinta entero en cada `revisar()`, las referencias a los botones se
   renuevan ahí (`botones_arbol`).
-- **Consume:** `Script.nucleo` (`revisar_estructura`, `traer_csv_cmg`,
+- **Consume:** `Script.nucleo` (`revisar_estructura`, `generar_medidas_sae`,
+  `traer_csv_cmg`,
   `generar_cmg`, `generar_consolidado`, `generar_pagos_bess`,
   `SECCIONES_CONSOLIDADO`, `SECCIONES_PAGOS`, `validar_aamm`,
   `ErrorEntrada`, `extrae_cmg`); `config.json` (última carpeta base y
@@ -87,6 +96,66 @@ importable como cualquier módulo.
   la ventana usa para decidir qué botón le cuelga (`_boton_de_fila`): así
   `nucleo.py` no sabe nada de botones.
 - **Depende de:** el paquete `Script/` (mismo directorio).
+
+---
+
+## `Script/Medidas/` — cómo se arma `Medidas_SAE.xlsx`
+
+- **Qué hace:** los cuatro pasos que antes eran cuatro scripts sueltos que se
+  corrían a mano uno detrás de otro (autor original: Freddy.Arriagada).
+  Ahora corren de un viaje desde el botón **Actualizar** de la fila
+  `Medidas_SAE.xlsx` (`nucleo.generar_medidas_sae`).
+
+  | Módulo | Script original | Qué hace |
+  |---|---|---|
+  | `Homologacion.py` | `0_diccionario_prmte_a_claves_balance.py` | lee las dos hojas del Excel de homologación: `homol` (`Punto de Medida` + `Canal` → `clave` + `Flujo`) y `Gen real` |
+  | `Descarga_PRMTE.py` | `1_generacion_prmte.py` | baja las medidas de cada punto, por lotes, reanudable |
+  | `Claves_Balance.py` | `2_generacion_claves_Balance.py` | calendario de cuartos de hora + agrupación por clave |
+  | `Generacion_Real.py` | `3_Generacion_Real.py` | agrega las centrales de la hoja `Gen real` desde la API de operación real |
+
+- **Qué cambió respecto de los scripts sueltos** (todo a pedido del usuario,
+  salvo donde se diga):
+  - el Excel de homologación vive en `Auxiliares/`, al lado de
+    `Centrales.xlsx`, y se busca por patrón (`*homologacion*`) en vez de
+    estar al lado del `.py`. El `homol.parquet` intermedio desapareció: se
+    lee una vez y queda en memoria;
+  - la lista `FILTROS_TOPOLOGY` que vivía dentro del paso 3 salió del código
+    y ahora es la hoja **`Gen real`** del mismo Excel de homologación (primero
+    se hizo como hoja de `Centrales.xlsx`; el usuario la movió acá: es
+    homologación, igual que `homol`, y se mantiene con el mismo archivo).
+    **Ya no es un reemplazo**: esas centrales se sacaron de `homol`, así que
+    no llegan por el otro camino — el paso 3 las **agrega**, con la `clave`
+    que diga esa hoja. Mismas cuatro columnas que `homol`, con el
+    `topologyName` de la API en la columna `Punto de Medida` (esa API no
+    tiene puntos de medida) y `Canal` sin uso;
+  - el `user_key` de las dos APIs sale de una sola constante
+    (`comun.USER_KEY`). Sigue en el código, a pedido explícito del usuario,
+    pero deja de estar repetido en dos archivos y con valores distintos;
+  - los lotes descargados y la marca de reanudación van a
+    `<CARPETA_BASE>/Medidas/_trabajo/`, que la ventana no muestra;
+  - **(no pedido, es un bug)** los lotes y la marca de reanudación llevan el
+    período en el nombre. Antes, correr dos meses en la misma carpeta
+    mezclaba los lotes (`medidas_batch_*.parquet` los levantaba todos) y
+    daba por procesados puntos de otro mes;
+  - **(no pedido, es un bug)** el umbral de "punto de medida completo" ya no
+    es la constante `2976` (= 31 × 96) sino la cantidad de cuartos de hora
+    que el mes descargado realmente trae. `2976` estaba mal para cualquier
+    mes de 30 días o menos, y para los meses con cambio de hora;
+  - se dejó de generar `log_inconsistencias_medidas.xlsx`, que comparaba el
+    criterio de desempate viejo contra el de mayor `idMeasure`: esa
+    comparación era una investigación ya cerrada (el propio script la titula
+    "CRITERIO DEFINITIVO"). Lo que sí se informa en el log es cuántos grupos
+    venían duplicados.
+- **Detalle que importa:** el `Cuarto de Hora` es un índice global del mes
+  que después cruza contra `CMg`, así que las **dos** fuentes comparten un
+  solo calendario, el que arma `Claves_Balance` (numerado por `intervaloUtc`,
+  porque la hora local se repite en el cambio de hora y desordenaría la
+  numeración). Las filas de la API de operación real se le pegan por hora
+  local — esa API no entrega UTC —, así que en un día de cambio de hora hacia
+  atrás hay ambigüedad: se toma la primera ocurrencia y se avisa en el log.
+- **Depende de:** `pandas`, `requests` y `pyarrow` (los lotes son parquet).
+  **No importa `nucleo`** (misma regla que `Cmg/`): recibe rutas y datos y
+  levanta `ErrorMedidas`, que `nucleo` traduce a `ErrorEntrada`.
 
 ---
 
@@ -252,6 +321,10 @@ importable como cualquier módulo.
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
     contenga "SOC" y el AAMM ingresado por el usuario (no hay un nombre de
     archivo fijo; debe existir exactamente uno)
+  - `<CARPETA_BASE>/Auxiliares/<algo>Homologacion<algo>.xlsx` (hoja `homol`:
+    `Punto de Medida` + `Canal` → `clave` + `Flujo`; hoja `Gen real`,
+    opcional: las centrales que se miden por la API de operación real), solo
+    para generar `Medidas_SAE.xlsx`
   - `<CARPETA_BASE>/Auxiliares/Centrales.xlsx` (hojas `Resumen BESS` y
     `Diccionario`; `Diccionario` columnas E/F/G — índices 4/5/6 — se usan
     específicamente para homologar Ofertas SSCC; `Resumen BESS` columnas
@@ -367,6 +440,17 @@ importable como cualquier módulo.
     secciones (si no se pide `"medidores"`, no exige
     Medidas_SAE/SoC/Centrales/Ofertas). Si el archivo no existe, se crea.
     Reemplaza a la vieja `ejecutar()`.
+  - `generar_medidas_sae(carpeta_base, aamm, registrar=print, progreso=None)`
+    — genera/actualiza `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` corriendo
+    los cuatro pasos seguidos (botón **Actualizar** de esa fila). El paso de
+    la API de operación real es opcional: sin la hoja `Gen real` se escribe
+    solo lo que viene de `homol`. Esa hoja la lee
+    `Homologacion.leer_gen_real()`; `_resumir_diagnostico_medidas()` es lo
+    que antes iba a `reporte_medidas_consolidadas.xlsx` y ahora va al log.
+  - `_leer_hoja_con_encabezado(ruta, hoja, columnas_buscadas)` — lector
+    genérico de hojas cuyo encabezado no está en la primera fila (las hojas
+    reales traen un título arriba). `_leer_resumen_bess()` es ahora un caso
+    particular de este.
   - `traer_csv_cmg(carpeta_base, aamm, registrar=print, progreso=None)` —
     copia el CSV 15-minutal del período de la unidad de red a
     `<CARPETA_BASE>/Cmg/` (botón **Traer cmg_15min**). Se copia en vez de

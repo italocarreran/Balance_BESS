@@ -31,6 +31,8 @@ python Balance_BESS.py
    diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
 4. **Cada acción es un botón en la fila que le corresponde** — no hay
    ventanas intermedias ni un botón "Ejecutar" único:
+   - `Medidas/Medidas_SAE.xlsx` → **Actualizar** (baja el mes completo de las
+     dos APIs del Coordinador y arma el archivo).
    - `Cmg/cmg<AAMM>_def_15minutal.csv` → **Traer cmg_15min** (lo baja de la
      unidad de red).
    - `Cmg/cmg.xlsx` → **Generar** (lo arma con ese CSV).
@@ -48,6 +50,11 @@ Script/
     nucleo.py              <- todo el cálculo del caso
     Cmg/
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
+    Medidas/
+        Homologacion.py        <- punto de medida + canal -> clave
+        Descarga_PRMTE.py      <- API de medidas, por punto de medida
+        Claves_Balance.py      <- calendario de cuartos + agrupación por clave
+        Generacion_Real.py     <- API de operación real (hoja "Gen real")
 ```
 
 La idea es ir sacando de `nucleo.py` un módulo por etapa, como ya se hizo
@@ -58,11 +65,14 @@ con `Cmg/`; por ahora el resto sigue en un solo archivo.
 ```text
 <CARPETA_BASE>/
 ├── Medidas/
-│   ├── Medidas_SAE.xlsx
+│   ├── Medidas_SAE.xlsx     (botón "Actualizar")
+│   ├── _trabajo/            (lotes descargados; no se muestra en la ventana)
 │   └── <algún archivo .xlsx cuyo nombre contenga "SOC" y el AAMM,
 │        ej. SOC_2607.xlsx, "resumen soc julio 2607.xlsx">
 ├── Auxiliares/
-│   └── Centrales.xlsx       (hojas "Resumen BESS" y "Diccionario")
+│   ├── Centrales.xlsx       (hojas "Resumen BESS" y "Diccionario")
+│   └── <algún archivo Excel cuyo nombre contenga "Homologacion">
+│                            (hojas "homol" y "Gen real")
 ├── Ofertas/
 │   └── <algún archivo Excel cuyo nombre contenga "OfertasSSCC">
 ├── Cmg/
@@ -90,6 +100,49 @@ Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
   dos) ese texto. Si hay más de uno, a diferencia del SoC, se toma
   automáticamente el más reciente por fecha de modificación — así lo hacen
   las macros originales de la planilla.
+- **Medidas_SAE.xlsx**: tampoco se arma a mano. El botón **Actualizar** de esa
+  fila corre los cuatro pasos de un viaje:
+
+  1. lee el Excel de homologación de `Auxiliares/` (hoja `homol`:
+     `Punto de Medida` + `Canal` → `clave` + `Flujo`);
+  2. baja las medidas de cada punto de medida del mes
+     (`medidas.api.coordinador.cl`), por lotes y **reanudable**: si se corta,
+     la corrida siguiente retoma donde quedó;
+  3. arma el calendario de cuartos de hora del mes y agrupa por `clave`;
+  4. **agrega** las centrales listadas en la hoja `Gen real` del **mismo**
+     Excel de homologación, cuya medida viene de la API de operación real
+     (`operacion.api.coordinador.cl`) y no de la API por punto de medida.
+
+  Es el proceso más lento del programa (miles de llamadas a la API). Los
+  archivos intermedios van a `Medidas/_trabajo/` y no aparecen en la ventana.
+
+  La hoja **`Gen real`** tiene las **mismas cuatro columnas que `homol`**,
+  con una lectura propia de cada una:
+
+  | clave | Punto de Medida | Canal | Flujo |
+  |---|---|---|---|
+  | `SAE-ANDES-III` | `SAE PFV Andes Solar III (Inyección)` | | `1` |
+  | `SAE-ANDES-III` | `SAE PFV Andes Solar III (Retiro de central)` | | `-1` |
+
+  - `clave`: con qué nombre tiene que aparecer en `Medidas_SAE.xlsx`, igual
+    que en `homol`. Dos filas pueden apuntar a la misma clave: se suman.
+  - `Punto de Medida`: acá va el **`topologyName` exacto** de la API de
+    operación real — es lo que identifica a la central en esa API, que no
+    tiene el concepto de punto de medida.
+  - `Canal`: **no se usa** (esa API no expone canales). Se acepta para que
+    la hoja tenga la misma forma que `homol`.
+  - `Flujo`: `1` / `-1`, igual que en `homol`. Si se deja vacío vale `1`.
+
+  La hoja entera es opcional: si no existe, no se agrega ninguna central por
+  ese camino y el resto del proceso corre igual.
+
+  **`user_key`**: las dos APIs piden la misma clave. Vive en el código, en
+  `Script/Medidas/comun.py` (constante `USER_KEY`) — un solo lugar para las
+  dos, en vez de repetida en cada script como estaba antes. Si el
+  Coordinador la cambia, se cambia ahí y nada más. Tené presente que, al
+  estar en el código, queda versionada: cualquiera con acceso al
+  repositorio la tiene.
+
 - **cmg.xlsx**: única excepción con nombre literal fijo, dentro de `Cmg/`.
   Tampoco hay que armarlo a mano, y son dos pasos, cada uno con su botón en
   esa misma carpeta del diagrama:

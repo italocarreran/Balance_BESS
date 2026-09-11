@@ -44,6 +44,13 @@ Ninguno se selecciona a mano — el programa los encuentra por carpeta + patrón
 - **Trampa**: si falta alguna de esas 9 columnas, `leer_medidas_sae()` corta con `ErrorEntrada`
   listando cuáles faltan — no intenta adivinar nombres parecidos.
 - **Función que lo lee**: `leer_medidas_sae(ruta)`.
+- **Cómo se genera**: ya no se deja a mano. El botón **Actualizar** de esa fila
+  (`nucleo.generar_medidas_sae`, paquete `Script/Medidas/`) lo arma bajando el mes completo de las
+  dos APIs del Coordinador: las medidas por punto de medida (`medidas.api.coordinador.cl`) según la
+  hoja `homol` del Excel de homologación, más las centrales de la hoja `Gen real` de ese mismo
+  archivo desde la API de operación real (`operacion.api.coordinador.cl`). Los intermedios van a
+  `Medidas/_trabajo/`, que la ventana no muestra. La clave de las dos APIs está en
+  `Script/Medidas/comun.py` (`USER_KEY`).
 - **Archivo real de referencia**: no tenemos una copia guardada en `docs/` todavía. ⚠️ estructura
   confirmada por funcionamiento del código, no por inspección directa de un archivo real reciente.
 
@@ -175,6 +182,46 @@ Maestro externo, nombre literal. Dos hojas.
 - **Trampa adicional**: cada fila puede tener 2 o 3 columnas de sinónimo (no siempre todo el
   bloque), y una celda vacía dentro del bloque significa "no hay sinónimo ahí" — el primer valor
   no vacío de la fila es el nombre "canónico" al que homologan los demás.
+
+---
+
+### 3.b `Auxiliares/*Homologacion*.xlsx` (cualquier Excel cuyo nombre contenga "Homologacion")
+
+Es el archivo del que sale `Medidas_SAE.xlsx`. El real se llama
+`Homologacion ClavesTF y PRMTE.xlsx`, pero se busca por patrón (sin tildes) para no depender del
+nombre exacto; si hay varios, el más reciente.
+
+**Hoja `homol`** (obligatoria) — ✅ confirmada contra el archivo real (74 filas, 7 claves,
+37 puntos de medida):
+
+| Columna | Contenido | Ejemplo real |
+|---|---|---|
+| `clave` | la clave del balance (la misma de `Medidas_SAE!clave`) | `SAE-CRCA-PFV-DON-HUMBERTO` |
+| `Punto de Medida` | el `idPuntoMedida` de la API de medidas | `DNHUMBER_033_FB1_EGP` |
+| `Canal` | el `slugCanal` de esa API | `kWhD` / `kWhR` |
+| `Flujo` | signo: `1` inyección, `-1` retiro | `1` / `-1` |
+
+El cruce contra la descarga es por `idPuntoMedida` + `slugCanal`, y el `Flujo` multiplica el valor
+absoluto medido.
+
+**Hoja `Gen real`** (opcional) — las centrales cuya medida NO sale de la API por punto de medida
+sino de la API de operación real. Mismas cuatro columnas que `homol`, con una lectura propia:
+
+| Columna | Contenido en esta hoja |
+|---|---|
+| `clave` | igual que en `homol` |
+| `Punto de Medida` | acá va el **`topologyName` exacto** de la API de operación real (esa API no tiene puntos de medida) |
+| `Canal` | ⚠️ **no se usa**: esa API no expone canales. Se acepta solo para que la hoja tenga la misma forma que `homol` |
+| `Flujo` | `1` / `-1`, igual que en `homol`; vacío vale `1` |
+
+Estas centrales tienen que estar **fuera** de `homol`: el paso de operación real las **agrega**, no
+las reemplaza. Si están en las dos hojas, se contarían dos veces.
+
+- **Funciones que lo leen**: `Homologacion.leer_homologacion(ruta)` y
+  `Homologacion.leer_gen_real(ruta)` (`Script/Medidas/`).
+- **Archivo real de referencia**: no está guardado en `docs/`, pero la hoja `homol` fue leída e
+  inspeccionada (ver arriba). ⚠️ de `Gen real` no hay archivo real todavía: la estructura la
+  definió el usuario en la conversación.
 
 ---
 

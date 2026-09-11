@@ -12,12 +12,15 @@ unico-:
 
     <CARPETA_BASE>/
         Medidas/
-            Medidas_SAE.xlsx
+            Medidas_SAE.xlsx               [Actualizar]
             <algo>SOC<algo>AAMM<algo>.xlsx
         Auxiliares/
             Centrales.xlsx
                 hoja 'Resumen BESS'
                 hoja 'Diccionario'
+            <algo>Homologacion<algo>.xlsx
+                hoja 'homol'
+                hoja 'Gen real'
         Ofertas/
             <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Cmg/
@@ -42,8 +45,14 @@ hoja se actualiza sola, y lo que no se toca se conserva tal cual
 estaba en el archivo. Si el archivo todavia no existe, se crea al
 actualizar la primera hoja.
 
-El calculo vive en Script/ (ver Script/__init__.py). La ubicacion de
-este .py no influye en nada salvo en donde se guarda config.json.
+Medidas/_trabajo/ (los lotes que baja la API, la marca de
+reanudacion) NO aparece en el diagrama a pedido del usuario: no es una
+entrada ni una salida del caso, son andamios del proceso.
+
+El calculo vive en Script/ (ver Script/__init__.py), incluida la clave
+de las dos APIs del Coordinador que usa Medidas (Script/Medidas/
+comun.py, USER_KEY). La ubicacion de este .py no influye en nada salvo
+en donde se guarda config.json.
 """
 
 import json
@@ -428,6 +437,9 @@ def main():
         cuelga, para que nucleo.py no sepa nada de botones.
         """
 
+        if id_fila == "medidas_sae":
+            return ("Actualizar", actualizar_medidas_sae)
+
         if id_fila == "cmg_csv":
             return ("Traer cmg_15min", traer_cmg_15min)
 
@@ -735,6 +747,43 @@ def main():
             nucleo.generar_cmg,
             dict(carpeta_base=ruta, aamm=aamm),
             nucleo.ARCHIVO_CMG,
+        )
+
+    def actualizar_medidas_sae():
+        """
+        Corre los cuatro pasos de Medidas_SAE.xlsx de un viaje
+        (homologacion -> descarga -> claves -> API de operacion real).
+        Es lo mas lento del programa: baja el mes completo de las dos
+        APIs del Coordinador. Si se corta, la corrida siguiente retoma
+        donde quedo.
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
+            return
+
+        if not messagebox.askyesno(
+            f"Generar {nucleo.ARCHIVO_MEDIDAS_SAE}",
+            f"Se van a bajar las medidas del periodo {aamm} de las dos "
+            f"APIs del Coordinador, punto de medida por punto de "
+            f"medida.\n\nEs el proceso mas lento del programa (puede "
+            f"tardar bastante). Si se corta, la proxima vez retoma "
+            f"donde quedo.\n\n¿Seguir?",
+        ):
+            return
+
+        lanzar(
+            nucleo.generar_medidas_sae,
+            dict(carpeta_base=ruta, aamm=aamm),
+            nucleo.ARCHIVO_MEDIDAS_SAE,
         )
 
     def actualizar_consolidado(secciones):
