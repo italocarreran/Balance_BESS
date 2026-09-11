@@ -33,10 +33,16 @@ código (no versionado, es de la herramienta, no del caso).
   `Balance_BESS.py` importa `Script.nucleo` y nunca al revés.
   - `Script/nucleo.py` — el cálculo del caso.
   - `Script/Cmg/Extrae_CMG_barras.py` — arma `cmg.xlsx` desde el CSV
-    15-minutal. Primer módulo separado de `nucleo.py`; la idea es ir
-    sacando uno por etapa a medida que se agreguen entradas. Un módulo de
-    etapa **no importa `nucleo`** (evita ciclos): recibe rutas y datos, y
-    levanta su propia excepción, que `nucleo` traduce a `ErrorEntrada`.
+    15-minutal.
+  - `Script/Medidas/` — arma `Medidas_SAE.xlsx` desde las dos APIs del
+    Coordinador (un módulo por cada uno de los cuatro scripts sueltos que
+    había antes).
+
+  Un módulo de etapa **no importa `nucleo`** (evita ciclos): recibe rutas y
+  datos, y levanta su propia excepción (`ErrorCmg`, `ErrorMedidas`), que
+  `nucleo` traduce a `ErrorEntrada`. Si necesita un helper de texto del
+  núcleo (`normalizar`), se duplica: diez líneas valen menos que un ciclo
+  de imports.
 
 Cada caso a procesar vive en su propia carpeta ("carpeta base"), fuera del
 repositorio, con la estructura fija documentada en
@@ -70,9 +76,10 @@ con grep o por su encabezado (p. ej. "9.4" para la columna `Ventana`).
 - `Balance_BESS.py` — módulo/entrada principal, se abre siempre primero.
   Vive en la raíz del repositorio.
 - `Script/nucleo.py` — módulo de cálculo compartido.
-- `Script/Cmg/Extrae_CMG_barras.py` — módulo de la etapa CMg. Los nombres
-  de archivo de los módulos usan guiones bajos, no espacios, para que sean
-  importables.
+- `Script/Cmg/Extrae_CMG_barras.py` — módulo de la etapa CMg.
+- `Script/Medidas/*.py` — módulos de la etapa Medidas.
+  Los nombres de archivo de los módulos usan guiones bajos, no espacios,
+  para que sean importables.
 - `config.json` — configuración/estado por PC/usuario (última carpeta base
   elegida). No se versiona (ver `.gitignore`). Vive junto a `Balance_BESS.py`
   únicamente porque así lo resuelve `Path(__file__).parent` en el propio
@@ -133,9 +140,12 @@ alguno autentica con el nombre de otra persona).
 No hay todavía scripts de apoyo (`scripts/sincronizar.sh`,
 `scripts/verificar.sh`). Mientras no existan, la verificación antes de
 cerrar una sesión es manual: correr `python -m py_compile Balance_BESS.py
-Script/nucleo.py Script/Cmg/Extrae_CMG_barras.py` y, si hay un caso de
+Script/nucleo.py Script/Cmg/*.py Script/Medidas/*.py` y, si hay un caso de
 prueba disponible, `nucleo.generar_consolidado(...)`/
-`nucleo.generar_pagos_bess(...)` contra él.
+`nucleo.generar_pagos_bess(...)` contra él. Lo que depende de una API
+(`generar_medidas_sae`) se prueba monkeypatcheando las dos funciones de
+descarga con DataFrames sintéticos con la forma de la respuesta real: el
+resto del proceso es puro pandas y sí se puede verificar.
 
 ---
 
@@ -167,6 +177,11 @@ prueba disponible, `nucleo.generar_consolidado(...)`/
   función de `nucleo` en un hilo aparte reportando al log/barra de la
   ventana (helper `lanzar()`), y mientras algo corre quedan todos
   deshabilitados.
+- **Credenciales:** ninguna clave de API va en el código ni en el
+  repositorio. La `user_key` del Coordinador se ingresa en la ventana y se
+  guarda en `config.json`, que está en `.gitignore`. Los scripts sueltos que
+  se fueron incorporando las traían escritas adentro: al migrarlos, esa es
+  la primera línea que hay que sacar.
 - **Persistencia de configuración:** `config.json` junto al `.py`, con una
   clave por PC/usuario (`get_usuario()` = `hostname_usuario`), para que
   varias personas puedan compartir la misma copia del script sin pisarse la
@@ -295,7 +310,7 @@ prueba disponible, `nucleo.generar_consolidado(...)`/
 
 No aplica todavía: no existe un generador de interfaces en este repositorio.
 Con los módulos de hoy (`Balance_BESS.py`, `Script/nucleo.py`,
-`Script/Cmg/Extrae_CMG_barras.py`) alcanza con `MAPA.md`. Si se agregan
+`Script/Cmg/`, `Script/Medidas/`) alcanza con `MAPA.md`. Si se agregan
 muchos más y esto deja de ser suficiente, documentar acá la decisión de
 introducir un generador (o no) antes de empezar a usarlo.
 

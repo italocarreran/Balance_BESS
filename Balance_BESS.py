@@ -12,12 +12,14 @@ unico-:
 
     <CARPETA_BASE>/
         Medidas/
-            Medidas_SAE.xlsx
+            Medidas_SAE.xlsx               [Actualizar]
             <algo>SOC<algo>AAMM<algo>.xlsx
         Auxiliares/
             Centrales.xlsx
                 hoja 'Resumen BESS'
                 hoja 'Diccionario'
+                hoja 'Medidas API'
+            <algo>Homologacion<algo>.xlsx
         Ofertas/
             <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Cmg/
@@ -42,8 +44,14 @@ hoja se actualiza sola, y lo que no se toca se conserva tal cual
 estaba en el archivo. Si el archivo todavia no existe, se crea al
 actualizar la primera hoja.
 
+Medidas/_trabajo/ (los lotes que baja la API, la marca de
+reanudacion) NO aparece en el diagrama a pedido del usuario: no es una
+entrada ni una salida del caso, son andamios del proceso.
+
 El calculo vive en Script/ (ver Script/__init__.py). La ubicacion de
-este .py no influye en nada salvo en donde se guarda config.json.
+este .py no influye en nada salvo en donde se guarda config.json, que
+ademas de la carpeta y el periodo guarda la clave de la API del
+Coordinador (user_key) -- por PC/usuario, fuera del repositorio.
 """
 
 import json
@@ -221,6 +229,7 @@ def main():
 
     var_base = tk.StringVar(value=cfg.get("carpeta_base", ""))
     var_aamm = tk.StringVar(value=cfg.get("aamm", ""))
+    var_user_key = tk.StringVar(value=cfg.get("user_key", ""))
     var_estado = tk.StringVar(value="Listo")
     var_tiempo = tk.StringVar(value="00:00:00")
 
@@ -330,6 +339,58 @@ def main():
     ).pack(side="left", padx=(10, 0))
 
     # --------------------------------------------------------
+    # CLAVE DE LA API DEL COORDINADOR (user_key)
+    #
+    # Es una credencial: no puede vivir en el codigo ni subirse al
+    # repositorio. Se guarda en config.json, que es por PC/usuario y
+    # esta en .gitignore -- mismo lugar donde ya se recuerdan la
+    # carpeta base y el periodo. Solo hace falta para el boton
+    # "Actualizar" de Medidas_SAE.xlsx (las dos APIs del Coordinador);
+    # el resto del programa funciona sin ella.
+    # --------------------------------------------------------
+
+    frame_clave = tk.LabelFrame(
+        contenedor, text="Clave de la API del Coordinador (user_key)",
+        padx=10, pady=8,
+    )
+    frame_clave.pack(fill="x", padx=20, pady=6)
+
+    entry_clave = tk.Entry(
+        frame_clave, textvariable=var_user_key, width=42, show="•",
+        font=("Segoe UI", 10),
+    )
+    entry_clave.pack(side="left")
+
+    var_ver_clave = tk.BooleanVar(value=False)
+
+    def alternar_clave():
+        entry_clave.config(show="" if var_ver_clave.get() else "•")
+
+    tk.Checkbutton(
+        frame_clave, text="Ver", variable=var_ver_clave,
+        command=alternar_clave, font=("Segoe UI", 8),
+    ).pack(side="left", padx=(6, 0))
+
+    tk.Label(
+        frame_clave,
+        text=(
+            "Solo hace falta para generar Medidas_SAE.xlsx. Se guarda "
+            "en config.json (por PC/usuario, no se sube al "
+            "repositorio)."
+        ),
+        fg=COLOR_NEUTRO,
+        font=("Segoe UI", 8),
+        wraplength=640,
+        justify="left",
+    ).pack(side="left", padx=(10, 0))
+
+    def clave_cambiada(*_):
+        guardar_config({"user_key": var_user_key.get().strip()})
+
+    entry_clave.bind("<FocusOut>", clave_cambiada)
+    entry_clave.bind("<Return>", clave_cambiada)
+
+    # --------------------------------------------------------
     # DIAGRAMA DE LA ESTRUCTURA DEL CASO
     # --------------------------------------------------------
 
@@ -427,6 +488,9 @@ def main():
         nucleo.revisar_estructura(); la ventana decide que accion le
         cuelga, para que nucleo.py no sepa nada de botones.
         """
+
+        if id_fila == "medidas_sae":
+            return ("Actualizar", actualizar_medidas_sae)
 
         if id_fila == "cmg_csv":
             return ("Traer cmg_15min", traer_cmg_15min)
@@ -735,6 +799,56 @@ def main():
             nucleo.generar_cmg,
             dict(carpeta_base=ruta, aamm=aamm),
             nucleo.ARCHIVO_CMG,
+        )
+
+    def actualizar_medidas_sae():
+        """
+        Corre los cuatro pasos de Medidas_SAE.xlsx de un viaje
+        (homologacion -> descarga -> claves -> API de operacion real).
+        Es lo mas lento del programa: baja el mes completo de las dos
+        APIs del Coordinador. Si se corta, la corrida siguiente retoma
+        donde quedo.
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
+            return
+
+        clave = var_user_key.get().strip()
+
+        if not clave:
+            messagebox.showwarning(
+                "Falta la clave de la API",
+                "Cargá arriba la clave de la API del Coordinador "
+                "(user_key): sin ella no se pueden bajar las medidas.",
+            )
+            entry_clave.focus_set()
+            return
+
+        guardar_config({"user_key": clave})
+
+        if not messagebox.askyesno(
+            f"Generar {nucleo.ARCHIVO_MEDIDAS_SAE}",
+            f"Se van a bajar las medidas del periodo {aamm} de las dos "
+            f"APIs del Coordinador, punto de medida por punto de "
+            f"medida.\n\nEs el proceso mas lento del programa (puede "
+            f"tardar bastante). Si se corta, la proxima vez retoma "
+            f"donde quedo.\n\n¿Seguir?",
+        ):
+            return
+
+        lanzar(
+            nucleo.generar_medidas_sae,
+            dict(carpeta_base=ruta, aamm=aamm, user_key=clave),
+            nucleo.ARCHIVO_MEDIDAS_SAE,
         )
 
     def actualizar_consolidado(secciones):

@@ -21,8 +21,14 @@ import pandas as pd
 # suelto con Script/ en el sys.path (tests).
 try:
     from .Cmg import Extrae_CMG_barras as extrae_cmg
+    from .Medidas import Homologacion, Descarga_PRMTE, Claves_Balance
+    from .Medidas import Generacion_Real
+    from .Medidas.comun import ErrorMedidas
 except ImportError:  # pragma: no cover - depende de como se importe
     from Cmg import Extrae_CMG_barras as extrae_cmg
+    from Medidas import Homologacion, Descarga_PRMTE, Claves_Balance
+    from Medidas import Generacion_Real
+    from Medidas.comun import ErrorMedidas
 
 
 # ============================================================
@@ -50,9 +56,23 @@ CARPETA_SUBASTAS = "Subastas"
 ARCHIVO_MEDIDAS_SAE = "Medidas_SAE.xlsx"
 HOJA_MEDIDAS_SAE = "Medidas"
 
+# Medidas_SAE.xlsx tampoco se arma a mano (igual que cmg.xlsx): lo
+# genera el programa desde las dos APIs del Coordinador, y los pasos
+# intermedios (lotes descargados, marca de reanudacion) van a esta
+# carpeta, que la ventana NO muestra a pedido del usuario -- no son
+# entradas ni salidas del caso, son andamios.
+CARPETA_TRABAJO_MEDIDAS = "_trabajo"
+
 ARCHIVO_CENTRALES = "Centrales.xlsx"
 HOJA_RESUMEN_BESS = "Resumen BESS"
 HOJA_DICCIONARIO = "Diccionario"
+
+# Hoja nueva: las centrales cuya medida NO sale del archivo de
+# homologacion por punto de medida sino de la API de operacion real,
+# con el nombre de topologia exacto que usa esa API y la clave con la
+# que tienen que aparecer en Medidas_SAE.xlsx. Reemplaza a la lista
+# FILTROS_TOPOLOGY que vivia dentro del script "3_Generacion_Real.py".
+HOJA_MEDIDAS_API = "Medidas API"
 
 # Nombre literal y fijo (a diferencia de SoC/Ofertas/SSCC_Desempeño/
 # Subastas): asi lo exige Cargar_CMg_Desde_Archivo.
@@ -220,6 +240,7 @@ def resolver_rutas(carpeta_base):
         "sscc_desempeno_dir": sscc_desempeno_dir,
         "subastas_dir": subastas_dir,
         "medidas_sae": medidas_dir / ARCHIVO_MEDIDAS_SAE,
+        "trabajo_medidas": medidas_dir / CARPETA_TRABAJO_MEDIDAS,
         "centrales": auxiliares_dir / ARCHIVO_CENTRALES,
         "cmg": cmg_dir / ARCHIVO_CMG,
         "salida": base / ARCHIVO_SALIDA,
@@ -546,7 +567,22 @@ def revisar_estructura(carpeta_base, aamm=None):
 
     # ---- Medidas/ -------------------------------------------------
     agregar("medidas_dir", f"{CARPETA_MEDIDAS}/", 0, rutas["medidas_dir"].is_dir())
-    agregar("medidas_sae", ARCHIVO_MEDIDAS_SAE, 1, rutas["medidas_sae"].is_file())
+
+    # Medidas_SAE.xlsx ya no se deja a mano: lo arma el programa desde
+    # las dos APIs del Coordinador (ver generar_medidas_sae).
+    filas.append(
+        _fila(
+            "medidas_sae",
+            ARCHIVO_MEDIDAS_SAE,
+            1,
+            "ok" if rutas["medidas_sae"].is_file() else "falta",
+            (
+                "se regenera con el boton ->"
+                if rutas["medidas_sae"].is_file()
+                else "se genera con el boton -> (baja las medidas del mes)"
+            ),
+        )
+    )
 
     # El SoC del periodo vive aca adentro (nivel 1), no es una entrada
     # suelta: su nombre solo tiene que contener "SOC" y el AAMM.
@@ -608,6 +644,51 @@ def revisar_estructura(carpeta_base, aamm=None):
                     f"centrales:{hoja}", f"hoja '{hoja}'", 2,
                     normalizar(hoja) in hojas_norm,
                 )
+
+            # La hoja "Medidas API" es opcional: un caso donde ninguna
+            # central venga de la API de operacion real es valido.
+            filas.append(
+                _fila(
+                    f"centrales:{HOJA_MEDIDAS_API}",
+                    f"hoja '{HOJA_MEDIDAS_API}'",
+                    2,
+                    (
+                        "ok"
+                        if normalizar(HOJA_MEDIDAS_API) in hojas_norm
+                        else "pendiente"
+                    ),
+                    (
+                        "centrales que se agregan desde la API de "
+                        "operacion real"
+                        if normalizar(HOJA_MEDIDAS_API) in hojas_norm
+                        else "opcional: sin ella no se agrega ninguna "
+                             "central de operacion real"
+                    ),
+                )
+            )
+
+    # Archivo de homologacion (punto de medida + canal -> clave), que
+    # alimenta la descarga de Medidas_SAE.xlsx.
+    archivo_homol = Homologacion.buscar_archivo_homologacion(
+        rutas["auxiliares_dir"]
+    )
+    rutas["homologacion"] = archivo_homol
+
+    if archivo_homol:
+        filas.append(
+            _fila(
+                "homologacion", archivo_homol.name, 1, "ok",
+                f"en {CARPETA_AUXILIARES}/",
+            )
+        )
+    else:
+        filas.append(
+            _fila(
+                "homologacion", "Archivo *Homologacion*", 1, "falta",
+                f"ningun Excel de {CARPETA_AUXILIARES}/ tiene "
+                f"'homologacion' en el nombre",
+            )
+        )
 
     # ---- Ofertas/ -------------------------------------------------
     agregar("ofertas_dir", f"{CARPETA_OFERTAS}/", 0, rutas["ofertas_dir"].is_dir())
@@ -797,14 +878,21 @@ def leer_medidas_sae(ruta):
 # LECTURA DEL MAESTRO
 # ============================================================
 
-def _leer_resumen_bess(ruta, nombre_hoja, filas_a_revisar=15):
+def _leer_hoja_con_encabezado(
+    ruta, nombre_hoja, columnas_buscadas, filas_a_revisar=15
+):
     """
-    Lee "Resumen BESS" detectando la fila de encabezados en vez de
-    asumir que es la primera fila: el archivo real trae un titulo
-    ("Cuadro N° 1: Resumen BESS") arriba de los encabezados reales.
-    Mismo criterio que detectar_fila_nombres() para el SoC: nunca una
-    posicion fija, se busca la fila que contiene los textos
-    esperados ('Nombre activo' / 'Barra inyección').
+    Lee una hoja detectando la fila de encabezados en vez de asumir
+    que es la primera: las hojas reales suelen traer un titulo arriba
+    ("Cuadro N° 1: Resumen BESS"). Mismo criterio que
+    detectar_fila_nombres() para el SoC: nunca una posicion fija, se
+    busca la fila que contiene los textos esperados.
+
+    columnas_buscadas: lista de tuplas de fragmentos; una fila sirve
+    como encabezado si, para CADA tupla, alguna de sus celdas contiene
+    todos los fragmentos de esa tupla. Ej.
+    [("nombre", "activ"), ("barra",)] exige una fila con una celda
+    tipo "Nombre activo" y otra tipo "Barra inyección".
     """
 
     crudo = pd.read_excel(
@@ -817,23 +905,35 @@ def _leer_resumen_bess(ruta, nombre_hoja, filas_a_revisar=15):
 
         textos = [normalizar(v) for v in crudo.iloc[indice].tolist()]
 
-        tiene_nombre = any(
-            "nombre" in t and "activ" in t for t in textos
-        )
-        tiene_barra = any("barra" in t for t in textos)
-
-        if tiene_nombre and tiene_barra:
+        if all(
+            any(all(f in t for f in fragmentos) for t in textos)
+            for fragmentos in columnas_buscadas
+        ):
             fila_encabezado = indice
             break
 
     if fila_encabezado is None:
+        esperadas = ", ".join(
+            "+".join(fragmentos) for fragmentos in columnas_buscadas
+        )
         raise ErrorEntrada(
             f"No se encontro, en las primeras {filas_a_revisar} filas de "
             f"la hoja '{nombre_hoja}' de {ARCHIVO_CENTRALES}, una fila de "
-            f"encabezados con 'Nombre activo' y 'Barra inyección'."
+            f"encabezados con las columnas esperadas ({esperadas})."
         )
 
     return pd.read_excel(ruta, sheet_name=nombre_hoja, header=fila_encabezado)
+
+
+def _leer_resumen_bess(ruta, nombre_hoja, filas_a_revisar=15):
+    """
+    "Resumen BESS": la fila de encabezados es la que trae
+    'Nombre activo' y 'Barra inyección'.
+    """
+
+    return _leer_hoja_con_encabezado(
+        ruta, nombre_hoja, [("nombre", "activ"), ("barra",)], filas_a_revisar
+    )
 
 
 def leer_centrales(ruta):
@@ -2491,6 +2591,85 @@ def construir_mapa_barra(resumen_bess):
         mapa[normalizar(nombre)] = "" if pd.isna(barra) else str(barra).strip()
 
     return mapa
+
+
+def leer_medidas_api(ruta_centrales):
+    """
+    Lee la hoja "Medidas API" de Centrales.xlsx: las centrales que se
+    AGREGAN a Medidas_SAE.xlsx desde la API de operacion real, porque
+    no estan en el archivo de homologacion por punto de medida.
+
+    Devuelve una lista de dicts con:
+        topologyName -- nombre exacto de la topologia en la API
+        clave        -- con que nombre tiene que aparecer en
+                        Medidas_SAE.xlsx (la clave del balance)
+        factor       -- 1 por defecto; -1 para invertir el signo
+                        (es el equivalente de la columna 'Flujo' del
+                        archivo de homologacion)
+
+    La columna 'factor' es opcional: sin ella todo vale 1, que es
+    exactamente lo que hacia el script original.
+
+    Si la hoja no existe se devuelve lista vacia y el proceso sigue:
+    un caso sin centrales de este tipo es valido.
+    """
+
+    ruta_centrales = Path(ruta_centrales)
+
+    hoja = None
+    for nombre in pd.ExcelFile(ruta_centrales).sheet_names:
+        if normalizar(nombre) == normalizar(HOJA_MEDIDAS_API):
+            hoja = nombre
+            break
+
+    if hoja is None:
+        return []
+
+    df = _leer_hoja_con_encabezado(
+        ruta_centrales, hoja, [("topology",), ("clave",)]
+    )
+
+    columna_topology = columna_clave = columna_factor = None
+
+    for columna in df.columns:
+        clave = normalizar(columna)
+        if columna_topology is None and "topology" in clave:
+            columna_topology = columna
+        if columna_clave is None and "clave" in clave:
+            columna_clave = columna
+        if columna_factor is None and ("factor" in clave or "flujo" in clave):
+            columna_factor = columna
+
+    centrales = []
+
+    for _, fila in df.iterrows():
+
+        topology = fila[columna_topology]
+        clave = fila[columna_clave]
+
+        if pd.isna(topology) or pd.isna(clave):
+            continue
+
+        factor = 1.0
+        if columna_factor is not None and not pd.isna(fila[columna_factor]):
+            try:
+                factor = float(fila[columna_factor])
+            except (TypeError, ValueError):
+                raise ErrorEntrada(
+                    f"En la hoja '{hoja}' de {ARCHIVO_CENTRALES}, la "
+                    f"central '{topology}' tiene un factor no numerico "
+                    f"({fila[columna_factor]!r}). Usa 1 o -1."
+                )
+
+        centrales.append(
+            {
+                "topologyName": str(topology).strip(),
+                "clave": str(clave).strip(),
+                "factor": factor,
+            }
+        )
+
+    return centrales
 
 
 def construir_dic_resumen_factor(resumen_bess):
@@ -6562,3 +6741,205 @@ def barras_desde_resumen_bess(resumen_bess):
         )
 
     return barras
+
+
+# ============================================================
+# Medidas_SAE.xlsx: LOS CUATRO PASOS DE UN VIAJE
+#
+# La logica vive en Script/Medidas/ (un modulo por cada uno de los
+# scripts sueltos que habia antes). Aca queda lo que es del caso:
+# resolver rutas, sacar de Centrales.xlsx la lista de centrales de la
+# API de operacion real, pegar las dos fuentes y escribir el Excel.
+#
+# Los intermedios (lotes descargados, marca de reanudacion) van a
+# <CARPETA_BASE>/Medidas/_trabajo/, que la ventana no muestra: no son
+# entradas ni salidas del caso. Los diagnosticos que el script
+# original exportaba a Excel (conteos por punto de medida,
+# incompletos, generacion total por clave) se resumen en el log.
+# ============================================================
+
+def _resumir_diagnostico_medidas(diagnostico, registrar):
+    """Lo que antes iba a 'reporte_medidas_consolidadas.xlsx'."""
+
+    incompletos = diagnostico["incompletos"]
+
+    if not incompletos.empty:
+        registrar(
+            f"  puntos de medida descartados por incompletos "
+            f"({len(incompletos):,}), esperados "
+            f"{diagnostico['cuartos_esperados']:,} cuartos de hora:"
+        )
+        for _, fila in incompletos.head(15).iterrows():
+            registrar(
+                f"    {fila['idPuntoMedida']}: "
+                f"canalVal1={int(fila['canalVal1']):,} "
+                f"canalVal3={int(fila['canalVal3']):,}"
+            )
+        if len(incompletos) > 15:
+            registrar(f"    ... y {len(incompletos) - 15:,} mas")
+
+    total = diagnostico["generacion_total"]
+
+    registrar(f"  generacion total por clave ({len(total)} clave(s)):")
+    for _, fila in total.head(25).iterrows():
+        registrar(f"    {fila['clave']}: {fila['Gen_Unidad']:,.3f}")
+    if len(total) > 25:
+        registrar(f"    ... y {len(total) - 25:,} mas")
+
+
+def generar_medidas_sae(
+    carpeta_base, aamm, user_key=None, registrar=print, progreso=None
+):
+    """
+    Genera/actualiza <CARPETA_BASE>/Medidas/Medidas_SAE.xlsx corriendo
+    los cuatro pasos seguidos (boton "Actualizar" de esa fila):
+
+      1. lee el Excel de homologacion de Auxiliares/;
+      2. descarga las medidas por punto de medida (API de medidas),
+         reanudable por lotes;
+      3. arma el calendario de cuartos de hora y agrupa por clave;
+      4. agrega las centrales de la hoja "Medidas API" de
+         Centrales.xlsx desde la API de operacion real.
+
+    El paso 4 es opcional: si la hoja no existe o esta vacia, se
+    escribe solo lo que viene del paso 3.
+
+    user_key: clave de la API del Coordinador. No vive en el codigo ni
+    en el repositorio -- la ingresa el usuario en la ventana y se
+    guarda en config.json (ignorado por git).
+    """
+
+    def avanzar(valor):
+        if progreso:
+            progreso(valor)
+
+    aamm = validar_aamm(aamm)
+    anio, mes = periodo_desde_aamm(aamm)
+    periodo = f"{anio}{mes:02d}"
+    ultimo_dia = calendar.monthrange(anio, mes)[1]
+
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["base"].is_dir():
+        raise ErrorEntrada(f"No se encontro la carpeta base {rutas['base']}")
+
+    if not rutas["centrales"].is_file():
+        raise ErrorEntrada(
+            f"No se encontro {rutas['centrales']} (de ahi sale la hoja "
+            f"'{HOJA_MEDIDAS_API}')."
+        )
+
+    archivo_homol = Homologacion.buscar_archivo_homologacion(
+        rutas["auxiliares_dir"]
+    )
+
+    if not archivo_homol:
+        raise ErrorEntrada(
+            f"No se encontro el archivo de homologacion en "
+            f"{rutas['auxiliares_dir']}: ningun Excel de esa carpeta "
+            f"tiene 'homologacion' en el nombre (el real se llama "
+            f"'Homologacion ClavesTF y PRMTE.xlsx')."
+        )
+
+    registrar(f"Periodo: {anio}-{mes:02d} ({aamm})")
+
+    try:
+        registrar(f"Leyendo {archivo_homol.name}...")
+        df_homol = Homologacion.leer_homologacion(archivo_homol)
+        puntos = Homologacion.puntos_de_medida(df_homol)
+        registrar(
+            f"  puntos de medida a consultar: {len(puntos):,} "
+            f"({df_homol['clave'].nunique()} clave(s))"
+        )
+        avanzar(5)
+
+        registrar("Descargando medidas por punto de medida...")
+        df_crudo, _ = Descarga_PRMTE.descargar(
+            puntos, periodo, user_key, rutas["trabajo_medidas"],
+            registrar=registrar, progreso=progreso, desde=5, hasta=55,
+        )
+
+        registrar("Armando calendario y agrupando por clave...")
+        df_sae, calendario, diagnostico = Claves_Balance.construir_por_clave(
+            df_crudo, df_homol, registrar=registrar
+        )
+        _resumir_diagnostico_medidas(diagnostico, registrar)
+        avanzar(60)
+
+        centrales_api = leer_medidas_api(rutas["centrales"])
+
+        if centrales_api:
+
+            registrar(
+                f"Centrales de la hoja '{HOJA_MEDIDAS_API}': "
+                f"{len(centrales_api)}"
+            )
+            for central in centrales_api:
+                registrar(
+                    f"    {central['topologyName']} -> "
+                    f"{central['clave']}"
+                    + ("" if central["factor"] == 1 else
+                       f"  (factor {central['factor']:g})")
+                )
+
+            df_opreal = Generacion_Real.descargar_mes(
+                anio, mes, ultimo_dia, user_key, registrar=registrar,
+                progreso=progreso, desde=60, hasta=85,
+            )
+            df_opreal = Generacion_Real.filtrar_y_desempatar(
+                df_opreal, centrales_api, registrar=registrar
+            )
+            df_cuartos = Generacion_Real.expandir_a_cuartos(
+                df_opreal, centrales_api, registrar=registrar
+            )
+            df_cuartos = Generacion_Real.pegar_calendario(
+                df_cuartos, calendario, registrar=registrar
+            )
+
+            df_sae = pd.concat(
+                [df_sae, df_cuartos[Claves_Balance.COLUMNAS_SAE]],
+                ignore_index=True,
+            )
+
+        else:
+            registrar(
+                f"La hoja '{HOJA_MEDIDAS_API}' de {ARCHIVO_CENTRALES} no "
+                f"existe o esta vacia: no se agrega ninguna central "
+                f"desde la API de operacion real."
+            )
+
+    except ErrorMedidas as error:
+        raise ErrorEntrada(str(error)) from error
+
+    avanzar(90)
+
+    df_sae = (
+        df_sae
+        .sort_values(["Cuarto de Hora", "clave"])
+        .reset_index(drop=True)
+    )
+
+    faltantes = [c for c in COLUMNAS_AI if c not in df_sae.columns]
+    if faltantes:
+        raise ErrorEntrada(
+            f"El resultado no trae las columnas {faltantes} que "
+            f"{ARCHIVO_MEDIDAS_SAE} necesita para alimentar Medidores."
+        )
+
+    rutas["medidas_dir"].mkdir(parents=True, exist_ok=True)
+
+    registrar(f"Escribiendo {rutas['medidas_sae']}...")
+    df_sae[COLUMNAS_AI].to_excel(
+        rutas["medidas_sae"], sheet_name=HOJA_MEDIDAS_SAE, index=False
+    )
+
+    registrar(f"  filas: {len(df_sae):,}")
+    registrar(f"  claves: {df_sae['clave'].nunique()}")
+    registrar(
+        f"  cuartos de hora: 1 a {int(df_sae['Cuarto de Hora'].max())}"
+    )
+
+    avanzar(100)
+    registrar(f"Listo: {rutas['medidas_sae']}")
+
+    return rutas["medidas_sae"]

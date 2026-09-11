@@ -31,6 +31,9 @@ python Balance_BESS.py
    diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
 4. **Cada acción es un botón en la fila que le corresponde** — no hay
    ventanas intermedias ni un botón "Ejecutar" único:
+   - `Medidas/Medidas_SAE.xlsx` → **Actualizar** (baja el mes completo de las
+     dos APIs del Coordinador y arma el archivo; pide la `user_key`, ver
+     abajo).
    - `Cmg/cmg<AAMM>_def_15minutal.csv` → **Traer cmg_15min** (lo baja de la
      unidad de red).
    - `Cmg/cmg.xlsx` → **Generar** (lo arma con ese CSV).
@@ -48,6 +51,11 @@ Script/
     nucleo.py              <- todo el cálculo del caso
     Cmg/
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
+    Medidas/
+        Homologacion.py        <- punto de medida + canal -> clave
+        Descarga_PRMTE.py      <- API de medidas, por punto de medida
+        Claves_Balance.py      <- calendario de cuartos + agrupación por clave
+        Generacion_Real.py     <- API de operación real (hoja "Medidas API")
 ```
 
 La idea es ir sacando de `nucleo.py` un módulo por etapa, como ya se hizo
@@ -58,11 +66,14 @@ con `Cmg/`; por ahora el resto sigue en un solo archivo.
 ```text
 <CARPETA_BASE>/
 ├── Medidas/
-│   ├── Medidas_SAE.xlsx
+│   ├── Medidas_SAE.xlsx     (botón "Actualizar")
+│   ├── _trabajo/            (lotes descargados; no se muestra en la ventana)
 │   └── <algún archivo .xlsx cuyo nombre contenga "SOC" y el AAMM,
 │        ej. SOC_2607.xlsx, "resumen soc julio 2607.xlsx">
 ├── Auxiliares/
-│   └── Centrales.xlsx       (hojas "Resumen BESS" y "Diccionario")
+│   ├── Centrales.xlsx       (hojas "Resumen BESS", "Diccionario" y
+│   │                         "Medidas API")
+│   └── <algún archivo Excel cuyo nombre contenga "Homologacion">
 ├── Ofertas/
 │   └── <algún archivo Excel cuyo nombre contenga "OfertasSSCC">
 ├── Cmg/
@@ -90,6 +101,44 @@ Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
   dos) ese texto. Si hay más de uno, a diferencia del SoC, se toma
   automáticamente el más reciente por fecha de modificación — así lo hacen
   las macros originales de la planilla.
+- **Medidas_SAE.xlsx**: tampoco se arma a mano. El botón **Actualizar** de esa
+  fila corre los cuatro pasos de un viaje:
+
+  1. lee el Excel de homologación de `Auxiliares/` (hoja `homol`:
+     `Punto de Medida` + `Canal` → `clave` + `Flujo`);
+  2. baja las medidas de cada punto de medida del mes
+     (`medidas.api.coordinador.cl`), por lotes y **reanudable**: si se corta,
+     la corrida siguiente retoma donde quedó;
+  3. arma el calendario de cuartos de hora del mes y agrupa por `clave`;
+  4. **agrega** las centrales listadas en la hoja `Medidas API` de
+     `Centrales.xlsx`, cuya medida viene de la API de operación real
+     (`operacion.api.coordinador.cl`) y no del archivo de homologación.
+
+  Es el proceso más lento del programa (miles de llamadas a la API). Los
+  archivos intermedios van a `Medidas/_trabajo/` y no aparecen en la ventana.
+
+  La hoja **`Medidas API`** tiene tres columnas (el encabezado puede llevar
+  un título arriba, como `Resumen BESS`):
+
+  | topologyName | clave | Factor |
+  |---|---|---|
+  | `SAE PFV Andes Solar III (Inyección)` | `SAE-ANDES-III` | `1` |
+  | `SAE PFV Andes Solar III (Retiro de central)` | `SAE-ANDES-III` | `-1` |
+
+  - `topologyName`: el nombre **exacto** con el que la central aparece en la
+    API de operación real.
+  - `clave`: con qué nombre tiene que aparecer en `Medidas_SAE.xlsx` (la
+    clave del balance). Dos filas pueden apuntar a la misma clave: se suman.
+  - `Factor`: **opcional**, `1` por defecto. Es el equivalente de la columna
+    `Flujo` del archivo de homologación — `-1` para los retiros.
+
+  La hoja entera es opcional: si no existe, no se agrega ninguna central por
+  ese camino y el resto del proceso corre igual.
+
+  **`user_key`**: las dos APIs piden una clave. Se carga en la ventana, se
+  guarda en `config.json` (por PC/usuario, ignorado por git) y **no está en
+  el código** — antes vivía escrita dentro de los scripts.
+
 - **cmg.xlsx**: única excepción con nombre literal fijo, dentro de `Cmg/`.
   Tampoco hay que armarlo a mano, y son dos pasos, cada uno con su botón en
   esa misma carpeta del diagrama:
