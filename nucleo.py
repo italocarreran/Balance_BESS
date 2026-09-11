@@ -5180,9 +5180,35 @@ def construir_medidores(
     sobrantes = sorted(centrales_soc - centrales_sae)
 
     if sin_soc:
+        # Para cada central sin bloque, se busca si algun nombre CRUDO
+        # (antes de homologar, "nombre_scada_original") normaliza igual
+        # a esa central -- si lo encuentra, es una pista fuerte de que
+        # el bloque SI esta en el archivo de SoC pero la homologacion
+        # (Centrales.xlsx!Diccionario) lo esta mandando a otro nombre.
+        candidatos_por_normalizado = {}
+        for origen in soc["nombre_scada_original"].unique():
+            candidatos_por_normalizado.setdefault(
+                normalizar(origen), []
+            ).append(origen)
+
+        detalle_sin_soc = []
+        for central in sin_soc:
+            candidatos = candidatos_por_normalizado.get(
+                normalizar(central), []
+            )
+            if candidatos:
+                detalle_sin_soc.append(
+                    f"{central} (el SoC SI trae un bloque con nombre "
+                    f"crudo {candidatos!r} -- revisar si "
+                    f"Centrales.xlsx!Diccionario lo esta homologando "
+                    f"a otro nombre distinto de '{central}')"
+                )
+            else:
+                detalle_sin_soc.append(central)
+
         avisos.append(
             f"Centrales en {ARCHIVO_MEDIDAS_SAE} sin bloque de "
-            f"SoC: {sin_soc}"
+            f"SoC: {detalle_sin_soc}"
         )
 
     if sobrantes:

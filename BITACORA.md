@@ -1446,3 +1446,46 @@ tildar solo `"ofertas_sscc"` dispara igual la lectura combinada (se llama a `con
 medidores()`) pero `Medidores` queda preservado tal cual estaba, y viceversa con solo
 `"medidores"` tildada. Regresión completa de las 16 sesiones anteriores: pasa. No se probó la
 ventana tkinter en sí (sin entorno gráfico en esta sesión, como siempre).
+
+---
+
+## 2026-09-11 (18) — Diagnóstico mejorado: "sin bloque de SoC" ahora dice si es un problema de Diccionario
+
+El usuario corrió de nuevo con el fix de la sesión anterior. Mejoró mucho (de 9 centrales sin
+cruzar a 1): `Centrales en Medidas_SAE.xlsx sin bloque de SoC: ['SAE-CRCA-PFV-NUEVO-QUILLAGUA-2']`
+— pero avisó que esa central sí está en su archivo de SoC.
+
+**Diagnóstico:** con el `SOC_2607.xlsx` real que había compartido, `extraer_soc()` (aislado, sin
+`Diccionario`) SÍ detecta esa central perfectamente — fila 2 trae literalmente
+`'SAE-CRCA-PFV-NUEVO-QUILLAGUA-2'`, idéntico a `Medidas_SAE.xlsx`, sin ningún carácter raro (se
+revisó con `repr()`, sin espacios/unicode ocultos). Sin `Diccionario`, esta central cruza sola.
+
+**Hipótesis más probable, confirmada como técnicamente posible con una prueba:** el
+`Centrales.xlsx!Diccionario` del usuario probablemente tiene una fila para esta central con el
+nombre "feo" (estilo ruta SCADA, ej. `"SAE-PFV Nuevo Quillagua II"`) escrito ANTES que el nombre
+limpio en esa misma fila. `construir_homologacion()` toma el PRIMER valor de cada fila como
+"canónico" — si ese orden quedó así (probablemente porque el `Diccionario` se armó en una época
+en que solo se conocía el nombre feo, antes de esta sesión), la homologación **rompe** un cruce
+que la fila 2 del SoC ya resolvía sola: convierte el nombre limpio en el feo, y el feo no cruza
+contra nada en `Medidas_SAE.xlsx`. Se armó una prueba sintética que reproduce exactamente este
+mecanismo (`construir_homologacion()` con una fila `["SAE-PFV Nuevo Quillagua II",
+"SAE-CRCA-PFV-NUEVO-QUILLAGUA-2"]` → el nombre limpio homologa hacia el feo).
+
+**No se tocó la lógica de homologación** (cambiar cuál valor de la fila gana como "canónico"
+afectaría potencialmente otras centrales que sí dependen del orden actual — cambio de más riesgo
+del que amerita una hipótesis todavía sin confirmar con el archivo real del usuario). En cambio,
+se mejoró el **diagnóstico**: el aviso "Centrales en Medidas_SAE.xlsx sin bloque de SoC" ahora
+busca, para cada central faltante, si existe algún `nombre_scada_original` (el nombre crudo antes
+de homologar) que normalice igual a esa central — si lo encuentra, lo dice explícitamente en el
+aviso ("el SoC SÍ trae un bloque con nombre crudo [...] — revisar si Diccionario lo está
+homologando a otro nombre"). Si el usuario corre de nuevo, el mensaje mismo va a confirmar o
+descartar la hipótesis sin necesitar que comparta su `Diccionario`.
+
+**Verificación:** test sintético (`test_soc_diagnostico.py`, no persistido) con la lógica exacta
+del bloque nuevo: caso "hay candidato crudo" (muestra la pista) y caso "de verdad no hay bloque"
+(mensaje simple, sin inventar pistas falsas). Regresión completa: pasa.
+
+**Pendiente:** confirmar con el próximo aviso (o con el contenido real de `Diccionario`) si la
+hipótesis es correcta. Si lo es, la corrección más simple sería reordenar esa fila del
+`Diccionario` (poner el nombre limpio primero) — eso ya lo puede hacer el usuario directamente en
+su archivo, sin esperar un cambio de código.
