@@ -615,6 +615,45 @@ def leer_medidas_sae(ruta):
 # LECTURA DEL MAESTRO
 # ============================================================
 
+def _leer_resumen_bess(ruta, nombre_hoja, filas_a_revisar=15):
+    """
+    Lee "Resumen BESS" detectando la fila de encabezados en vez de
+    asumir que es la primera fila: el archivo real trae un titulo
+    ("Cuadro N° 1: Resumen BESS") arriba de los encabezados reales.
+    Mismo criterio que detectar_fila_nombres() para el SoC: nunca una
+    posicion fija, se busca la fila que contiene los textos
+    esperados ('Nombre activo' / 'Barra inyección').
+    """
+
+    crudo = pd.read_excel(
+        ruta, sheet_name=nombre_hoja, header=None, nrows=filas_a_revisar
+    )
+
+    fila_encabezado = None
+
+    for indice in range(len(crudo)):
+
+        textos = [normalizar(v) for v in crudo.iloc[indice].tolist()]
+
+        tiene_nombre = any(
+            "nombre" in t and "activ" in t for t in textos
+        )
+        tiene_barra = any("barra" in t for t in textos)
+
+        if tiene_nombre and tiene_barra:
+            fila_encabezado = indice
+            break
+
+    if fila_encabezado is None:
+        raise ErrorEntrada(
+            f"No se encontro, en las primeras {filas_a_revisar} filas de "
+            f"la hoja '{nombre_hoja}' de {ARCHIVO_CENTRALES}, una fila de "
+            f"encabezados con 'Nombre activo' y 'Barra inyección'."
+        )
+
+    return pd.read_excel(ruta, sheet_name=nombre_hoja, header=fila_encabezado)
+
+
 def leer_centrales(ruta):
     """Devuelve (resumen_bess, diccionario) como DataFrames."""
 
@@ -629,10 +668,7 @@ def leer_centrales(ruta):
             f"'{nombre_buscado}'. Hojas: {excel.sheet_names}"
         )
 
-    resumen = pd.read_excel(
-        ruta,
-        sheet_name=buscar_hoja(HOJA_RESUMEN_BESS),
-    )
+    resumen = _leer_resumen_bess(ruta, buscar_hoja(HOJA_RESUMEN_BESS))
 
     diccionario = pd.read_excel(
         ruta,

@@ -433,3 +433,34 @@ pasando por un `.xlsx` real (vía `leer_centrales()`/`leer_cmg()`) para confirma
 que devuelve `pandas`/`openpyxl` al leer un archivo real (no un `DataFrame` construido a mano)
 no rompen `_normaliza_cuarto()` ni la homologación por nombre. Todos los casos coincidieron con
 lo esperado a mano. No se probó contra un caso real ni contra la planilla 11.
+
+---
+
+## 2026-09-11 (2) — Fix: `Resumen BESS` con título arriba de los encabezados
+
+Al correr contra un `Centrales.xlsx` real (primera vez que el usuario probó la etapa `Calculo
+E Costos` fuera de un caso sintético) salió:
+
+```
+La hoja 'Resumen BESS' de Centrales.xlsx debe tener una columna de nombre de central
+('Nombre activo') y una de barra de inyeccion ('Barra inyección'). Columnas encontradas:
+['Cuadro N° 1: Resumen BESS', 'Unnamed: 1', ..., 'Unnamed: 8']
+```
+
+Causa: `leer_centrales()` leía `Resumen BESS` con `pd.read_excel(header=0)`, asumiendo que la
+fila 1 ya traía los encabezados. El archivo real trae un título fusionado
+("`Cuadro N° 1: Resumen BESS`") en esa fila, y los encabezados reales van una fila más abajo —
+mismo problema que ya se había resuelto para el SoC (`detectar_fila_nombres()`), pero acá
+todavía no se había aplicado el mismo criterio.
+
+**Fix:** nueva función `_leer_resumen_bess(ruta, nombre_hoja)` que lee la hoja cruda
+(`header=None`) y busca, en las primeras 15 filas, la que contiene textos que matchean
+`'nombre'+'activ'` y `'barra'` (normalizados) — nunca una posición fija. `leer_centrales()` la
+usa para `Resumen BESS`; `Diccionario` no se toca porque ya se leía con `header=None` sin
+asumir fila fija. `construir_mapa_barra()` no necesitó cambios: ya buscaba por nombre de
+columna, no por posición.
+
+**Verificación:** test sintético con una hoja de 4 filas (título fusionado, encabezados,
+2 centrales) reproduciendo exactamente la estructura del error real; `leer_centrales()` +
+`construir_mapa_barra()` devolvieron el mapa esperado. Sin persistir en el repo (convención de
+pruebas).
