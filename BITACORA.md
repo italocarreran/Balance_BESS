@@ -1889,3 +1889,185 @@ CSV. `py_compile` de los tres módulos pasa. La ventana en sí no se pudo abrir 
 **Pendiente que deja esta sesión:** abrir la ventana una vez en Windows para confirmar el
 ancho de la columna "Acción" (`ANCHO_ACCION = 150 px`) contra los botones más largos
 ("Traer cmg_15min", "Actualizar todo") y el alto de fila (`ALTO_ACCION = 26 px`).
+
+---
+
+## 2026-09-11 (24) — Encabezados de grupo (celdas combinadas) en Pagos_BESS.xlsx
+
+> **Nota de integración:** esta entrada se escribió en paralelo a las (22) y (23) (rama
+> `claude/brave-wozniak-24n138`, PR #11), en las dos se numeró como "(22)". Al fusionar se
+> renumeró a (24), que es el orden real en que entró a `main`. El trabajo de esta sesión es
+> independiente del de las otras dos y no se pisan: acá se tocó `escribir_pagos_bess()`; allá,
+> la estructura del repo y la ventana. Dos cosas que esta entrada menciona cambiaron de lugar
+> con la (23): `nucleo.py` ahora es `Script/nucleo.py`, y el `py_compile` de verificación es
+> `python -m py_compile Balance_BESS.py Script/nucleo.py Script/Cmg/Extrae_CMG_barras.py`.
+
+
+El usuario pidió agregar "los encabezados de celdas combinadas que van arriba de algunas hojas",
+como en el libro real. Pregunté alcance (Calculo RE545 / Calculo E Costos / hojas de
+`Consolidado_entradas.xlsx`) — contestó "todas las anteriores", respetando la lógica que ya
+funciona y siguiendo la estructura del `Libro1` que había entregado antes.
+
+**Investigación primero, antes de tocar código** (todos los archivos reales ya en `docs/`):
+- `docs/Calculo_RE545_reducido_para_IA.xlsx` (hoja "Calculo RE545 reducido"): confirma, en la
+  fila 3 del archivo real, los títulos de grupo `Dia`/`Nombre`/`BESS` (sobre `Mes:Hora`,
+  `Configuracion:Barra`, `Descarga:SoC%`) y `Subastas`/`FD`/`FMA` (sobre los tres bloques de
+  reservas) y `Componente 1`/`Componente 2` (sobre partes de `BI:CE`) — el merge en sí se perdió
+  en la reducción, pero el texto queda solo en la celda más a la izquierda de cada grupo, igual
+  que en un merge real.
+- `docs/Libro1_Subastas_real.xlsx` (hoja "E COSTOS", agregada en una sesión anterior para el fix
+  de `NOMBRES_SUBASTAS` pero nunca revisada a fondo hasta ahora): es la ÚNICA referencia real que
+  tenemos con los merges de Excel intactos (`ws.merged_cells.ranges`) — confirma exactamente los
+  mismos 8 grupos que después aparecen (sin merge, solo texto) en Calculo RE545: `Dia`(A2:C2),
+  `Nombre`(G2:H2), `BESS`(I2:K2), `Componente 2`(S2:U2), `Prorratas (-)`(AG2:AI2),
+  `Prorratas (+)`(AJ2:AL2), `FD`(AM2:AR2), `Componente 1`(AU2:AX2).
+- Las otras dos hojas del mismo archivo ("FD", "subastas") NO tienen merges ni título de grupo —
+  confirmado, no se les agregó nada. No hay archivo real de referencia para "Medidores"/"CMg"/
+  "Ofertas SSCC" con títulos de grupo, así que tampoco se tocaron esas hojas de
+  `Consolidado_entradas.xlsx` — agregar algo ahí sería inventar sin dato real, contra la
+  metodología del proyecto.
+
+**Trampa importante:** las letras reales de estos merges (ej. `S2:U2`, `AG2:AI2`) NO son las
+letras de nuestra salida — la hoja de salida nunca reprodujo la letra de Excel real, solo el
+orden y el contenido (documentado desde antes, ver plan §26.2). Cada grupo se definió entonces
+como `(etiqueta, [claves internas del diccionario NOMBRES_CALCULO_XXX])`, y la posición real en
+la hoja se calcula recién al escribir, buscando esas claves en `list(NOMBRES_CALCULO_XXX)` — así
+el grupo cae en la columna que le toca en NUESTRO orden, sea cual sea. Se verificó que las claves
+de cada grupo real (ej. `S`,`T`,`U` para "Componente 2") caen CONTIGUAS en nuestro orden interno
+también (aunque a veces con nombres repetidos entre grupos, como `CPF(-)`/`CSF(-)`/`CTF(-)`, que
+aparecen tanto en "Prorratas (-)" como en el bloque "FD" — por eso los grupos se identifican
+siempre por clave interna, nunca por nombre de columna, que no es único).
+
+**Implementación:**
+- `GRUPOS_CALCULO_E_COSTOS` y `GRUPOS_CALCULO_RE545` (nuevas constantes, mismo estilo que
+  `NOMBRES_CALCULO_XXX`): 8 grupos cada una.
+- `_escribir_encabezados_grupo(ws, columnas_internas, grupos, fila=1, columna_inicio=1)` (nueva
+  función): calcula la columna real de cada grupo buscando sus claves en `columnas_internas` y
+  hace el merge con openpyxl (`ws.merge_cells(...)`) si el grupo tiene más de 1 columna.
+- `escribir_pagos_bess()`: ahora escribe ambas hojas con `startrow=1` (deja la fila 1 libre) y
+  llama a `_escribir_encabezados_grupo()` después de cada `to_excel()`. **Cambio de estructura**:
+  antes la fila 1 tenía los nombres de columna y los datos arrancaban en la fila 2; ahora la fila
+  1 tiene los títulos de grupo (celdas combinadas, con huecos donde no hay grupo), la fila 2 tiene
+  los nombres de columna, y los datos arrancan en la fila 3. La tabla resumen de RE545 (`AW:BG`,
+  que se escribe al lado del bloque principal) también se corrió a `startrow=1` para que sus
+  nombres de columna queden alineados con los del bloque principal — no tiene título de grupo
+  propio, no hay evidencia real de uno.
+- De paso, se corrigió `completar_calculo_e_costos_grupos()`: devolvía `df.rename(columns=
+  NOMBRES_CALCULO_E_COSTOS)` sin seleccionar antes por `list(NOMBRES_CALCULO_E_COSTOS)` (a
+  diferencia de `renombrar_calculo_re545()`, que sí lo hacía) — no causaba ningún bug visible
+  porque `df` nunca traía columnas de más, pero dejaba el orden de salida atado al orden de
+  asignación interno en vez del orden documentado, y sin esa garantía los encabezados de grupo
+  (que dependen de la posición) se podían desalinear. Ahora usa el mismo patrón `df[list(...)]
+  .rename(...)` que RE545.
+
+**Verificación:**
+- Test nuevo (`test_encabezados_grupo.py`, no persistido): escribe una hoja completa de cada una,
+  confirma que los 8 merges de cada hoja existen, no se pisan entre sí, caen exactamente en la
+  columna esperada (recalculada independientemente a partir de `GRUPOS_CALCULO_XXX`), que las
+  columnas sin grupo (`AZ`/Monto a compensar en E Costos; `AU`/`BI`/`BJ`/`BQ`/`BR`/`CE` en RE545)
+  quedan sueltas sin merge, y que los nombres de columna/datos quedaron en las filas 2/3.
+- `test_secciones_pagos.py` (existente) actualizado: los `assert ws.cell(row=2, ...)` que
+  apuntaban a datos pasaron a `row=3` (fila 2 ahora son nombres de columna); se agregaron
+  aserciones nuevas para los encabezados de grupo. De paso se corrigió un problema en el fixture
+  del propio test: `pd.DataFrame({c: [v] for c in NOMBRES_XXX.values()})` colapsa los nombres
+  reales duplicados (dict comprehension sobre `.values()`), armando una hoja sintética más
+  angosta que la real — no afectaba nada antes de esta sesión porque no se validaba la posición
+  de nada, pero desalineaba los encabezados de grupo. Reemplazado por un helper que selecciona
+  primero por clave interna (`list(NOMBRES_XXX)`) y recién ahí renombra, igual que la producción.
+- Regresión completa de las 21 sesiones anteriores: pasa.
+
+**Pendiente:** no se agregó nada a `Consolidado_entradas.xlsx` (Medidores, Ofertas SSCC, CMg, FD,
+Subastas) por falta de un archivo real de referencia con títulos de grupo para esas hojas — si el
+usuario comparte uno, se puede repetir el mismo mecanismo (`_escribir_encabezados_grupo()`, ya
+genérico) para esas hojas también.
+
+## 2026-09-11 (25) — Nuevo documento: `docs/Estructura_Archivos_Reales.md`
+
+El usuario pidió que los archivos Excel reales que manda (de entrada del proceso, o de
+comparación/validación) queden bien descritos en algún `.md`, específicamente dudando si
+`Centrales.xlsx` estaba bien documentado. Motivo explícito: va a abrir otra sesión de chat y no
+quiere tener que re-adjuntar archivos ni re-explicar cosas ya dichas — la sesión nueva tiene que
+entender la estructura real "a la primera".
+
+**Diagnóstico:** la información SÍ existía, pero repartida y parcialmente desactualizada —
+`docs/Plan_Traspaso_Python_Balance_BESS.md` secciones 3.4/3.5/3.6 (las que describen
+`Medidas_SAE.xlsx`/`SOC_AAMM.xlsx`/`Centrales.xlsx`/Ofertas SSCC) son de las primeras del
+documento, escritas ANTES de que se validara nada contra datos reales, y solo algunas tienen una
+nota de "corrección" pegada al final (la de `Diccionario` sí, gracias a una sesión anterior; la de
+`SOC` no tanto). Para reconstruir el resto de una sesión nueva había que rastrear `BITACORA.md`
+sesión por sesión — exactamente lo que el usuario no quiere tener que hacer, y exactamente lo que
+esta sesión no quiere que la SIGUIENTE tenga que hacer.
+
+**Qué se hizo:** documento nuevo, `docs/Estructura_Archivos_Reales.md`, escrito de cero (no
+parcheado sobre el plan viejo) como referencia única y actual de CADA archivo Excel real del
+proyecto, con dos secciones:
+
+- **A. Archivos de entrada del proceso** (los 7 que arma el usuario en la carpeta del caso:
+  `Medidas_SAE.xlsx`, `SOC_AAMM.xlsx`, `Centrales.xlsx` [`Resumen BESS` + `Diccionario`],
+  `*OfertasSSCC*`, `cmg.xlsx`, `SSCC_Desempeño_*.xlsx`, `3_REMUNERACIÓN_SUBASTAS_E_ID_*.xlsx`).
+  Para cada uno: ubicación/patrón de nombre, hoja(s), fila exacta donde arrancan encabezados y
+  datos, columnas reales en orden (tabla), trampas ya confirmadas, función de `nucleo.py` que lo
+  lee, y el archivo real guardado en `docs/` que lo respalda (si hay). Reconstruido leyendo
+  directo con `openpyxl` los 5 archivos reales que ya teníamos guardados
+  (`docs/Centrales_real.xlsx`, `docs/SOC_real_2607.xlsx`, `docs/Libro1_Subastas_real.xlsx` [hojas
+  `FD`/`subastas`/`E COSTOS`]) más el código ya funcionando de `nucleo.py` para los dos archivos
+  sin copia real guardada (`Medidas_SAE.xlsx`, `*OfertasSSCC*`, `cmg.xlsx` — marcados con ⚠️ donde
+  la estructura sale del código y no de un archivo real visto).
+- **B. Archivos de referencia real para validar la salida** (las hojas de comparación tipo
+  "planilla 11" que el usuario pega/adjunta cuando reporta una diferencia): qué trae cada uno de
+  los 5 archivos ya guardados en `docs/` y el método de comparación (por clave/nombre de columna,
+  nunca por letra de Excel — la salida propia nunca reprodujo la letra real).
+- **C.** una guía corta de qué hacer si mandan un Excel nuevo no descrito acá.
+
+**Corrección real encontrada al escribir la sección de `Centrales.xlsx!Diccionario`:** el ejemplo
+que se iba a poner tenía un typo de transcripción (`"BESS PE LA CAÑADA"` en vez del valor real
+`"BESS PE LA CABAÑA"`) — se relee el archivo real (`docs/Centrales_real.xlsx`) letra por letra
+antes de cerrar el documento, en vez de confiar en la memoria de la sesión, y se corrige.
+
+**Enganchado a `README.md`** (fila nueva al principio de la tabla de documentación, con el caso de
+uso explícito) **y a `METODOLOGIA.md`** (fila nueva en "el set de documentos" + una regla nueva:
+"si el usuario menciona o adjunta un archivo Excel real, leer `docs/Estructura_Archivos_Reales.md`
+primero" — para que una sesión nueva lo encuentre solo con la regla de expansión de contexto
+normal, sin que el usuario tenga que señalarlo).
+
+**Pendiente:** no hay archivo real guardado todavía para `Medidas_SAE.xlsx`, `*OfertasSSCC*` ni
+`cmg.xlsx` — si el usuario comparte alguno, guardarlo en `docs/` y sacar el ⚠️ de esa sección
+(pasa a ✅).
+
+---
+
+## 2026-09-11 (26) — Fusión de la rama de encabezados de grupo con la reorganización en `Script/`
+
+El PR #11 (`claude/brave-wozniak-24n138`, encabezados de grupo en `Pagos_BESS.xlsx` +
+`docs/Estructura_Archivos_Reales.md`) salió de `main` ANTES de las sesiones (22) y (23) y quedó en
+conflicto. Se fusionó `main` dentro de esa rama.
+
+**Conflictos reales: uno solo, `BITACORA.md`.** Las dos ramas agregaron su entrada al final y las
+dos la numeraron "(22)" (y la segunda de esa rama, "(23)"). Se conservaron las cuatro entradas y
+las de la rama se renumeraron a (24) y (25) — el orden real en que entran a `main` — con una nota
+de integración explicando el renumerado. Ninguna entrada vieja se tocó.
+
+`Script/nucleo.py` lo fusionó git solo (detectó el rename `nucleo.py` → `Script/nucleo.py` y los
+dos lados tocaban partes distintas de `escribir_pagos_bess()`: allá los encabezados de grupo, acá
+el mensaje de preservación). El resto de los archivos, automático.
+
+**Lo que SÍ hubo que arreglar a mano es una interacción que ninguna de las dos ramas podía ver
+sola:** `_copiar_hoja_existente()` copia valores y anchos de columna, pero **no** las celdas
+combinadas. Con los encabezados de grupo de la rama (24) y el botón "Actualizar" por hoja de la
+(23), cada vez que se actualiza UNA de las dos hojas de `Pagos_BESS.xlsx` la otra se preserva…
+perdiendo la combinación de sus encabezados (el texto quedaba, la combinación no). Antes esto no
+se notaba porque preservar era la excepción; ahora es el caso normal. Se agregó el copiado de
+`merged_cells.ranges`.
+
+**Verificación:** test dedicado a esa interacción — se generan las dos hojas (8 rangos combinados
+cada una), se actualiza solo `Calculo RE545` y se comprueba que `Calculo E Costos` conserva sus 8
+rangos y el texto de los grupos. Se confirmó además, monkeypatcheando la versión vieja de
+`_copiar_hoja_existente()`, que sin el fix quedaban en **0** (no es una suposición: es el
+comportamiento medido). Más la regresión de las sesiones (22) y (23) (árbol del diagrama,
+`Traer cmg_15min` + `Generar`, `generar_consolidado()` de una sola sección) y `py_compile` de los
+tres módulos.
+
+También se actualizó `docs/Estructura_Archivos_Reales.md` (que nació en la rama (25) y cuyo
+propósito es ser la referencia AL DÍA): su §5 ahora documenta los dos archivos de `Cmg/` —el CSV
+15-minutal y el `cmg.xlsx` derivado—, cómo se generan, y la trampa de que `leer_cmg()` los lee por
+posición; y las rutas `nucleo.py` pasaron a `Script/nucleo.py`.

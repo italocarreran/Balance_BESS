@@ -118,6 +118,7 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 
 | Querés... | Leé |
 |---|---|
+| **Saber qué estructura real tiene cada archivo Excel que arma el usuario (o que manda para validar), sin tener que pedírselo de nuevo ni que te lo vuelva a explicar** | `docs/Estructura_Archivos_Reales.md` |
 | Entender cómo se trabaja en este repo (para un asistente de IA o alguien nuevo) | `METODOLOGIA.md` |
 | El checklist obligatorio de inicio/cierre de sesión | `REGLAS.md` |
 | Qué hace cada script, en dos líneas | `MAPA.md` |
@@ -125,7 +126,7 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 | Reglas de negocio del cálculo y el plan completo de migración | `docs/Plan_Traspaso_Python_Balance_BESS.md` |
 | El código VBA original, las fórmulas del `.xlsm` y de dónde sale cada dato | `docs/Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md` |
 | La hoja `Calculo RE545` real (recortada), con sus nombres de columna y fórmulas | `docs/Calculo_RE545_reducido_para_IA.xlsx` |
-| La hoja `Subastas` real, con encabezados y fórmulas (fuente de la corrección de `NOMBRES_SUBASTAS`) | `docs/Libro1_Subastas_real.xlsx` |
+| La hoja `Subastas` real, con encabezados y fórmulas (fuente de la corrección de `NOMBRES_SUBASTAS`); también trae la hoja `E COSTOS` con los encabezados de grupo reales (celdas combinadas), fuente de `GRUPOS_CALCULO_E_COSTOS` | `docs/Libro1_Subastas_real.xlsx` |
 | `Centrales.xlsx` y `SOC_AAMM.xlsx` reales (fuente de las correcciones de `detectar_fila_nombres()` y `construir_homologacion()`) | `docs/Centrales_real.xlsx`, `docs/SOC_real_2607.xlsx` |
 | Primera comparación real vs Python de `Calculo E Costos` fila a fila (fuente de la corrección de la Prorrata SSCC) | `docs/Pagos_BESS_comparacion_real.xlsx` |
 
@@ -176,6 +177,14 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
   `Ventana_No_Completa`), las reservas por subasta (`AC:AU`), el resumen por
   central+ventana (`AW:BG`, una tabla de otro largo que se escribe al lado) y
   los Componentes 1 y 2 (`BI:CE`), hasta el `Monto a compensar`.
+
+Las dos hojas de `Pagos_BESS.xlsx` llevan además, arriba de los nombres de
+columna, los encabezados de grupo con celdas combinadas del archivo real
+(`Dia`, `Nombre`, `BESS`, `Prorratas (-)/(+)`, `FD`, `Subastas`, `FMA`,
+`Componente 1`/`Componente 2` — `GRUPOS_CALCULO_E_COSTOS`/
+`GRUPOS_CALCULO_RE545`); como la salida no reproduce la letra de Excel real
+(solo el orden y el contenido), cada grupo cae en la columna que le toca en
+**nuestro** orden, no en la del archivo original.
 
 Las macros de Ofertas SSCC, CMg, FD y Subastas replicadas son solo las de
 **carga** de esas hojas.
