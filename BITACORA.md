@@ -1663,3 +1663,66 @@ en `1.0`, para todas las filas, sin excepción — es dato constante, no una fó
 no se copió a `docs/` porque no aporta nada que `docs/Pagos_BESS_comparacion_real.xlsx` (sesión
 anterior) o `docs/Calculo_RE545_reducido_para_IA.xlsx` (ya en el repo, fuente directa de la
 fórmula real que confirmó el fix) no tuvieran ya.
+
+## 2026-09-11 (21) — Fix grande: `BK/BL/BS` de `Calculo RE545!BI:CE` cruzaban mal S contra BI
+
+El usuario, todavía mirando la misma comparación real (`RE545 P11`), reportó más diferencias
+usando los nombres de columna de **nuestra** salida (no las letras reales): "AR:AT, BI, AZ" y
+después, más específico: "Curva Cmg Decendente promedio horario, (blanco), Curva Cmg Decendente".
+
+**Primer chequeo (para no repetir la confusión de letras de la entrada anterior):** comparando por
+contenido, `AR:AT` (el fix de la sesión 20) y `BI`/`AZ` con letra REAL (`Orden`, `EiniT` del
+resumen) daban 0 diferencias — esos ya estaban bien. El problema real estaba en dos columnas
+específicas que el usuario nombró explícitamente: `Curva Cmg Decendente promedio horario` (`BK`
+real) y `Curva Cmg Decendente` (`BM` real).
+
+**Causa exacta**, encontrada comparando fila a fila y confirmada contra las fórmulas guardadas del
+archivo real (`docs/Calculo_RE545_reducido_para_IA.xlsx`, hoja `Mapa_Formulas`):
+
+```
+BK4 = SUMIFS(R:R, G:G,G4, S:S,BI4, T:T,T4, E:E,BJ4)
+BL4 = SUMIFS(Q:Q, S:S,BI4, E:E,BJ4, G:G,G4, T:T,T4)
+BS4 = IFERROR(INDEX(I, MATCH(1, (BR=BR4)*(S=BI4)*(G=G4)*(E=BJ4), 0)), "")
+```
+
+El criterio `S:S,BI4` compara la columna `S` (`ranking cmg`) de las OTRAS filas contra el `BI`
+(`Orden`) de LA FILA ACTUAL — no `BI` contra `BI`. `calcular_bk_bl_bm_bs_re545()` armaba una sola
+clave usando `BI` de los dos lados (la de acumulación Y la de búsqueda), lo que da el resultado
+correcto únicamente cuando `S` y `BI` coinciden fila a fila por casualidad — que es exactamente lo
+que pasaba en el único caso sintético que existía hasta ahora (por eso nunca se detectó). Con
+datos reales, donde `S` y `BI` difieren, el agrupamiento salía mal.
+
+Esto no se quedaba en `BK`/`BM`: al ser el insumo de `BN` (`Edisp_Asig`), `BO` (`Total C1_545`),
+`CC` (`Total C2_545`) y, al final, `CE` (`Monto a compensar` — la ÚLTIMA columna de toda la hoja),
+el error se propagaba a lo largo de toda la sección `BI:CE`.
+
+**Fix:** `calcular_bk_bl_bm_bs_re545()` ahora arma DOS listas de claves — `claves_acumulacion`
+(con `S` de cada fila, para poblar los diccionarios de suma/primer-valor) y `claves_busqueda` (con
+`BI` de cada fila, para leer el resultado) — en vez de una sola clave usada de los dos lados.
+También se corrigió el valor por defecto de `BS` sin match: antes daba `KeyError` (nunca pasaba
+porque la clave vieja siempre existía en el propio diccionario); ahora, correctamente, da `NA`
+(blanco), igual que el `IFERROR` real — a diferencia de `BK`/`BL`, que sin match dan `0` (`SUMIFS`
+real).
+
+**Verificación exhaustiva** (con `Pagos_BESS.xlsx` real, hoja `RE545 P11`, 26.784 filas):
+- Reconstruyendo `BK`/`BM` a partir de los datos crudos de la propia salida (`Configuracion`,
+  `Ventana de valorizacion`, `ranking cmg`, `CMg Promedio`, `CMg`, `Orden`, `Periodo`) y pasándolos
+  por la función corregida: **0** diferencias contra los valores reales, en las 26.784 filas.
+- Corriendo la etapa completa `BI:CE` (`calcular_componentes_re545()`) con `AU` y el resumen
+  `AW:BG` reconstruidos con sus valores REALES (para no arrastrar la contaminación del bug de `AU`
+  de la sesión anterior, que también ensuciaba el resumen `AW:BG` generado con el código viejo):
+  `Edisp_Asig`, `Total C1_545`, `Total C2_545` y **`Monto a compensar`** (la columna final de toda
+  la hoja) dan **0** diferencias en las 26.784 filas.
+- Test sintético nuevo (`test_re545_bk_bl_bs_cruzado.py`, no persistido) que reproduce un caso con
+  `S != BI` fila a fila y confirma que el resultado cambia respecto del comportamiento viejo (el
+  test viejo, `test_re545d.py`, nunca hubiese detectado esto porque su `S` sintético coincidía con
+  `BI` por construcción — se le agregó una columna `S` explícita, documentando por qué, para que
+  siga siendo válido sin ocultar el hueco de cobertura).
+- Regresión completa de las 20 sesiones anteriores: pasa.
+
+**Confirmado también:** la contaminación de `Edisp_Asig`/`Total C1_545`/`Total C2_545` que
+aparecía al principio de esta validación (antes de sustituir el resumen `AW:BG` por valores
+reales) no era un bug nuevo — era el mismo bug de `AU` de la sesión 20 propagándose a través de
+`BV` → `Margen ultima hora`/`Total Reservas* FD *FMA`/`Edisp_T` del resumen. Con los dos fixes (20
+y 21) aplicados juntos en el pipeline real (donde el resumen se reconstruye siempre a partir del
+`AU` ya corregido), no hace falta ningún fix adicional para esa cadena.

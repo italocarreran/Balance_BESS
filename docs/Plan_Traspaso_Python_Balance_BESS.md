@@ -2132,6 +2132,30 @@ Nada: la hoja quedó completa. Lo único que **no** se replica son las columnas 
 | `BQ` | `Energia Total` | `BS + BN`. |
 | `BR` | `Ventana de Valorizacion` | `= T`. |
 | `BS` | `inyeccion en el periodo del Cmg Descendente` | `I` de la **primera** fila con `BR`, `S=BI`, `G`, `E=BJ` iguales (`INDEX/MATCH` matricial). |
+
+**Trampa real en `BK`/`BL`/`BS` (sesión 2026-09-11 (21), validada fila a fila contra
+`Pagos_BESS.xlsx` real):** el criterio `S=BI` de las tres fórmulas de arriba **no** compara `BI`
+contra `BI` de fila a fila — compara la columna `S` (`ranking cmg`) de las **otras** filas contra
+el `BI` (`Orden`) de **la fila actual**. O sea hay dos claves distintas: la clave de
+**acumulación** (para decidir qué sumar en el `SUMIFS`/qué candidatos mira el `MATCH`) usa el `S`
+de cada fila candidata; la clave de **búsqueda** (una por fila, la fija del criterio) usa el `BI`
+de esa fila. La implementación original (`calcular_bk_bl_bm_bs_re545()`) usaba `BI` en los dos
+lados por error, lo que da el resultado correcto solo quando `S` y `BI` coinciden fila a fila —
+en un caso real donde difieren, el agrupamiento queda mal. Confirmado contra las fórmulas
+guardadas del archivo real (`docs/Calculo_RE545_reducido_para_IA.xlsx`, hoja `Mapa_Formulas`):
+
+```
+BK4 = SUMIFS(R:R, G:G,G4, S:S,BI4, T:T,T4, E:E,BJ4)
+BL4 = SUMIFS(Q:Q, S:S,BI4, E:E,BJ4, G:G,G4, T:T,T4)
+BS4 = IFERROR(INDEX(I, MATCH(1, (BR=BR4)*(S=BI4)*(G=G4)*(E=BJ4), 0)), "")
+```
+
+Corregido separando `claves_acumulacion` (con `S`) de `claves_busqueda` (con `BI`). El error
+arrastraba a todo lo que depende de `BM`/`BS` — `BN`, `BO`, `CC` y, al final, `CE` ("Monto a
+compensar", la columna final de la hoja). Verificado con el `Pagos_BESS.xlsx` real (hoja
+`RE545 P11`, pegada por el usuario): `BK`/`BM` **0** diferencias en las 26.784 filas; con eso más
+la corrección de `AU` de la sesión anterior (que también alimenta el resumen `AW:BG`, contaminado
+igual que `BK`/`BM` por el bug viejo), `BN`/`BO`/`CC`/`CE` también dan **0** diferencias.
 | `BT` | `Energía ya Asignada` | Suma de los `BU` **posteriores** del mismo grupo. |
 | `BU` | `Asignacion Edisponible` | `IF(BS=0, 0, MAX(0, MIN(BQ, BC - BT - suma de BV del grupo)))`. |
 | `BV` | `SSCC ultima hora` | Ver 26.4 (ya se usaba para `BF`). |
