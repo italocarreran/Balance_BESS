@@ -219,7 +219,11 @@ de.
     normalizado → `Pmax (MW), umbral_soc_minimo)` (misma hoja `Resumen BESS`
     que `construir_mapa_barra`, ver plan §25.8);
     `construir_calculo_e_costos(df_medidores, mapa_barra, dic_cmg, registrar=print)`
-    → `df_ecostos`; `escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print)`.
+    → `df_ecostos`; `escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print)`
+    escribe "Calculo E Costos"/"Calculo RE545" con `startrow=1` (fila 1 libre)
+    y llama a `_escribir_encabezados_grupo()` para las celdas combinadas de
+    `GRUPOS_CALCULO_E_COSTOS`/`GRUPOS_CALCULO_RE545` — los nombres de columna
+    quedan en la fila 2 y los datos desde la fila 3 (antes: fila 1 y 2).
   - Calculo E Costos (etapa 2): `calcular_l(df_ecostos, df_subastas)`,
     `calcular_m(df_ecostos, umbral_soc_minimo)`, `calcular_n_o(df_ecostos)`,
     `calcular_r_ecostos(df_ecostos)` (sufijo `_ecostos` a propósito:
@@ -244,7 +248,12 @@ de.
     agregadas Y renombrada a nombres reales (`NOMBRES_CALCULO_E_COSTOS`,
     plan §25.9) — mismo patrón que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`;
     `AG:AL` y `AM:AR` comparten a propósito los mismos 6 nombres cortos
-    (así es en el archivo real).
+    (así es en el archivo real). `GRUPOS_CALCULO_E_COSTOS` (mismo criterio
+    que `GRUPOS_CALCULO_RE545`, ver más abajo) documenta los encabezados de
+    grupo reales (`Dia`, `Nombre`, `BESS`, `Componente 2`, `Prorratas (-)`,
+    `Prorratas (+)`, `FD`, `Componente 1`), confirmados con
+    `docs/Libro1_Subastas_real.xlsx` (hoja `E COSTOS`, la única con los
+    merges de Excel intactos).
   - `construir_medidores(df_sae, df_soc, anio, mes, ruta_ofertas, diccionario, registrar=print)`
     → `(df_medidores, avisos, df_wxy, df_resumen_ventana)`.
   - `escribir_salida(df, ruta_salida, avisos, incidencias, df_wxy=None, df_resumen_ventana=None, df_cmg=None, df_fd_csf=None, df_fd_cpf=None, df_subastas=None, ruta_existente=None, hojas_regenerar=None, registrar=print)`

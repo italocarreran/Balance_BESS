@@ -2483,6 +2483,42 @@ def construir_calculo_e_costos(
 _HOJAS_PAGOS = (HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545)
 
 
+def _escribir_encabezados_grupo(ws, columnas_internas, grupos, fila=1, columna_inicio=1):
+    """
+    Escribe, en una fila propia arriba de los nombres de columna, los
+    titulos de grupo con celdas combinadas que trae el archivo real
+    (ej. "Subastas"/"FD"/"FMA" arriba de las reservas de Calculo
+    RE545, "Prorratas (-)"/"Prorratas (+)" en Calculo E Costos).
+
+    columnas_internas: el orden de claves internas con el que se armo
+    la hoja ANTES de renombrar (list(NOMBRES_CALCULO_XXX) -- define
+    la posicion real de cada grupo en la salida, que es la del orden
+    interno, no la letra del archivo real: la salida no reproduce la
+    letra de Excel real, solo el orden y el contenido, asi que un
+    grupo puede terminar en una letra distinta de la del archivo
+    original).
+    grupos: tuplas (etiqueta, [claves internas del grupo, en orden]).
+    fila: fila de Excel (1-indexada) donde va el titulo de grupo --
+    la fila de nombres de columna queda siempre una fila mas abajo.
+    columna_inicio: columna de Excel (1-indexada) donde arranca la
+    hoja (1 = A, para el bloque principal; mas adelante para una
+    tabla escrita al lado, si alguna vez tuviera sus propios grupos).
+    """
+
+    for etiqueta, claves in grupos:
+        posiciones = [columnas_internas.index(clave) for clave in claves]
+        columna_desde = columna_inicio + min(posiciones)
+        columna_hasta = columna_inicio + max(posiciones)
+
+        if columna_hasta > columna_desde:
+            ws.merge_cells(
+                start_row=fila, start_column=columna_desde,
+                end_row=fila, end_column=columna_hasta,
+            )
+
+        ws.cell(row=fila, column=columna_desde, value=etiqueta)
+
+
 def escribir_pagos_bess(
     ruta_salida,
     df_ecostos=None,
@@ -2543,10 +2579,21 @@ def escribir_pagos_bess(
 
         if HOJA_CALCULO_ECOSTOS in regenerar:
             if df_ecostos is not None:
+                # startrow=1: deja la fila 1 libre para los
+                # encabezados de grupo (celdas combinadas), que se
+                # escriben aparte con _escribir_encabezados_grupo();
+                # los nombres de columna quedan en la fila 2 y los
+                # datos desde la fila 3.
                 df_ecostos.to_excel(
                     writer,
                     sheet_name=HOJA_CALCULO_ECOSTOS,
                     index=False,
+                    startrow=1,
+                )
+                _escribir_encabezados_grupo(
+                    writer.sheets[HOJA_CALCULO_ECOSTOS],
+                    list(NOMBRES_CALCULO_E_COSTOS),
+                    GRUPOS_CALCULO_E_COSTOS,
                 )
         else:
             _preservar_o_avisar(writer, HOJA_CALCULO_ECOSTOS)
@@ -2557,16 +2604,28 @@ def escribir_pagos_bess(
                     writer,
                     sheet_name=HOJA_CALCULO_RE545,
                     index=False,
+                    startrow=1,
+                )
+                _escribir_encabezados_grupo(
+                    writer.sheets[HOJA_CALCULO_RE545],
+                    list(NOMBRES_CALCULO_RE545),
+                    GRUPOS_CALCULO_RE545,
                 )
 
                 if df_resumen_re545 is not None:
                     # Tabla de otro largo, al lado del bloque
                     # principal con una columna en blanco de
                     # separacion (mismo criterio que CSF/CPF de FD).
+                    # startrow=1 tambien, para que sus nombres de
+                    # columna queden en la misma fila que los del
+                    # bloque principal (no tiene encabezado de grupo
+                    # propio: no hay evidencia de uno en el archivo
+                    # real).
                     df_resumen_re545.to_excel(
                         writer,
                         sheet_name=HOJA_CALCULO_RE545,
                         index=False,
+                        startrow=1,
                         startcol=len(df_re545.columns) + 1,
                     )
         else:
@@ -2679,6 +2738,40 @@ NOMBRES_CALCULO_RE545 = {
     "CC": "Total C2_545",
     "CE": "Monto a compensar",
 }
+
+# Encabezados de grupo (celdas combinadas arriba de los nombres de
+# columna) de "Calculo RE545", confirmados contra
+# docs/Calculo_RE545_reducido_para_IA.xlsx (fila 3 del archivo real,
+# aunque esa fila viene sin el merge en si -- se perdio en la
+# reduccion -- el texto queda solo en la celda de mas a la izquierda
+# de cada grupo, igual que en un merge real). Cada tupla es
+# (etiqueta, [claves internas del grupo, en orden]); las claves usan
+# el mismo diccionario NOMBRES_CALCULO_RE545 de arriba, asi que la
+# posicion real en la hoja de salida se calcula en el momento de
+# escribir (no depende de la letra del archivo real, que es distinta
+# de la nuestra -- ver el comentario de escribir_pagos_bess()).
+#
+# "Componente 1" y "Componente 2" no arrancan en BI/BQ (las primeras
+# columnas de cada seccion): el archivo real las deja sueltas, sin
+# grupo, y el merge arranca recien en BK/BS -- igual que en
+# GRUPOS_CALCULO_E_COSTOS, donde "Componente 1"/"Componente 2" tampoco
+# incluyen la columna final "Total"... salvo que aca SI la incluyen
+# (BO y CC quedan dentro del grupo); la unica columna que queda
+# siempre afuera de cualquier grupo es la ultima de toda la hoja
+# ("Monto a compensar").
+GRUPOS_CALCULO_RE545 = (
+    ("Dia", ["Mes", "Dia", "Hora"]),
+    ("Nombre", ["clave", "Barra"]),
+    ("BESS", ["Energia_Positiva", "Energia_Negativa", "SoC"]),
+    ("Subastas", ["AC", "AD", "AE", "AF", "AG", "AH"]),
+    ("FD", ["AI", "AJ", "AK", "AL", "AM", "AN"]),
+    ("FMA", ["AO", "AP", "AQ", "AR", "AS", "AT"]),
+    ("Componente 1", ["BK", "BL", "BM", "BN", "BO"]),
+    (
+        "Componente 2",
+        ["BS", "BT", "BU", "BV", "BW", "BX", "BY", "BZ", "CA", "CC"],
+    ),
+)
 
 
 def construir_dic_resumen_capacidad(resumen_bess):
@@ -5029,6 +5122,29 @@ NOMBRES_CALCULO_E_COSTOS = {
     "AZ": "Monto a compensar",
 }
 
+# Encabezados de grupo de "Calculo E Costos", confirmados contra
+# docs/Libro1_Subastas_real.xlsx (hoja "E COSTOS", fila 2 real -- la
+# unica hoja de las que tenemos como referencia real que conserva los
+# merges de Excel tal cual, via ws.merged_cells). Mismo criterio que
+# GRUPOS_CALCULO_RE545: (etiqueta, [claves internas]), resuelto contra
+# la posicion real en la salida al momento de escribir.
+#
+# "Prorratas (-)"/"Prorratas (+)" y el bloque "FD" (FD homologado)
+# comparten los mismos 6 nombres de columna (CPF/CSF/CTF por
+# direccion) que las Prorratas -- por eso los grupos se arman con las
+# claves internas (unicas), nunca buscando por nombre de columna
+# (duplicado a proposito, como el resto de la hoja).
+GRUPOS_CALCULO_E_COSTOS = (
+    ("Dia", ["Mes", "Dia", "Hora"]),
+    ("Nombre", ["clave", "Barra"]),
+    ("BESS", ["Energia_Positiva", "Energia_Negativa", "SoC"]),
+    ("Componente 2", ["S", "T", "U"]),
+    ("Prorratas (-)", ["AG", "AH", "AI"]),
+    ("Prorratas (+)", ["AJ", "AK", "AL"]),
+    ("FD", ["AM", "AN", "AO", "AP", "AQ", "AR"]),
+    ("Componente 1", ["AU", "AV", "AW", "AX"]),
+)
+
 
 def completar_calculo_e_costos_grupos(
     df_ecostos,
@@ -5145,7 +5261,9 @@ def completar_calculo_e_costos_grupos(
         f"marcadas como 'participa en subasta' (L=1)."
     )
 
-    return df.rename(columns=NOMBRES_CALCULO_E_COSTOS)
+    return df[list(NOMBRES_CALCULO_E_COSTOS)].rename(
+        columns=NOMBRES_CALCULO_E_COSTOS
+    )
 
 
 # ============================================================
