@@ -6,6 +6,28 @@ de.
 
 ---
 
+## Estructura del repositorio
+
+```
+Balance_BESS.py            <- la ventana (lo unico que se ejecuta)
+Script/
+    __init__.py
+    nucleo.py              <- todo el calculo del caso
+    Cmg/
+        __init__.py
+        Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
+```
+
+`Script/` es un paquete: la ventana hace `from Script import nucleo` y
+`nucleo.py` hace `from .Cmg import Extrae_CMG_barras`. La idea (conversada
+con el usuario) es ir sacando de `nucleo.py` un módulo por etapa, como ya
+se hizo con `Cmg/`; por ahora el resto sigue en un solo archivo grande.
+
+El nombre del módulo de CMg usa guiones bajos, no espacios, para que sea
+importable como cualquier módulo.
+
+---
+
 ## `Balance_BESS.py`
 
 - **Qué hace:** ventana tkinter única. Deja elegir la carpeta base del caso
@@ -14,51 +36,93 @@ de.
   texto tipo consola, prefijos `├──`/`└──`/`│`, patrón tomado del
   `Revisor_Reliquidacion.py` que el usuario dio como referencia) con el
   estado de cada entrada (OK/FALTA/PENDIENTE). El AAMM no se infiere del
-  nombre de ningún archivo: lo escribe el usuario.
+  nombre de ningún archivo: lo escribe el usuario, y **no** es una fila del
+  diagrama (no es parte de la estructura de carpetas) — las dos filas que
+  dependen de él (el SoC dentro de `Medidas/`, el CSV dentro de `Cmg/`) lo
+  dicen en su propio detalle cuando falta.
 
-  Las dos salidas (`Consolidado_entradas.xlsx`, `Pagos_BESS.xlsx`) son las
-  dos últimas filas del mismo diagrama, cada una con su botón **Generar...**
-  que abre una ventana aparte:
-  - *Generar Consolidado_entradas.xlsx*: una casilla por sección de
-    `nucleo.SECCIONES_CONSOLIDADO` ("Medidores", "Ofertas SSCC", "CMg",
-    "FD", "Subastas" -- 5 casillas, "Medidores"/"Ofertas SSCC" separadas
-    a pedido del usuario aunque comparten una unica lectura, ver
-    comentario de esa constante; todas tildadas por defecto). Lo
-    destildado se **conserva** tal cual estaba en el archivo existente
-    (no se recalcula ni se borra) — ver `nucleo.generar_consolidado`.
-  - *Generar Pagos_BESS.xlsx*: una casilla por hoja de
-    `nucleo.SECCIONES_PAGOS` ("Calculo E Costos", "Calculo RE545"),
-    mismo criterio de preservación — ver `nucleo.generar_pagos_bess`.
+  **No hay ventanas intermedias ni un botón "Ejecutar" único**: cada acción
+  es un botón en la fila que le corresponde. Las columnas del diagrama son
+  `Estructura | Estado | Acción | Detalle` — el botón va a la **izquierda**
+  del detalle, en una celda de ancho fijo (`ANCHO_ACCION`, en píxeles) para
+  que el detalle arranque siempre en la misma columna tenga o no botón esa
+  fila.
 
-  Ambas ventanas corren su función de `nucleo` en un hilo aparte
-  (`lanzar_generacion()`, helper compartido) y reportan al log/barra de
-  progreso/timer de la ventana **principal**, no a widgets propios: no hay
-  un botón "Ejecutar" único, cada salida se genera por separado.
+  | Fila | Botón | Qué hace |
+  |---|---|---|
+  | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
+  | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
+  | `Consolidado_entradas.xlsx` | **Actualizar todo** | `generar_consolidado` con todas las secciones |
+  | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
+  | `Pagos_BESS.xlsx` | **Actualizar todo** | `generar_pagos_bess` con todas |
+  | cada `hoja '...'` de esa salida | **Actualizar** | `generar_pagos_bess` con esa sola |
 
-  La fila **`cmg.xlsx`** del diagrama (una ENTRADA, no una salida) tiene
-  también su botón **Generar** al lado del nombre, pero **sin ventana
-  intermedia**: no hay nada que elegir (el origen sale del AAMM y las
-  barras de `Centrales.xlsx`), así que corre `nucleo.generar_cmg` directo
-  por el mismo `lanzar_generacion()`. Si el archivo ya existe, pide
-  confirmación antes de reemplazarlo. Es el único botón que vive dentro
-  de una fila del árbol y por eso `pintar_arbol()` guarda las referencias
-  en `botones_arbol` (el árbol se repinta entero en cada `revisar()`, así
-  que el widget puede haber desaparecido cuando termina el hilo — ver el
-  `try/except tk.TclError` de `terminar()`).
-- **Consume:** `nucleo` (`revisar_estructura`, `resolver_rutas`,
-  `generar_consolidado`, `generar_pagos_bess`, `SECCIONES_CONSOLIDADO`,
-  `ErrorEntrada`); `config.json` (última carpeta base y último AAMM
-  recordados, por PC/usuario).
+  Las dos salidas se desglosan por hoja igual que `Centrales.xlsx`: lo que
+  no se actualiza se **conserva** tal cual estaba en el archivo (no se
+  recalcula ni se borra — ver `escribir_salida`/`hojas_regenerar`), y si el
+  archivo todavía no existe se crea con el resto de las hojas vacías (queda
+  registrado en su hoja `Log` y el diagrama las muestra como PENDIENTE).
+
+  Todos los botones corren su función de `nucleo` en un hilo aparte
+  (`lanzar()`, helper compartido) reportando al log/barra/timer de la
+  ventana, y mientras algo corre **todos** los botones del árbol quedan
+  deshabilitados (`corriendo`/`habilitar_botones`). Como el árbol se
+  repinta entero en cada `revisar()`, las referencias a los botones se
+  renuevan ahí (`botones_arbol`).
+- **Consume:** `Script.nucleo` (`revisar_estructura`, `traer_csv_cmg`,
+  `generar_cmg`, `generar_consolidado`, `generar_pagos_bess`,
+  `SECCIONES_CONSOLIDADO`, `SECCIONES_PAGOS`, `validar_aamm`,
+  `ErrorEntrada`, `extrae_cmg`); `config.json` (última carpeta base y
+  último AAMM recordados, por PC/usuario).
 - **Produce:** `config.json` actualizado con la carpeta base y el AAMM
-  elegidos; dispara en `nucleo` la escritura de `Consolidado_entradas.xlsx`
-  y/o `Pagos_BESS.xlsx` dentro de la carpeta base del caso (por separado,
-  según que ventana "Generar" se haya usado).
+  elegidos; dispara en `nucleo` la escritura del CSV de CMg, `cmg.xlsx`,
+  `Consolidado_entradas.xlsx` y/o `Pagos_BESS.xlsx` dentro de la carpeta
+  base del caso (cada uno por su botón).
 - **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`);
-  helpers de presentación del árbol (`_profundidad_fila`,
-  `_es_ultimo_en_su_nivel`, `_prefijos_arbol`) que traducen la lista plana
-  de `revisar_estructura()` a prefijos tipo consola — deliberadamente NO
-  viven en `nucleo.py`, que no conoce conceptos de interfaz.
-- **Depende de:** `nucleo.py` (mismo directorio, import directo).
+  helpers de presentación del árbol (`_es_ultimo_en_su_nivel`,
+  `_prefijos_arbol`) que traducen la lista plana de `revisar_estructura()`
+  a prefijos tipo consola — deliberadamente NO viven en `nucleo.py`, que no
+  conoce conceptos de interfaz. El **nivel** de cada fila sí lo pone
+  `nucleo` (es estructura, no dibujo), y el **id** de cada fila es lo que
+  la ventana usa para decidir qué botón le cuelga (`_boton_de_fila`): así
+  `nucleo.py` no sabe nada de botones.
+- **Depende de:** el paquete `Script/` (mismo directorio).
+
+---
+
+## `Script/Cmg/Extrae_CMG_barras.py`
+
+- **Qué hace:** todo lo que sabe del CSV 15-minutal de CMg. Viene del
+  script suelto que se corría a mano al lado del CSV (autor original:
+  Freddy.Arriagada), con tres cambios: el CSV se baja de la unidad de red a
+  la carpeta `Cmg/` del caso en vez de buscarse al lado del `.py`, las
+  barras a filtrar se reciben por parámetro en vez de estar escritas en el
+  código, y no escribe el Excel (devuelve DataFrames).
+- **Consume:**
+  `T:\CMgReales 15MIN\<AAAA>\<AAMM>\Mensual\CMg\Cmg para balance\cmg<AAMM>_def_15minutal.csv`
+  (`RAIZ_CMG_REALES` + `SUBCARPETAS_CMG_REALES` + `PLANTILLA_CSV_CMG_15MIN`
+  — la única ruta del programa que apunta fuera de la carpeta base del
+  caso; si `T:` cambia de letra se cambia ahí y nada más), y después el
+  mismo CSV ya copiado en `<CARPETA_BASE>/Cmg/`.
+- **Produce:** la copia local del CSV; el DataFrame de `cmg.xlsx` (lo
+  escribe `nucleo.generar_cmg`).
+- **Expone:** `ErrorCmg`; `nombre_csv_15min(aamm)`,
+  `ruta_csv_en_red(aamm, raiz=None)`, `ruta_csv_local(carpeta_cmg, aamm)`,
+  `traer_csv_15min(carpeta_cmg, aamm, raiz=None, registrar=print)`,
+  `construir_cmg_desde_csv(ruta_csv, barras, registrar=print)` →
+  `(df_salida, resumen_dias)`, `validar_layout(df, registrar=print)`,
+  `resumen_dias_anomalos(resumen_dias)`.
+- **Depende de:** solo `pandas` (a propósito: **no importa `nucleo`**, así
+  no hay ciclos de import cuando se saquen más etapas a módulos propios).
+  Los errores previsibles salen como `ErrorCmg` y `nucleo` los traduce a
+  `ErrorEntrada`.
+- **Detalle que importa:** `nucleo.leer_cmg()` vuelve a leer `cmg.xlsx`
+  **por posición** (D = Barra, F = valor de Q, H = Cuarto de Hora,
+  I = CMg promedio), así que un cambio de columnas en el CSV rompería la
+  etapa siguiente en silencio: `validar_layout()` avisa en el log si
+  `BARRA` deja de caer en D o `Cuarto de Hora` en H. El `Cuarto de Hora`
+  global se numera con los bloques que el CSV **realmente** trae (no se
+  asumen 96 por día: los días de cambio de hora traen 92/100).
 
 ---
 
@@ -196,12 +260,10 @@ de.
     `<CARPETA_BASE>/Ofertas/` cuyo nombre contenga "OfertasSSCC" (más
     reciente si hay varios)
   - `<CARPETA_BASE>/Cmg/cmg.xlsx` (nombre literal fijo, sin AAMM). No se
-    descarga: lo genera el propio programa con `generar_cmg()` a partir del
-    CSV 15-minutal de la unidad de red
-    `T:\CMgReales 15MIN\AAAA\AAMM\Mensual\CMg\Cmg para balance\cmgAAMM_def_15minutal.csv`
-    (`RAIZ_CMG_REALES` + `SUBCARPETAS_CMG_REALES` +
-    `PLANTILLA_CSV_CMG_15MIN`) — la **única** entrada que se busca fuera de
-    la carpeta base del caso
+    descarga: lo genera el propio programa con `generar_cmg()` a partir de
+    `<CARPETA_BASE>/Cmg/cmg<AAMM>_def_15minutal.csv`, que a su vez se baja
+    de la unidad de red con `traer_csv_cmg()` (ver
+    `Script/Cmg/Extrae_CMG_barras.py`)
   - Un archivo Excel dentro de `<CARPETA_BASE>/SSCC_Desempeño/` cuyo nombre
     empiece con "SSCC_Desempeño_" (más reciente si hay varios), hojas `CPF
     Horario` y `CSF Horario`
@@ -220,6 +282,17 @@ de.
     también requiere el archivo `SSCC_Desempeño_*` para `AM:AR`).
 - **Expone (funciones clave agregadas hasta ahora, además de las básicas
   de E/S y homologación):**
+  - Estructura del caso: `revisar_estructura(carpeta_base, aamm=None)` →
+    `(rutas, filas)`, donde cada fila es un dict `{id, etiqueta, nivel,
+    estado, detalle}` (`estado`: `ok`/`falta`/`pendiente`). El **nivel**
+    (0 = raíz del caso, 1 = dentro de una carpeta/archivo, 2 = un nivel
+    más) lo pone `nucleo` porque es estructura, no dibujo; el **id** es
+    estable y es lo que la ventana usa para colgarle el botón que
+    corresponda. Helpers: `_fila()`, `hojas_de(ruta)` (nombres de hoja de
+    un Excel) y `hojas_con_datos(ruta)` (`{hoja: tiene datos}`, usado para
+    el estado hoja por hoja de las dos salidas: una hoja preservada que
+    nunca se generó queda con una sola celda vacía y tiene que verse
+    PENDIENTE, no generada), `_filas_de_hojas()`.
   - Ofertas SSCC: `buscar_archivo_ofertas`, `construir_resumen_ofertas_sscc`,
     `cargar_resumen_en_medidores`, `calcular_r`, `calcular_s`,
     `construir_resumen_ventana_oferta`, `calcular_t`.
@@ -281,23 +354,25 @@ de.
     `"subastas"` si son independientes de punta a punta.
   - `generar_consolidado(carpeta_base, aamm, secciones_activas, registrar=print, progreso=None)`
     — genera/actualiza `Consolidado_entradas.xlsx` recalculando solo las
-    secciones tildadas; valida los archivos de entrada únicamente para las
-    secciones tildadas (si `"medidores"` no está tildada, no exige
-    Medidas_SAE/SoC/Centrales/Ofertas). Reemplaza a la vieja `ejecutar()`.
+    secciones pedidas; valida los archivos de entrada únicamente para esas
+    secciones (si no se pide `"medidores"`, no exige
+    Medidas_SAE/SoC/Centrales/Ofertas). Si el archivo no existe, se crea.
+    Reemplaza a la vieja `ejecutar()`.
+  - `traer_csv_cmg(carpeta_base, aamm, registrar=print, progreso=None)` —
+    copia el CSV 15-minutal del período de la unidad de red a
+    `<CARPETA_BASE>/Cmg/` (botón **Traer cmg_15min**). Se copia en vez de
+    leerlo directo de la red para que el caso quede autocontenido: una vez
+    traído, `cmg.xlsx` se puede regenerar sin la unidad conectada y queda
+    registrado con qué archivo se trabajó.
   - `generar_cmg(carpeta_base, aamm, ruta_csv=None, registrar=print, progreso=None)`
-    — genera/actualiza `<CARPETA_BASE>/Cmg/cmg.xlsx` desde el CSV
-    15-minutal del período (reemplaza al script suelto
-    `Extrae_CMG_barras.py`, que leía el CSV de al lado del `.py` y traía
-    las barras hardcodeadas). Helpers: `ruta_csv_cmg_15min(aamm, raiz=None)`
-    (arma la ruta de red; no valida existencia, la ventana la muestra
-    igual), `barras_desde_resumen_bess(resumen_bess)` (las barras a filtrar
-    salen de `Resumen BESS!Barra inyección` vía `construir_mapa_barra()` —
-    la MISMA fuente que `Calculo E Costos!Barra`, así que las dos puntas no
-    se pueden desincronizar), `construir_cmg_desde_csv(ruta_csv, barras, registrar=print)`
-    (numera el `Cuarto de Hora` global con los bloques que el CSV realmente
-    trae, no asumiendo 96 por día: los días de cambio de hora traen 92/100)
-    y `_validar_layout_cmg(df, registrar=print)` (avisa si el CSV cambió de
-    formato, porque `leer_cmg()` después lee `cmg.xlsx` POR POSICIÓN).
+    — genera/actualiza `<CARPETA_BASE>/Cmg/cmg.xlsx` con el CSV que ya está
+    en esa misma carpeta (botón **Generar**). Las barras salen de
+    `barras_desde_resumen_bess(resumen_bess)`, que reusa
+    `construir_mapa_barra()` — la MISMA fuente que `Calculo E Costos!Barra`,
+    así que las dos puntas no se pueden desincronizar. El resto (ruta de
+    red, formato del CSV, numeración del `Cuarto de Hora`, validación del
+    layout) vive en `Script/Cmg/Extrae_CMG_barras.py`, ver su bloque más
+    arriba.
   - `generar_pagos_bess(carpeta_base, registrar=print, progreso=None)` —
     genera/actualiza `Pagos_BESS.xlsx`; lee `Medidores` Y `Subastas` desde
     `Consolidado_entradas.xlsx` ya generado (no los recalcula), y
