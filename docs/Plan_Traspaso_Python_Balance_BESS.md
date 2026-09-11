@@ -2054,29 +2054,37 @@ hoja de salida conserva el orden y el contenido, no la letra de Excel.
 
 Tres bloques de 6 columnas con los **mismos 6 encabezados** (`CPF(-)`, `CSF(-)`, `CTF(-)`,
 `CPF(+)`, `CSF(+)`, `CTF(+)`), que se distinguen por el título de grupo de la fila 2: "Subastas"
-(`AC:AH`), "FD" (`AI:AN`) y "FMA" (`AO:AT`). Los tres son el mismo `SUMIFS` contra `Subastas`,
-cambiando solo la columna que se suma:
+(`AC:AH`), "FD" (`AI:AN`) y "FMA" (`AO:AT`). **Corrección (sesión 2026-09-11 (20), validada
+contra `Pagos_BESS.xlsx` real):** no los 18 son el mismo `SUMIFS` — las 15 columnas `AC:AN` y
+`AO:AQ` sí lo son, pero `AR:AT` (`CPF(+)`/`CSF(+)`/`CTF(+)` del bloque `FMA`, el tercero) son la
+**constante `1`** en las 26.784 filas del archivo real, no una fórmula (confirmado contra las
+fórmulas guardadas de `docs/Calculo_RE545_reducido_para_IA.xlsx`, hoja `Mapa_Formulas`, que no
+lista ninguna fórmula para ese rango — y contra la comparación real fila a fila, sin ninguna
+excepción):
 
 ```
 AC4 = SUMIFS(Subastas!$O:$O, Subastas!$K:$K,$G4, Subastas!$J:$J,$D4, Subastas!$B:$B,AC$3)
 AI4 = idem sobre Subastas!$P:$P
-AO4 = idem sobre Subastas!$Q:$Q
+AO4 = idem sobre Subastas!$Q:$Q      (AO:AQ; AR:AT = 1, constante, no es SUMIFS)
 AU4 = SUMPRODUCT($AC4:$AH4, $AI4:$AN4, $AO4:$AT4) / 4 * 1000
 ```
 
 Criterios homologados **por nombre** contra nuestra hoja `Subastas` (igual que `calcular_l()` y
 los umbrales de E Costos): central → `Configuración`, hora del mes → `Hora_mes`, tipo → `Control`
 (la columna con los valores `CPF`/`CSF`, la misma que ya usa `construir_prorrata_sscc()`). Un
-`SUMIFS` sin coincidencias da **0**, no blanco.
+`SUMIFS` sin coincidencias da **0**, no blanco. Esto aplica a `AC:AN` y `AO:AQ`; `AR:AT` no
+consultan `Subastas` en absoluto.
 
-**Pendiente de confirmar (no bloquea):** las tres columnas que se *suman* se toman por
+**Confirmado** (ya no es un pendiente): las tres columnas que se *suman* se toman por
 **posición** (`O`, `P`, `Q` de nuestra hoja `Subastas`, que es como las escribe la macro de
 carga), no por nombre. Los nombres reales que trajo el archivo de encabezados llaman `FD` a `O` y
 `FMA` a `P`, o sea corridos una columna respecto de los títulos de grupo de RE545 (que dicen
 Subastas/FD/FMA para `O`/`P`/`Q`) — el mismo corrimiento de una columna que el usuario ya
 describió para el archivo de Subastas. Se siguió la **fórmula** (posición), no el nombre, porque
-la fórmula es la fuente primaria; si al validar contra un caso real los tres bloques salen
-corridos entre sí, esto es lo primero que hay que mirar.
+la fórmula es la fuente primaria; validado contra un caso real (sesión 2026-09-11 (20)): los tres
+bloques (`Subastas`, `FD`, `FMA`) coinciden con la planilla 11 real sin ningún corrimiento entre
+ellos, comparando por orden/contenido (la salida Python no reproduce la letra de Excel real,
+igual que el resto de la hoja — ver 26.2).
 
 ## 26.4. Etapa 3 implementada: `AW:BG` (resumen por central + ventana)
 
@@ -2124,6 +2132,30 @@ Nada: la hoja quedó completa. Lo único que **no** se replica son las columnas 
 | `BQ` | `Energia Total` | `BS + BN`. |
 | `BR` | `Ventana de Valorizacion` | `= T`. |
 | `BS` | `inyeccion en el periodo del Cmg Descendente` | `I` de la **primera** fila con `BR`, `S=BI`, `G`, `E=BJ` iguales (`INDEX/MATCH` matricial). |
+
+**Trampa real en `BK`/`BL`/`BS` (sesión 2026-09-11 (21), validada fila a fila contra
+`Pagos_BESS.xlsx` real):** el criterio `S=BI` de las tres fórmulas de arriba **no** compara `BI`
+contra `BI` de fila a fila — compara la columna `S` (`ranking cmg`) de las **otras** filas contra
+el `BI` (`Orden`) de **la fila actual**. O sea hay dos claves distintas: la clave de
+**acumulación** (para decidir qué sumar en el `SUMIFS`/qué candidatos mira el `MATCH`) usa el `S`
+de cada fila candidata; la clave de **búsqueda** (una por fila, la fija del criterio) usa el `BI`
+de esa fila. La implementación original (`calcular_bk_bl_bm_bs_re545()`) usaba `BI` en los dos
+lados por error, lo que da el resultado correcto solo quando `S` y `BI` coinciden fila a fila —
+en un caso real donde difieren, el agrupamiento queda mal. Confirmado contra las fórmulas
+guardadas del archivo real (`docs/Calculo_RE545_reducido_para_IA.xlsx`, hoja `Mapa_Formulas`):
+
+```
+BK4 = SUMIFS(R:R, G:G,G4, S:S,BI4, T:T,T4, E:E,BJ4)
+BL4 = SUMIFS(Q:Q, S:S,BI4, E:E,BJ4, G:G,G4, T:T,T4)
+BS4 = IFERROR(INDEX(I, MATCH(1, (BR=BR4)*(S=BI4)*(G=G4)*(E=BJ4), 0)), "")
+```
+
+Corregido separando `claves_acumulacion` (con `S`) de `claves_busqueda` (con `BI`). El error
+arrastraba a todo lo que depende de `BM`/`BS` — `BN`, `BO`, `CC` y, al final, `CE` ("Monto a
+compensar", la columna final de la hoja). Verificado con el `Pagos_BESS.xlsx` real (hoja
+`RE545 P11`, pegada por el usuario): `BK`/`BM` **0** diferencias en las 26.784 filas; con eso más
+la corrección de `AU` de la sesión anterior (que también alimenta el resumen `AW:BG`, contaminado
+igual que `BK`/`BM` por el bug viejo), `BN`/`BO`/`CC`/`CE` también dan **0** diferencias.
 | `BT` | `Energía ya Asignada` | Suma de los `BU` **posteriores** del mismo grupo. |
 | `BU` | `Asignacion Edisponible` | `IF(BS=0, 0, MAX(0, MIN(BQ, BC - BT - suma de BV del grupo)))`. |
 | `BV` | `SSCC ultima hora` | Ver 26.4 (ya se usaba para `BF`). |

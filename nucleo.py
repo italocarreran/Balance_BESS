@@ -3051,6 +3051,19 @@ def calcular_reservas_re545(df_re545, dics_reservas):
 
     o sea, la suma de los 6 productos "reserva x FD x FMA", dividida
     por 4 y por mil.
+
+    TRAMPA REAL (encontrada comparando fila a fila contra "Pagos_BESS
+    real" -- planilla 11 -- que el usuario pego en la hoja "RE545 P11":
+    a diferencia de los otros 15 valores de los tres bloques, las
+    columnas CPF(+)/CSF(+)/CTF(+) del bloque "FMA" (el tercero, AR:AT
+    en el archivo real) NO son un SUMIFS -- son la CONSTANTE 1 en TODAS
+    las filas. Confirmado contra las formulas guardadas del archivo
+    real (docs/Calculo_RE545_reducido_para_IA.xlsx, hoja
+    Mapa_Formulas): AO/AP/AQ (CPF(-)/CSF(-)/CTF(-) del mismo bloque)
+    son SUMIFS igual que los otros dos bloques, pero AR/AS/AT aparecen
+    como valor literal "1", sin formula. Antes de esta correccion se
+    les aplicaba el mismo SUMIFS (que da 0 casi siempre), lo que
+    tambien arrastraba un error a AU (el SUMPRODUCT las multiplica).
     """
 
     df = df_re545
@@ -3060,9 +3073,23 @@ def calcular_reservas_re545(df_re545, dics_reservas):
 
     columnas = {}
 
-    for bloque, dic in zip(_BLOQUES_RESERVA_RE545, dics_reservas):
+    indice_bloque_fma = 2
+    posiciones_constante_uno = (3, 4, 5)
 
-        for interno, tipo in zip(bloque, TIPOS_RESERVA_RE545):
+    for indice_bloque, (bloque, dic) in enumerate(
+        zip(_BLOQUES_RESERVA_RE545, dics_reservas)
+    ):
+
+        for posicion, (interno, tipo) in enumerate(
+            zip(bloque, TIPOS_RESERVA_RE545)
+        ):
+
+            if (
+                indice_bloque == indice_bloque_fma
+                and posicion in posiciones_constante_uno
+            ):
+                columnas[interno] = pd.Series(1.0, index=df.index)
+                continue
 
             tipo_normalizado = _normaliza_valor_vba(tipo)
 
@@ -3442,15 +3469,33 @@ def calcular_bi_bj_re545(df_re545):
 
 def calcular_bk_bl_bm_bs_re545(df_re545):
     """
-    Replica BK, BL, BM y BS, que comparten la misma clave
-    (central + Orden + ventana + Periodo):
+    Replica BK, BL, BM y BS.
 
-      BK = suma de R (CMg Promedio) de las filas con esa clave
-      BL = suma de Q (CMg) de las filas con esa clave
+    TRAMPA REAL (encontrada comparando fila a fila contra la hoja
+    "RE545 P11" que el usuario pego -- planilla 11 real -- y
+    confirmada contra las formulas guardadas del archivo real,
+    docs/Calculo_RE545_reducido_para_IA.xlsx, hoja Mapa_Formulas):
+
+        BK4 = SUMIFS(R:R, G:G,G4, S:S,BI4, T:T,T4, E:E,BJ4)
+        BL4 = SUMIFS(Q:Q, S:S,BI4, E:E,BJ4, G:G,G4, T:T,T4)
+        BS4 = INDEX(I, MATCH(1, (BR=BR4)*(S=BI4)*(G=G4)*(E=BJ4), 0))
+
+    Las tres NO agrupan comparando BI contra BI: el criterio de cada
+    SUMIFS/MATCH es "S:S,BI4" -- la columna S (ranking cmg) de las
+    OTRAS filas contra el BI (Orden) de LA FILA ACTUAL. O sea hay dos
+    claves distintas: la clave de ACUMULACION (para saber que sumar)
+    usa el S de cada fila; la clave de BUSQUEDA (para saber que leer)
+    usa el BI de la fila. Antes se usaba BI de los dos lados por
+    error (mismo "trampa de letras" que ya afecto a otras columnas de
+    este proyecto -- R/S/T/U/V significan cosas distintas segun la
+    hoja, y aca ademas se cruzan entre si DENTRO de la misma hoja).
+
+      BK = suma de R (CMg Promedio) de las filas cuyo S == BI(fila)
+      BL = suma de Q (CMg) de las filas cuyo S == BI(fila)
       BM = el k-esimo valor mas grande de BL entre TODAS las filas
            (de toda la hoja, no del grupo) cuyo BK es igual al de la
            fila, con k = Periodo/15 + 1
-      BS = el I (Descarga kWh) de la PRIMERA fila con esa clave
+      BS = el I (Descarga kWh) de la PRIMERA fila cuyo S == BI(fila)
     """
 
     df = df_re545.reset_index(drop=True)
@@ -3459,7 +3504,23 @@ def calcular_bk_bl_bm_bs_re545(df_re545):
     q = pd.to_numeric(df["CMg"], errors="coerce").fillna(0.0)
     i_energia = pd.to_numeric(df["Energia_Positiva"], errors="coerce")
 
-    claves = [
+    # Clave de ACUMULACION: se arma con S (ranking cmg) de cada fila,
+    # que es lo que el SUMIFS/MATCH real compara contra "BI4".
+    claves_acumulacion = [
+        (
+            _normaliza_valor_vba(central),
+            _normaliza_valor_vba(ranking),
+            _normaliza_valor_vba(ventana),
+            _normaliza_valor_vba(periodo),
+        )
+        for central, ranking, ventana, periodo in zip(
+            df["clave"], df["S"], df["T"], df["BJ"]
+        )
+    ]
+
+    # Clave de BUSQUEDA (una por fila): se arma con el BI (Orden) de
+    # esa misma fila, el criterio fijo del SUMIFS/MATCH real.
+    claves_busqueda = [
         (
             _normaliza_valor_vba(central),
             _normaliza_valor_vba(orden),
@@ -3475,15 +3536,17 @@ def calcular_bk_bl_bm_bs_re545(df_re545):
     suma_q = {}
     primer_i = {}
 
-    for posicion, clave in enumerate(claves):
+    for posicion, clave in enumerate(claves_acumulacion):
         suma_r[clave] = suma_r.get(clave, 0.0) + float(r.iloc[posicion])
         suma_q[clave] = suma_q.get(clave, 0.0) + float(q.iloc[posicion])
         if clave not in primer_i:
             primer_i[clave] = i_energia.iloc[posicion]
 
-    bk = [suma_r[clave] for clave in claves]
-    bl = [suma_q[clave] for clave in claves]
-    bs = [primer_i[clave] for clave in claves]
+    # SUMIFS sin match da 0; el INDEX/MATCH de BS, en cambio, cae en
+    # el IFERROR real y da "" (blanco), no 0.
+    bk = [suma_r.get(clave, 0.0) for clave in claves_busqueda]
+    bl = [suma_q.get(clave, 0.0) for clave in claves_busqueda]
+    bs = [primer_i.get(clave, pd.NA) for clave in claves_busqueda]
 
     # BM: LARGE(IF(BK = BK(i), BL), Periodo/15 + 1). El IF recorre
     # TODA la columna, no el grupo: se indexa por valor de BK.

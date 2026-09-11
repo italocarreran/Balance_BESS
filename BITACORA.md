@@ -58,6 +58,15 @@ estado, no un historial.
   filas de la planilla 11 real — solo se confirmaron 2 casos puntuales
   (los que el usuario reportó), aunque el mecanismo (normalizar por fila)
   quedó confirmado con certeza matemática, no es una inferencia.
+- ~~Investigar el reporte del usuario "En el R545 tengo diferencias igual
+  parten en AK:AN"~~ — resuelto esta sesión: no era un problema de
+  columnas AK:AN en sí (esas coinciden perfectamente comparando por
+  posición/orden, no por letra de Excel — la salida nunca reprodujo la
+  letra real, ver más abajo), sino que `AR:AT` (`CPF(+)`/`CSF(+)`/`CTF(+)`
+  del bloque "FMA", el tercero de los tres bloques de reservas) se
+  calculaban con el mismo `SUMIFS` que el resto, cuando en el archivo real
+  son la **constante 1** en las 26.784 filas, no una fórmula. Ver entrada
+  de esta sesión.
 - Revisar si `construir_dic_mapeo_diccionario()` (columnas A:B, usada por
   el FD homologado de `Calculo E Costos!AM:AR`) y `_mapas_homologacion_
   fge()` (columnas E:F:G, usada por `Medidores!V`) también deberían usar
@@ -1590,3 +1599,130 @@ discrepancia).
 
 **Pendiente:** el usuario todavía no confirmó si con estos dos fixes el resto de la hoja coincide
 completamente contra la planilla 11 — falta una corrida nueva de punta a punta.
+
+## 2026-09-11 (20) — Fix: `Calculo RE545!AR:AT` no eran `SUMIFS`, eran la constante 1
+
+El usuario reportó, con una nueva comparación real (`Pagos_BESS.xlsx` con una hoja pegada
+`RE545 P11`, análoga a la de la sesión anterior pero para `Calculo RE545`): "En el R545 tengo
+diferencias igual parten en AK:AN".
+
+**Primer paso, para no perseguir un fantasma:** como ya se documentó (plan §26.2, BITACORA de
+sesiones anteriores), la salida de `Calculo RE545` **no reproduce la letra de Excel real** — las
+columnas vacías del original (`W:AB`) no se escriben, así que todo lo que sigue queda corrido de
+letra. Comparando por **orden/contenido** (no por letra) los tres bloques de 6 columnas
+(`Subastas`, `FD`, `FMA`) contra la hoja `RE545 P11` pegada por el usuario, fila a fila por las
+26.784 filas, usando como clave `Mes+Dia+Hora+Minuto+Configuracion`:
+
+- Bloque `Subastas`: 0 diferencias.
+- Bloque `FD` (donde el usuario ubicó "AK:AN" en SU comparación, que sí tiene las columnas reales
+  sin correr): 0 diferencias.
+- Bloque `FMA`: **80.352 diferencias** (positions `CPF(+)`, `CSF(+)`, `CTF(+)` de ese bloque, en
+  TODAS las filas).
+
+O sea: la molestia real no estaba en `AK:AN` de nuestra salida (que es el bloque `FD`, sin
+diferencias), sino en el bloque `FMA` (que en nuestra salida compacta cae en columnas distintas,
+pero el usuario lo estaba mirando alineado con la posición real del `.xlsm`, donde si cae en
+`AK:AN`... da igual: la comparación por contenido mostró exactamente dónde estaba el problema real,
+sin necesidad de discutir letras).
+
+**Causa exacta**, confirmada contra las fórmulas guardadas del archivo real
+(`docs/Calculo_RE545_reducido_para_IA.xlsx`, hoja `Mapa_Formulas`, que lista la fórmula de cada
+rango de columnas del `.xlsm` real): `AO:AQ` (`CPF(-)`/`CSF(-)`/`CTF(-)` del bloque `FMA`) SÍ son
+`SUMIFS(Subastas!$Q:$Q, ...)`, igual que los otros 15 valores de los tres bloques — pero `AR:AT`
+(`CPF(+)`/`CSF(+)`/`CTF(+)`, el mismo bloque) **no aparecen como fórmula en el mapa**: son el
+valor literal `1`, constante, en las 26.784 filas del archivo real (confirmado también
+directamente en la hoja `RE545 P11` pegada por el usuario: `CPF(+)=CSF(+)=CTF(+)=1` sin ninguna
+excepción). El plan (§26.3) asumía "los tres [bloques] son el mismo SUMIFS" — cierto para 15 de
+las 18 columnas, falso para estas 3. Nuestro código, al no distinguir el caso, les aplicaba el
+mismo `SUMIFS`, que casi siempre da 0 (rara vez hay match exacto central+hora+tipo en `Subastas`
+para esas combinaciones) — de ahí el "sale con 2 [en realidad 0] donde debería ser otra cosa" que
+reportaba el usuario, y el arrastre a `AU` (`SUMA Reservas*FMA*FD = SUMPRODUCT(...)/4*1000`, que
+multiplica por estas columnas).
+
+**Fix:** `calcular_reservas_re545()` — al armar el tercer bloque (`FMA`), las posiciones 3, 4 y 5
+(`CPF(+)`, `CSF(+)`, `CTF(+)`) ya no consultan el diccionario de `SUMIFS`: se fijan directamente
+en `1.0`, para todas las filas, sin excepción — es dato constante, no una fórmula que dependa de
+`Subastas`.
+
+**Verificación:**
+- La función nueva es, por construcción, independiente de los diccionarios de `SUMIFS` para esas
+  3 columnas (siempre devuelve 1.0 sin mirar `Subastas`) — coincide automáticamente con las
+  26.784 filas reales, que también son constantes.
+- Recalculando `AU` fila a fila con los valores reales de los otros 15 componentes (que ya
+  coincidían) más `AR=AS=AT=1` en vez del `SUMIFS` viejo: **0 diferencias** contra el `AU` real en
+  las 26.784 filas (antes del fix: 4.628 filas con diferencia, hasta 36.609 de magnitud).
+- Test sintético actualizado/agregado (`test_re545.py`, `test_re545_fma_constante.py`, no
+  persistidos) que confirman que `AR`/`AS`/`AT` dan 1.0 sin importar el contenido de `Subastas`
+  (incluso con diccionarios vacíos), y que las otras 15 columnas del bloque de reservas siguen
+  siendo el `SUMIFS` de siempre, sin tocarse.
+- Regresión completa de las 19 sesiones anteriores: pasa (se actualizó a mano el valor esperado
+  de un test viejo, `test_re545.py`, que tenía hardcodeado el resultado incorrecto de `AU` para
+  un caso con `CSF(+)`; el valor nuevo es el correcto según la fórmula real).
+
+**Archivo de referencia:** `015231ed-Pagos_BESS.xlsx` (hoja `RE545 P11`, pegada por el usuario) —
+no se copió a `docs/` porque no aporta nada que `docs/Pagos_BESS_comparacion_real.xlsx` (sesión
+anterior) o `docs/Calculo_RE545_reducido_para_IA.xlsx` (ya en el repo, fuente directa de la
+fórmula real que confirmó el fix) no tuvieran ya.
+
+## 2026-09-11 (21) — Fix grande: `BK/BL/BS` de `Calculo RE545!BI:CE` cruzaban mal S contra BI
+
+El usuario, todavía mirando la misma comparación real (`RE545 P11`), reportó más diferencias
+usando los nombres de columna de **nuestra** salida (no las letras reales): "AR:AT, BI, AZ" y
+después, más específico: "Curva Cmg Decendente promedio horario, (blanco), Curva Cmg Decendente".
+
+**Primer chequeo (para no repetir la confusión de letras de la entrada anterior):** comparando por
+contenido, `AR:AT` (el fix de la sesión 20) y `BI`/`AZ` con letra REAL (`Orden`, `EiniT` del
+resumen) daban 0 diferencias — esos ya estaban bien. El problema real estaba en dos columnas
+específicas que el usuario nombró explícitamente: `Curva Cmg Decendente promedio horario` (`BK`
+real) y `Curva Cmg Decendente` (`BM` real).
+
+**Causa exacta**, encontrada comparando fila a fila y confirmada contra las fórmulas guardadas del
+archivo real (`docs/Calculo_RE545_reducido_para_IA.xlsx`, hoja `Mapa_Formulas`):
+
+```
+BK4 = SUMIFS(R:R, G:G,G4, S:S,BI4, T:T,T4, E:E,BJ4)
+BL4 = SUMIFS(Q:Q, S:S,BI4, E:E,BJ4, G:G,G4, T:T,T4)
+BS4 = IFERROR(INDEX(I, MATCH(1, (BR=BR4)*(S=BI4)*(G=G4)*(E=BJ4), 0)), "")
+```
+
+El criterio `S:S,BI4` compara la columna `S` (`ranking cmg`) de las OTRAS filas contra el `BI`
+(`Orden`) de LA FILA ACTUAL — no `BI` contra `BI`. `calcular_bk_bl_bm_bs_re545()` armaba una sola
+clave usando `BI` de los dos lados (la de acumulación Y la de búsqueda), lo que da el resultado
+correcto únicamente cuando `S` y `BI` coinciden fila a fila por casualidad — que es exactamente lo
+que pasaba en el único caso sintético que existía hasta ahora (por eso nunca se detectó). Con
+datos reales, donde `S` y `BI` difieren, el agrupamiento salía mal.
+
+Esto no se quedaba en `BK`/`BM`: al ser el insumo de `BN` (`Edisp_Asig`), `BO` (`Total C1_545`),
+`CC` (`Total C2_545`) y, al final, `CE` (`Monto a compensar` — la ÚLTIMA columna de toda la hoja),
+el error se propagaba a lo largo de toda la sección `BI:CE`.
+
+**Fix:** `calcular_bk_bl_bm_bs_re545()` ahora arma DOS listas de claves — `claves_acumulacion`
+(con `S` de cada fila, para poblar los diccionarios de suma/primer-valor) y `claves_busqueda` (con
+`BI` de cada fila, para leer el resultado) — en vez de una sola clave usada de los dos lados.
+También se corrigió el valor por defecto de `BS` sin match: antes daba `KeyError` (nunca pasaba
+porque la clave vieja siempre existía en el propio diccionario); ahora, correctamente, da `NA`
+(blanco), igual que el `IFERROR` real — a diferencia de `BK`/`BL`, que sin match dan `0` (`SUMIFS`
+real).
+
+**Verificación exhaustiva** (con `Pagos_BESS.xlsx` real, hoja `RE545 P11`, 26.784 filas):
+- Reconstruyendo `BK`/`BM` a partir de los datos crudos de la propia salida (`Configuracion`,
+  `Ventana de valorizacion`, `ranking cmg`, `CMg Promedio`, `CMg`, `Orden`, `Periodo`) y pasándolos
+  por la función corregida: **0** diferencias contra los valores reales, en las 26.784 filas.
+- Corriendo la etapa completa `BI:CE` (`calcular_componentes_re545()`) con `AU` y el resumen
+  `AW:BG` reconstruidos con sus valores REALES (para no arrastrar la contaminación del bug de `AU`
+  de la sesión anterior, que también ensuciaba el resumen `AW:BG` generado con el código viejo):
+  `Edisp_Asig`, `Total C1_545`, `Total C2_545` y **`Monto a compensar`** (la columna final de toda
+  la hoja) dan **0** diferencias en las 26.784 filas.
+- Test sintético nuevo (`test_re545_bk_bl_bs_cruzado.py`, no persistido) que reproduce un caso con
+  `S != BI` fila a fila y confirma que el resultado cambia respecto del comportamiento viejo (el
+  test viejo, `test_re545d.py`, nunca hubiese detectado esto porque su `S` sintético coincidía con
+  `BI` por construcción — se le agregó una columna `S` explícita, documentando por qué, para que
+  siga siendo válido sin ocultar el hueco de cobertura).
+- Regresión completa de las 20 sesiones anteriores: pasa.
+
+**Confirmado también:** la contaminación de `Edisp_Asig`/`Total C1_545`/`Total C2_545` que
+aparecía al principio de esta validación (antes de sustituir el resumen `AW:BG` por valores
+reales) no era un bug nuevo — era el mismo bug de `AU` de la sesión 20 propagándose a través de
+`BV` → `Margen ultima hora`/`Total Reservas* FD *FMA`/`Edisp_T` del resumen. Con los dos fixes (20
+y 21) aplicados juntos en el pipeline real (donde el resumen se reconstruye siempre a partir del
+`AU` ya corregido), no hace falta ningún fix adicional para esa cadena.
