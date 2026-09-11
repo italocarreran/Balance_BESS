@@ -306,6 +306,8 @@ causa raíz deje de existir en el código.
 | **(Resuelto)** `nucleo.construir_calculo_e_costos()`/`completar_calculo_e_costos_grupos()` calculan TODO con nombres internos tipo letra/placeholder (`Mes`, `clave`, `Energia_Positiva`, `L`, `N`, `AB`...) y recién renombran a los nombres reales (`NOMBRES_CALCULO_E_COSTOS`) al final de `completar_calculo_e_costos_grupos()` — mismo patrón que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`. El usuario tardó 3 intentos en mandar el archivo correcto con la hoja "E COSTOS" (las dos primeras veces solo traía `FD`/`Subastas`). | Si se agrega una columna nueva a `Calculo E Costos`, calcularla con un nombre interno letra/placeholder y agregarla a `NOMBRES_CALCULO_E_COSTOS` al final, **nunca** usar el nombre real directamente en medio del cálculo (mismo motivo que FD: si dos columnas terminan compartiendo un nombre real, indexar por ese nombre a mitad de cálculo sería ambiguo). |
 | `"OfertasSSCC"` tiene **tres** "s" seguidas al pasarlo a minúsculas (`"Ofertas"` termina en "s" + `"SSCC"` empieza con dos "s" más = `"...tas" + "sscc"` = `"...tasssc c"`). Un primer intento transcribió el literal a mano con solo dos "s" (`"ofertasscc"`) y `buscar_archivo_ofertas()` nunca encontraba ningún archivo real. | No transcribir a mano un literal derivado de un nombre con letras dobles/triples repetidas: calcularlo en tiempo de ejecución (`"OfertasSSCC".lower()`, constante `PATRON_NOMBRE_OFERTAS` en `nucleo.py`) y comparar contra eso. Se detectó con un test sintético antes de llegar a producción; si vuelve a fallar la detección del archivo de Ofertas, este es el primer sospechoso a descartar. |
 | Al agregar `calcular_r()` para la etapa 2 de `Calculo E Costos`, se redefinió sin querer una función que YA existía con ese nombre (`calcular_r()` de Medidores, para `Oferta_Completa_Dia`) — Python no avisa: la segunda definición pisa a la primera en silencio, y como `construir_medidores()` llama a `calcular_r()` en tiempo de ejecución (no al definirse), el error solo aparece al correr esa parte, con un `TypeError` de argumentos que no dice nada sobre la causa real. Se detectó por un test sintético que corrió `generar_pagos_bess()` de punta a punta. | Antes de agregar una función nueva a `nucleo.py`, buscar (`grep -n "^def <nombre>("`) si el nombre ya existe. Si dos hojas distintas tienen una columna con la misma letra pero lógica distinta (como el `R` de Medidores y el `R` de Calculo E Costos), usar un sufijo que distinga la hoja (`calcular_r_ecostos`, no `calcular_r`) en vez de reutilizar el nombre corto. |
+| La hoja `Diccionario` de `Centrales.xlsx` se lee de **tres** formas distintas según qué la consume: `construir_homologacion()` (toda la fila como equivalencias simétricas, para el SoC), `_mapas_homologacion_fge()` (columnas E/F/G→E, para Ofertas SSCC) y `construir_dic_mapeo_diccionario()` (columna A→B, primera coincidencia gana, para `Calculo E Costos!AM:AR`). | No fusionar estas tres lecturas ni reusar una para lo que hace otra: son reglas de negocio distintas sobre la misma hoja, confirmadas en momentos distintos de la migración. Si aparece una CUARTA necesidad de homologación, no asumir que es igual a alguna de las tres — preguntar. |
+| `NOMBRES_CALCULO_E_COSTOS` tiene valores DUPLICADOS a propósito: `AG:AL` ("Prorratas") y `AM:AR` ("FD") comparten los mismos 6 nombres cortos (`CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)`) porque así está en el archivo real (se distinguen por un encabezado de grupo en las filas 1-2 que no se replica en nuestro esquema de una sola fila). Indexar el DataFrame final por uno de esos nombres (`df["CPF(-)"]`) después de renombrar devuelve un DataFrame de 2 columnas, no una Series — un test que no lo espera falla con `ValueError: truth value of a Series is ambiguous`. | No es un bug: es el mismo patrón que el `"Hora Mes"` duplicado de `FD`. Si hay que acceder a una de las dos columnas después del rename (normalmente no hace falta, el rename es el último paso antes de escribir a Excel), usar posición (`df.columns.get_loc`/`.iloc`), nunca el nombre solo. |
 
 ---
 
@@ -362,13 +364,21 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   (`L, N, O, R, S, T, U, W, X, Y, AB, AC, AD`, plan §25.6/25.7). Esa hoja
   `Resumen` del libro original resultó ser la MISMA tabla que
   `Centrales.xlsx!Resumen BESS` (confirmado con un archivo real, plan
-  §25.8) — no hacía falta una hoja nueva, así que `M`, `AE` y `AF` ya están
-  implementadas también. `AG:AX`, `AZ` y toda `Calculo RE545` siguen
-  pendientes: dependen de la tabla dinámica Prorrata SSCC (confirmada por
-  el usuario pero todavía no construida en Python), de una categoría
-  `CTF` que no existe en nuestra hoja `FD`, y de un umbral de subida/
-  bajada por central+ventana cuya posición real en `Subastas` sigue sin
-  confirmarse (plan §25.9) — no se adivinan, hay que resolverlos primero.
+  §25.8) — no hacía falta una hoja nueva, así que `M`, `AE` y `AF` se
+  agregaron también. Una etapa 3 (`AG:AV`, plan §25.10) agregó las
+  Prorratas (`AG:AL`, tabla dinámica **derivada de `Subastas`**, no un
+  archivo externo), el FD homologado (`AM:AR`), el costo ponderado
+  (`AS`/`AT`) y el ingreso/costo de Componente 1 (`AU`/`AV`) — el usuario
+  confirmó que `CTF` (`AI/AL/AO/AR`) no existe y sale en 0 (coincide con
+  el VBA original, que las deja hardcodeadas), y que el archivo de
+  Subastas usado para nuestra hoja está corrido una columna respecto del
+  original, lo que explicó por qué las letras que documentaba el VBA para
+  `L` no coincidían con los encabezados reales. `AW, AX, AZ` y toda
+  `Calculo RE545` siguen pendientes: dependen de un umbral de subida/
+  bajada por central+ciclo cuya posición real en `Subastas` involucra una
+  dependencia circular (`COUNTIFS` contra una columna que a su vez
+  depende de `Calculo E Costos`) todavía sin resolver (plan §25.10) — no
+  se adivina, hay que decantarlo primero.
 - **Cada salida tiene su propio botón "Generar" con casillas por sección,
   en vez de un único botón "Ejecutar" para todo.** Pedido explícito del
   usuario, con un archivo de referencia (`Revisor_Reliquidacion.py`) para

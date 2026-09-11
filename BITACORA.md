@@ -16,30 +16,32 @@ estado, no un historial.
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
-- **Bloqueante para terminar `Calculo E Costos` (`AG:AZ`)**: construir la
-  "Prorrata SSCC" como tabla dinámica derivada de `Subastas` (confirmado
-  por el usuario que no es un archivo externo: `Filas: Configuración,
-  Hora_mes` / `Columnas: Control` / `Valores: Cuenta de Sub_Baj`) —
-  necesaria para `AG:AL`. Encontrar el origen de una categoría `CTF` que
-  usa `AM:AR` y no existe en nuestra hoja `FD` (que solo tiene bloques
-  CSF/CPF). Confirmar la posición real de la tabla de umbrales de subida/
-  bajada en `Subastas` — el archivo de encabezados reales muestra
-  `Subastas!R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`, `BAJADA`)
-  sin filas de datos de ejemplo, pero el código VBA hacía referencia a
-  `Subastas!U:W`; no coinciden y ninguna de las dos está confirmada contra
-  datos reales (usada en `AW`/`AZ`). Ver plan §25.9.
-- Validar contra un caso real la homologación de la columna `L` de
-  `Calculo E Costos`: usa `Subastas!Configuración` como campo de central.
-  Ya no es una inferencia a ciegas — el archivo de encabezados reales
-  confirmó que `Calculo E Costos!G` se llama literalmente `Configuracion`
-  (mismo nombre de campo en ambas hojas) — pero sigue sin confirmarse
-  fila por fila. Si al correr con datos reales la cantidad de filas con
-  `L=1` sale sospechosamente baja o en cero, revisar si debería ser
-  `Subastas!Propietario` en su lugar.
-- Completar `AG:AX, AZ` de `Calculo E Costos` (bloqueados, ver arriba) y
-  toda la hoja `Calculo RE545` — la etapa base, la etapa 2 (L, N, O, R, S,
-  T, U, W, X, Y, AB, AC, AD) y M/AE/AF ya están implementadas (ver
-  entradas de esta sesión y las dos anteriores).
+- **Bloqueante para terminar `Calculo E Costos` (`AW`, `AX`, `AZ`)**:
+  confirmar la posición real de la tabla de umbrales de subida/bajada por
+  central+ciclo en `Subastas`. Aplicando el mismo corrimiento de columna
+  que el usuario confirmó para `L` (ver entrada de esta sesión), la tabla
+  parecería estar en `Subastas!S:W`, pero involucra una fórmula `COUNTIFS`
+  que depende de `Subastas!N` ("Energía SSCC"), que a su vez depende de
+  `Calculo E Costos!P` — una dependencia circular con nuestro propio
+  cálculo que todavía no se terminó de decantar. Ver plan §25.10.
+- Validar contra un caso real la homologación de la columna `L` (y de
+  `AG:AL`/`AM:AR`, que dependen del mismo campo `Configuración`) de
+  `Calculo E Costos`. Ya no es una inferencia a ciegas — el archivo de
+  encabezados reales confirmó que `Calculo E Costos!G` se llama
+  literalmente `Configuracion` (mismo nombre de campo en `Subastas`) — y
+  el usuario confirmó por separado que el archivo de Subastas usado tiene
+  un corrimiento de columna respecto del original, lo que explica la
+  discrepancia que había con el VBA. Pero sigue sin confirmarse fila por
+  fila con datos reales.
+- Validar contra un caso real que `Subastas!Control` tenga exactamente los
+  valores `CPF`/`CSF` (usado para separar la tabla dinámica Prorrata SSCC
+  en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
+  inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
+  `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
+- Completar `AW, AX, AZ` de `Calculo E Costos` (bloqueados, ver arriba) y
+  toda la hoja `Calculo RE545` — la etapa base, la etapa 2 y la etapa 3
+  (`AG:AV`) ya están implementadas (ver entradas de esta sesión y las
+  anteriores).
 - Una vez completo `Calculo E Costos`, resolver `Subastas!N` ("Energía
   SSCC"), que depende de columnas de esa hoja.
 - Confirmar si la carpeta `Subastas/` (creada esta sesión, no existe en
@@ -715,3 +717,71 @@ anterior) contra los nombres reales, sin cambios en los valores esperados. Un te
 punta corrió `generar_pagos_bess()` completo con archivos reales de `Centrales.xlsx`/`cmg.xlsx`/
 `Consolidado_entradas.xlsx`, confirmando que las 28 columnas de `Pagos_BESS.xlsx` salen con los
 nombres reales y los tipos esperados. No se probó contra un caso real ni contra la planilla 11.
+
+---
+
+## 2026-09-11 (6) — `Calculo E Costos`, etapa 3: `AG:AV` (Prorratas, FD homologado, costo ponderado)
+
+El usuario aportó dos confirmaciones cortas que destrabaron esta etapa: **"creo que no tiene
+ctf no está en los FD y en la hoja de los ecostos sale con 0"** y **"Las subastas que te mande
+vs las del original están corridas una columna, la primera en el original está vacía"**.
+
+La segunda explica retroactivamente la discrepancia de letras encontrada la sesión anterior
+para la columna `L`: aplicando ese corrimiento de una columna a lo que documentaba el VBA
+(`Subastas!D`=tipo, `G,H,I,K`=clave), se obtiene exactamente `Sub_Baj` + `Configuración+Mes+
+Dia+Hora_dia` — lo mismo que ya se había implementado por inferencia, ahora con una explicación
+clara. La primera confirma que `CTF` (columnas `AI`, `AL`, `AO`, `AR`) no necesita ningún
+origen: en el VBA original están hardcodeadas en 0 (`salidaAGAX(i,3)=0`, etc.), nunca dependen
+de un diccionario — coincide exactamente con lo que el usuario reportó ver en el archivo real.
+
+**Implementado en `nucleo.py`** (todo lo que no depende del umbral de subida/bajada, que sigue
+sin resolverse — ver "Pendientes abiertos"):
+
+- `construir_prorrata_sscc(df_subastas)`: arma la tabla dinámica Prorrata SSCC con
+  `pandas.pivot_table` directamente desde `Subastas` (`index=[Configuración, Hora_mes],
+  columns=Control, values=Sub_Baj, aggfunc=count`) — confirmado hace varias sesiones que NO es
+  un archivo externo, pero recién ahora se construye en Python.
+- `construir_dic_prorrata()`: busca entre las columnas que deja el pivot la que contenga "cpf"
+  y la que contenga "csf" en el nombre (inferido, no confirmado que `Control` tenga esos dos
+  valores exactos — avisa si no las encuentra, no falla).
+- `calcular_prorratas()`: homologa por central+`Hora Mes` → `(AG, AH)`. `AJ=AG`, `AK=AH`
+  (duplicados a propósito, así lo hace el VBA original: `salidaAGAX(i,4)=valorAG`). `AI=AL=0`.
+- `construir_dic_mapeo_diccionario()`: TERCERA lectura de la hoja `Diccionario` (columna A→B,
+  primera coincidencia gana) — distinta de `construir_homologacion()` y de
+  `_mapas_homologacion_fge()`, documentado como trampa nueva en `METODOLOGIA.md` §7.
+- `_calcular_bloque()` + `construir_dic_fd_bloque()` + `calcular_fd_prorrateado()`: homologan la
+  central contra `Diccionario`, arman una clave "bloque de 4 + central homologada" (uno para
+  descarga usando `Y`, otro para carga usando `AC`) y buscan esa clave en `FD!CSF(±)`/`CPF(±)`
+  → `(AM, AN, AP, AQ)`. Central no encontrada en `Diccionario` → blanco (`pd.NA`); central
+  encontrada pero sin match en `FD` → 0 (fiel al original, que solo registra un aviso). `AO=AR=0`.
+- `_calcular_costo_ponderado()` + `calcular_as_at()`: replica `CalcularCostoPonderado` → `(AS,
+  AT)`, combinando las Prorratas, el FD homologado y `AE`/`AF`.
+- `calcular_au_av()`: promedio de `AB`/`AD` por grupo (central+ventana), activado solo si la
+  suma GLOBAL de energía por ventana (TODAS las centrales que comparten esa `Copia_Ventana`, sin
+  agrupar por central — una agrupación distinta de la de `N/O/R/Y/AB/AC/AD`) supera ±10 → `(AU,
+  AV)`.
+- `completar_calculo_e_costos_grupos()` ahora recibe también `diccionario`, `df_fd_csf` y
+  `df_fd_cpf`, y agrega las 16 columnas nuevas antes del rename final.
+- `generar_pagos_bess()` ahora también busca y lee el archivo `SSCC_Desempeño_*` (con
+  `buscar_archivo_sscc_desempeno()` + `construir_fd()`, igual que ya hacía `generar_consolidado()`
+  para la sección `"fd"`) y mantiene `diccionario` de `leer_centrales()` en vez de descartarlo.
+
+**`NOMBRES_CALCULO_E_COSTOS` gana valores DUPLICADOS a propósito**: `AG:AL` ("Prorratas") y
+`AM:AR` ("FD") comparten los mismos 6 nombres cortos (`CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`,
+`CSF(+)`, `CTF(+)`) porque así están en el archivo real (se distinguen por un encabezado de
+grupo en las filas 1-2 que no se replica en nuestro esquema de una sola fila de encabezado) —
+mismo criterio que el `"Hora Mes"` duplicado de `FD`. Documentado como trampa en
+`METODOLOGIA.md` §7 (indexar por ese nombre después del rename da una `Series` ambigua).
+
+**Verificación:** tests sintéticos (sin persistir en el repo) para cada función nueva por
+separado con valores calculados a mano (incluye el caso "central sin match en Diccionario ->
+blanco", "central con match pero sin FD -> 0", `CalcularCostoPonderado` con energía/precio en
+blanco, y `AU`/`AV` con una tercera central en el mismo `Copia_Ventana` para probar que la suma
+global cruza centrales). Un test llamó a `completar_calculo_e_costos_grupos()` completo y
+confirmó que el orden final de columnas coincide exactamente con `NOMBRES_CALCULO_E_COSTOS`. Un
+test de punta a punta corrió `generar_pagos_bess()` con un archivo `SSCC_Desempeño_*` sintético
+pero con la estructura real que espera `construir_fd()` (datos desde la fila 12, filtro BESS/SAE
+en columna D) — corrió sin errores; la única discrepancia fue que `pd.read_excel` renombra
+columnas duplicadas al releer (`"CPF(-)"` → `"CPF(-).1"`), un comportamiento conocido de pandas
+al leer, no un problema de lo que se escribió (confirmado escribiendo y releyendo un `DataFrame`
+con columnas duplicadas de prueba). No se probó contra un caso real ni contra la planilla 11.

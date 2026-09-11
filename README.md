@@ -112,19 +112,21 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 `Pagos_BESS.xlsx` (nombre y alcance provisorios, a pedido del usuario) tiene
 por ahora una sola hoja:
 
-- `Calculo E Costos` — traspaso desde `Medidores`, asignación de CMg y buena
-  parte de `Actualizar_Calculos_Columnas` (`L, M, N, O, R, S, T, U, W, X, Y,
-  AB, AC, AD, AE, AF`), con **nombres reales de columna** (confirmados
+- `Calculo E Costos` — traspaso desde `Medidores`, asignación de CMg, y casi
+  toda `Actualizar_Calculos_Columnas` (`L, M, N, O, R, S, T, U, W, X, Y, AB,
+  AC, AD, AE, AF, AG:AV`), con **nombres reales de columna** (confirmados
   contra un archivo real, hoja "E COSTOS"): `Configuracion`, `Barra`,
   `Descarga kWh`/`Carga kWh`, `SoC %`, `CMg`, `Adj SSCC`, `SoC sobre el
-  minimo`, `Energía SSCC (-) por remunerar` / `(+) por remunerar`,
-  `ranking cmg`, `Valorizacion Descarga`/`Carga`, `Bloque ordenado`, `Ciclo`, `Curva
-  monotona CMg Descarga`/`Carga`, `Energía descargada`/`cargada`, entre
-  otros. `AG:AX` y `AZ` quedan pendientes: dependen de la tabla dinámica
-  Prorrata SSCC (confirmada pero no construida todavía), de una categoría
-  `CTF` que no existe en nuestra hoja `FD`, y de un umbral de subida/bajada
-  en `Subastas` cuya posición real todavía no está clara. Toda la hoja
-  `Calculo RE545` también queda para una etapa posterior.
+  minimo`, `ranking cmg`, `Valorizacion Descarga`/`Carga`, `Bloque ordenado`,
+  `Ciclo`, `Curva monotona CMg Descarga`/`Carga`, `Energía descargada`/
+  `cargada`, las Prorratas y el FD homologado (`CPF(±)`/`CSF(±)`/`CTF(±)`,
+  este último siempre en 0 — confirmado que no existe), `Ingreso descarga`,
+  `Costo carga`, entre otros. Requiere ahora también el archivo
+  `SSCC_Desempeño_*` (para el FD homologado). Quedan pendientes `AW`, `AX` y
+  `AZ`: dependen de un umbral de subida/bajada en `Subastas` cuya posición
+  real involucra una dependencia circular con nuestro propio cálculo,
+  todavía sin resolver. Toda la hoja `Calculo RE545` también queda para una
+  etapa posterior.
 
 Las macros de Ofertas SSCC, CMg, FD y Subastas replicadas son solo las de
 **carga** de esas hojas.

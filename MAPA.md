@@ -103,23 +103,36 @@ de.
   Hora` normalizado, vía `NormalizaCuarto`). Va a un archivo **separado**
   (`Pagos_BESS.xlsx`, nombre provisorio) a pedido explícito del usuario.
 
-  **Calculo E Costos, etapa 2** (plan §25.6-25.9): agrega `L, M, N, O, R, S,
-  T, U, W, X, Y, AB, AC, AD, AE, AF`. `L` (¿participó en una subasta?)
+  **Calculo E Costos, etapas 2 y 3** (plan §25.6-25.10): agrega `L, M, N,
+  O, R, S, T, U, W, X, Y, AB, AC, AD, AE, AF, AG, AH, AI, AJ, AK, AL, AM,
+  AN, AO, AP, AQ, AR, AS, AT, AU, AV`. `L` (¿participó en una subasta?)
   homologa contra `Subastas!Sub_Baj` (confirmado por el usuario) +
   `Configuración`+`Mes`+`Dia`+`Hora_dia`; `M` (¿SoC sobre el mínimo?) y
   `AE`/`AF` (energía asignada por bloques) usan la hoja `Resumen BESS` de
   `Centrales.xlsx` — resultó ser la MISMA tabla que la hoja `Resumen` del
-  libro original (no hacía falta una hoja nueva, ver plan §25.8).
-  `N/O/R/Y/AB/AC/AD/AE/AF` se calculan por grupo (central=`clave` +
-  ventana=`Copia_Ventana`); `S/T/U` no agrupan; `W/X` son **globales** (no
-  por grupo). **Nombres de columna reales, confirmados contra un archivo
-  real** (`NOMBRES_CALCULO_E_COSTOS`, plan §25.9) — ya no son placeholders.
-  Bloqueadas: `AG:AX`, `AZ` — dependen de la tabla dinámica Prorrata SSCC
-  (confirmada pero todavía no construida en Python), de una categoría
-  `CTF` en `FD` que no existe en nuestra hoja `FD`, y de un umbral de
-  subida/bajada por central+ventana cuya posición real en `Subastas`
-  todavía no está clara. Toda la hoja `Calculo RE545` también queda
-  fuera.
+  libro original (no hacía falta una hoja nueva, ver plan §25.8). `AG:AL`
+  (Prorratas) salen de una tabla dinámica **derivada de `Subastas`, no de
+  un archivo externo** (`construir_prorrata_sscc()`); `AM:AR` (FD) salen
+  de homologar la central contra `Diccionario!A→B` y buscar en `FD` un
+  bloque de 4 "Cuarto de Hora" (`construir_dic_mapeo_diccionario()`,
+  `calcular_fd_prorrateado()`) — en ambos grupos, `CTF` (`AI/AL/AO/AR`) es
+  **0 hardcodeado** (confirmado por el usuario: no existe, y así lo hace
+  también el VBA original). `AS/AT` combinan lo anterior con `AE`/`AF`
+  (`_calcular_costo_ponderado()`); `AU/AV` promedian `AB`/`AD` por grupo,
+  activados solo si la suma GLOBAL de energía por ventana (todas las
+  centrales, no por grupo) supera/baja de ±10. `N/O/R/Y/AB/AC/AD/AE/AF`
+  se calculan por grupo (central=`clave` + ventana=`Copia_Ventana`);
+  `S/T/U` no agrupan; `W/X` son **globales** (no por grupo). **Nombres de
+  columna reales, confirmados contra un archivo real**
+  (`NOMBRES_CALCULO_E_COSTOS`, plan §25.9) — ya no son placeholders; `AG:AL`
+  y `AM:AR` comparten a propósito los mismos 6 nombres cortos (así es en
+  el archivo real, se distinguen por un encabezado de grupo que no se
+  replica en este esquema de una sola fila). Bloqueadas: `AW`, `AX`, `AZ`
+  — dependen de un umbral de subida/bajada por central+ciclo cuya
+  posición real en `Subastas` involucra una dependencia circular
+  (`COUNTIFS` contra `Subastas!N`, que a su vez depende de `Calculo E
+  Costos`) todavía sin resolver. Toda la hoja `Calculo RE545` también
+  queda fuera.
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
@@ -147,7 +160,8 @@ de.
     a lado, columnas A:M y Q:AE, con sus nombres reales), `Subastas` (con
     sus nombres reales), `Log`.
   - `<CARPETA_BASE>/Pagos_BESS.xlsx` (nombre provisorio), hoja `Calculo E
-    Costos` (etapa base, ver más arriba).
+    Costos` hasta `AV` (ver más arriba; `generar_pagos_bess()` ahora
+    también requiere el archivo `SSCC_Desempeño_*` para `AM:AR`).
 - **Expone (funciones clave agregadas hasta ahora, además de las básicas
   de E/S y homologación):**
   - Ofertas SSCC: `buscar_archivo_ofertas`, `construir_resumen_ofertas_sscc`,
@@ -173,11 +187,25 @@ de.
     Medidores ya tiene su propia `calcular_r()`, lógica no relacionada — no
     fusionarlas), `calcular_s_t_u(df_ecostos)`, `calcular_w_x(df_ecostos)`,
     `calcular_y_ab_ac_ad(df_ecostos)`, `calcular_ae_af(df_ecostos, dic_factor)`
-    (usa `_calcular_asignacion_energia()`), todas combinadas por
-    `completar_calculo_e_costos_grupos(df_ecostos, df_subastas, dic_factor, umbral_soc_minimo, registrar=print)`
-    → `df_ecostos` con L/M/N/O/R/S/T/U/W/X/Y/AB/AC/AD/AE/AF agregadas Y
-    renombrada a nombres reales (`NOMBRES_CALCULO_E_COSTOS`, plan §25.9) —
-    mismo patrón que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`.
+    (usa `_calcular_asignacion_energia()`).
+  - Calculo E Costos (etapa 3, plan §25.10): `construir_prorrata_sscc(df_subastas)`
+    → tabla dinámica (pivot); `construir_dic_prorrata(tabla_prorrata, registrar=print)`
+    → `dict` central+hora_mes → `(CPF, CSF)`; `calcular_prorratas(df_ecostos, dic_prorrata)`
+    → `(AG, AH)`; `construir_dic_mapeo_diccionario(diccionario)` → `dict`
+    (tercera lectura de `Diccionario`, distinta de `construir_homologacion`
+    y `_mapas_homologacion_fge` — no fusionar); `_calcular_bloque(valor)`;
+    `construir_dic_fd_bloque(df_fd, columna_id, columna_mas, columna_menos)`;
+    `calcular_fd_prorrateado(df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf)`
+    → `(AM, AN, AP, AQ)`; `_calcular_costo_ponderado(...)` +
+    `calcular_as_at(df_ecostos)` → `(AS, AT)`; `calcular_au_av(df_ecostos)`
+    → `(AU, AV)`.
+  - Todas combinadas por
+    `completar_calculo_e_costos_grupos(df_ecostos, df_subastas, dic_factor, umbral_soc_minimo, diccionario, df_fd_csf, df_fd_cpf, registrar=print)`
+    → `df_ecostos` con L/M/N/O/R/S/T/U/W/X/Y/AB/AC/AD/AE/AF/AG/AH/AI/AJ/AK/AL/AM/AN/AO/AP/AQ/AR/AS/AT/AU/AV
+    agregadas Y renombrada a nombres reales (`NOMBRES_CALCULO_E_COSTOS`,
+    plan §25.9) — mismo patrón que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`;
+    `AG:AL` y `AM:AR` comparten a propósito los mismos 6 nombres cortos
+    (así es en el archivo real).
   - `construir_medidores(df_sae, df_soc, anio, mes, ruta_ofertas, diccionario, registrar=print)`
     → `(df_medidores, avisos, df_wxy, df_resumen_ventana)`.
   - `escribir_salida(df, ruta_salida, avisos, incidencias, df_wxy=None, df_resumen_ventana=None, df_cmg=None, df_fd_csf=None, df_fd_cpf=None, df_subastas=None, ruta_existente=None, hojas_regenerar=None, registrar=print)`
@@ -199,9 +227,10 @@ de.
   - `generar_pagos_bess(carpeta_base, registrar=print, progreso=None)` —
     genera/actualiza `Pagos_BESS.xlsx`; lee `Medidores` Y `Subastas` desde
     `Consolidado_entradas.xlsx` ya generado (no los recalcula), y
-    Centrales.xlsx/cmg.xlsx frescos. Sin `aamm` como parámetro: nada de la
-    etapa base ni de la etapa 2 de Calculo E Costos lo necesita (todo sale
-    de `Medidores`/`Subastas`, que ya traen Mes/Dia/Hora).
+    Centrales.xlsx/cmg.xlsx/`SSCC_Desempeño_*` frescos (este último, nuevo,
+    para `AM:AR`). Sin `aamm` como parámetro: nada de las etapas 2/3 de
+    Calculo E Costos lo necesita (todo sale de `Medidores`/`Subastas`, que
+    ya traen Mes/Dia/Hora).
 - **Parámetros fijos:** `INICIO_VENTANA = 10`, `UMBRAL_SOC = 0.06` (ver plan
   de migración §8).
 - **Constantes de columnas:** `LETRA_A_CAMPO` (dict A→U de `Medidores`, su

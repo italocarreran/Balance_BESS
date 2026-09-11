@@ -2710,10 +2710,354 @@ def calcular_ae_af(df_ecostos, dic_factor):
     )
 
 
+# ============================================================
+# CALCULO E COSTOS (etapa 3): AG:AL (prorratas), AM:AR (FD), AS, AT,
+# AU, AV
+#
+# El usuario confirmo que la categoria "CTF" (AI, AL, AO, AR) no
+# existe en nuestros datos de FD y que en el archivo real esas
+# columnas salen en 0 -- coincide exactamente con el VBA original,
+# que las deja hardcodeadas en 0 (no dependen de ningun diccionario).
+#
+# Tambien confirmo que el archivo de Subastas que uso para armar nuestra
+# hoja esta corrido una columna respecto del original (el original
+# tiene una columna vacia al principio que el nuestro no tiene). Eso
+# explica por que el VBA original documentaba "D"/"G,H,I,K" para L:
+# aplicando ese corrimiento, esas letras coinciden exactamente con
+# Sub_Baj/Configuración+Mes+Dia+Hora_dia -- lo mismo que ya se venia
+# usando, ahora con una explicacion clara de la discrepancia.
+#
+# Sigue FUERA de esta etapa: AW, AX, AZ -- dependen de una tabla de
+# umbrales de subida/bajada en Subastas cuya posicion exacta (con el
+# mismo corrimiento de una columna) parece ser Subastas!S:W, pero
+# involucra una formula circular (COUNTIFS contra 'Energia SSCC',
+# que a su vez depende de Calculo E Costos) que todavia no se
+# termino de decantar. Ver plan seccion 25.10.
+# ============================================================
+
+def construir_prorrata_sscc(df_subastas):
+    """
+    Construye la tabla dinamica "Prorrata SSCC" a partir de Subastas
+    (confirmado por el usuario, NO es un archivo externo):
+        Filas: Configuración, Hora_mes
+        Columnas: Control
+        Valores: Cuenta de Sub_Baj
+    """
+
+    tabla = (
+        df_subastas
+        .pivot_table(
+            index=["Configuración", "Hora_mes"],
+            columns="Control",
+            values="Sub_Baj",
+            aggfunc="count",
+            fill_value=0,
+        )
+        .reset_index()
+    )
+    tabla.columns.name = None
+
+    return tabla
+
+
+def construir_dic_prorrata(tabla_prorrata, registrar=print):
+    """
+    Arma central+hora_mes -> (CPF, CSF) a partir de la tabla dinamica
+    Prorrata SSCC (construir_prorrata_sscc()). Busca, entre las
+    columnas que dejo el pivot (una por cada valor distinto de
+    Subastas!Control), la que contenga "cpf" y la que contenga "csf"
+    en el nombre -- INFERIDO (no confirmado letra por letra que
+    Control tenga exactamente esos dos valores); si no las encuentra,
+    avisa y usa 0 en vez de fallar.
+    """
+
+    columnas_valor = [
+        c for c in tabla_prorrata.columns
+        if c not in ("Configuración", "Hora_mes")
+    ]
+
+    columna_cpf = next(
+        (c for c in columnas_valor if "cpf" in normalizar(str(c))), None
+    )
+    columna_csf = next(
+        (c for c in columnas_valor if "csf" in normalizar(str(c))), None
+    )
+
+    if columna_cpf is None or columna_csf is None:
+        registrar(
+            f"  [AVISO] La columna 'Control' de Subastas no tiene valores "
+            f"identificables como CPF/CSF (encontrados: {columnas_valor}); "
+            f"CPF(-)/CSF(-)/CPF(+)/CSF(+) de Prorrata SSCC quedaran en 0."
+        )
+
+    dic = {}
+
+    for _, fila in tabla_prorrata.iterrows():
+
+        clave = (
+            _normaliza_valor_vba(fila["Configuración"])
+            + "¦" + _normaliza_valor_vba(fila["Hora_mes"])
+        )
+
+        cpf = float(fila[columna_cpf]) if columna_cpf is not None else 0.0
+        csf = float(fila[columna_csf]) if columna_csf is not None else 0.0
+
+        dic[clave] = (cpf, csf)
+
+    return dic
+
+
+def calcular_prorratas(df_ecostos, dic_prorrata):
+    """
+    Replica AG/AH (y sus duplicados AJ/AK, ver comentario de
+    completar_calculo_e_costos_grupos): busca central+"Hora Mes" en
+    el diccionario de construir_dic_prorrata(); si no hay match,
+    ambas quedan en 0 (igual que el original, que no distingue
+    "sin match" de "cero").
+    """
+
+    clave = (
+        df_ecostos["clave"].map(_normaliza_valor_vba)
+        + "¦" + df_ecostos["Hora Mes"].map(_normaliza_valor_vba)
+    )
+
+    valores = clave.map(lambda k: dic_prorrata.get(k, (0.0, 0.0)))
+
+    ag = valores.map(lambda v: v[0])
+    ah = valores.map(lambda v: v[1])
+
+    return ag, ah
+
+
+def construir_dic_mapeo_diccionario(diccionario):
+    """
+    Replica CrearDiccionarioPrimerValor(datosDiccionario, 1, 2):
+    columna A -> columna B de la hoja Diccionario (header=None), la
+    primera coincidencia gana. Es un mapeo DISTINTO de
+    construir_homologacion() (usa toda la fila) y de
+    _mapas_homologacion_fge() (usa E/F/G) -- tres lecturas distintas
+    de la misma hoja Diccionario, no fusionar.
+    """
+
+    dic = {}
+
+    for _, fila in diccionario.iterrows():
+
+        clave = fila[0]
+        if pd.isna(clave):
+            continue
+
+        clave_norm = normalizar(clave)
+
+        if clave_norm and clave_norm not in dic:
+            dic[clave_norm] = fila[1]
+
+    return dic
+
+
+def _calcular_bloque(valor):
+    """Replica CalcularBloque: Int((valor-1)/4)+1."""
+
+    return math.floor((valor - 1.0) / 4.0) + 1.0
+
+
+def construir_dic_fd_bloque(df_fd, columna_id, columna_mas, columna_menos):
+    """
+    Arma id->(valor_mas, valor_menos) a partir de un bloque de FD
+    (CSF o CPF, ya con nombres reales de columna), clave = columna_id
+    normalizada, primera coincidencia gana. Replica
+    CrearDiccionarioFDAL/CrearDiccionarioFDQAD.
+    """
+
+    dic = {}
+
+    for _, fila in df_fd.iterrows():
+
+        clave = normalizar(fila[columna_id])
+
+        if clave and clave not in dic:
+            dic[clave] = (fila[columna_mas], fila[columna_menos])
+
+    return dic
+
+
+def calcular_fd_prorrateado(df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf):
+    """
+    Replica AM, AN, AP, AQ: homologa la central ("clave") contra
+    Diccionario!A->B; si no esta en el Diccionario, las 4 quedan en
+    blanco (pd.NA, equivalente al #N/A del original). Si esta,
+    arma una clave "bloque+central homologada" (bloque = CalcularBloque
+    de Y para descarga, de AC para carga) y busca esa clave en los
+    diccionarios de FD (CPF da AM/AP, CSF da AN/AQ); si no hay match
+    en FD, queda en 0 (fiel al original: ahi solo se registra un
+    aviso, no se propaga un error).
+    """
+
+    y_num = pd.to_numeric(df_ecostos["Y"], errors="coerce").fillna(0.0)
+    ac_num = pd.to_numeric(df_ecostos["AC"], errors="coerce").fillna(0.0)
+
+    bloque_y = y_num.map(_calcular_bloque)
+    bloque_ac = ac_num.map(_calcular_bloque)
+
+    am, an, ap, aq = [], [], [], []
+
+    for central, by, bac in zip(df_ecostos["clave"], bloque_y, bloque_ac):
+
+        mapeo = dic_mapeo.get(normalizar(central))
+
+        if mapeo is None:
+            am.append(pd.NA)
+            an.append(pd.NA)
+            ap.append(pd.NA)
+            aq.append(pd.NA)
+            continue
+
+        mapeo_texto = _normaliza_valor_vba(mapeo)
+
+        clave_y = normalizar(f"{int(by)}{mapeo_texto}")
+        clave_ac = normalizar(f"{int(bac)}{mapeo_texto}")
+
+        cpf_y = dic_fd_cpf.get(clave_y)
+        csf_y = dic_fd_csf.get(clave_y)
+        csf_ac = dic_fd_csf.get(clave_ac)
+
+        ap.append(cpf_y[0] if cpf_y is not None else 0.0)
+        am.append(cpf_y[1] if cpf_y is not None else 0.0)
+        an.append(csf_y[1] if csf_y is not None else 0.0)
+        aq.append(csf_ac[0] if csf_ac is not None else 0.0)
+
+    return (
+        pd.Series(am, index=df_ecostos.index),
+        pd.Series(an, index=df_ecostos.index),
+        pd.Series(ap, index=df_ecostos.index),
+        pd.Series(aq, index=df_ecostos.index),
+    )
+
+
+def _calcular_costo_ponderado(cantidad1, cantidad2, precio1, precio2, energia):
+    """Replica CalcularCostoPonderado (AS/AT)."""
+
+    if pd.isna(energia):
+        return pd.NA
+
+    if (cantidad1 + cantidad2) > 0:
+
+        if pd.isna(precio1) or pd.isna(precio2):
+            return pd.NA
+
+        factor = float(precio1) * cantidad1 + float(precio2) * cantidad2
+
+    else:
+        factor = 1.0
+
+    return factor * float(energia)
+
+
+def calcular_as_at(df_ecostos):
+    """
+    Replica AS (energia descarga con FD) y AT (energia carga con
+    FD): CalcularCostoPonderado combinando las prorratas (AG/AH), el
+    FD homologado (AM/AN para AS, AP/AQ para AT) y la energia
+    asignada (AE para AS, AF para AT).
+    """
+
+    as_ = [
+        _calcular_costo_ponderado(ag, ah, am, an, ae)
+        for ag, ah, am, an, ae in zip(
+            df_ecostos["AG"], df_ecostos["AH"],
+            df_ecostos["AM"], df_ecostos["AN"], df_ecostos["AE"],
+        )
+    ]
+
+    at = [
+        _calcular_costo_ponderado(ag, ah, ap, aq, af)
+        for ag, ah, ap, aq, af in zip(
+            df_ecostos["AG"], df_ecostos["AH"],
+            df_ecostos["AP"], df_ecostos["AQ"], df_ecostos["AF"],
+        )
+    ]
+
+    return (
+        pd.Series(as_, index=df_ecostos.index),
+        pd.Series(at, index=df_ecostos.index),
+    )
+
+
+def calcular_au_av(df_ecostos):
+    """
+    Replica AU (ingreso descarga) y AV (costo carga): promedio de AB
+    (donde AE es valido y distinto de 0, dentro del grupo central+
+    ventana) multiplicado por AE, solo si la suma GLOBAL de energia
+    de descarga por ventana (todas las centrales que comparten esa
+    misma "Copia_Ventana"/P) supera 10; analogo para AV con AF/AD,
+    umbral de suma global menor a -10.
+    """
+
+    ae = df_ecostos["AE"]
+    af = df_ecostos["AF"]
+    ab = df_ecostos["AB"]
+    ad = df_ecostos["AD"]
+
+    grupo = [df_ecostos["clave"], df_ecostos["Copia_Ventana"]]
+
+    ae_valido = ae.notna() & (pd.to_numeric(ae, errors="coerce") != 0)
+    af_valido = af.notna() & (pd.to_numeric(af, errors="coerce") != 0)
+
+    ab_contable = ab.where(ae_valido & ab.notna())
+    ad_contable = ad.where(af_valido & ad.notna())
+
+    suma_ab = ab_contable.groupby(grupo).transform("sum")
+    cantidad_ab = ab_contable.groupby(grupo).transform("count")
+    hay_error_ae = ae.isna().groupby(grupo).transform("any")
+
+    suma_ad = ad_contable.groupby(grupo).transform("sum")
+    cantidad_ad = ad_contable.groupby(grupo).transform("count")
+    hay_error_af = af.isna().groupby(grupo).transform("any")
+
+    promedio_ab = (suma_ab / cantidad_ab.replace(0, pd.NA)).fillna(0.0)
+    promedio_ad = (suma_ad / cantidad_ad.replace(0, pd.NA)).fillna(0.0)
+
+    # sumaIP/sumaJP: suma GLOBAL por ventana (P), agrupando TODAS las
+    # centrales que comparten esa Copia_Ventana -- no por central+P.
+    suma_i_global = (
+        df_ecostos["Energia_Positiva"]
+        .groupby(df_ecostos["Copia_Ventana"])
+        .transform("sum")
+    )
+    suma_j_global = (
+        df_ecostos["Energia_Negativa"]
+        .groupby(df_ecostos["Copia_Ventana"])
+        .transform("sum")
+    )
+
+    condicion_au = (
+        (cantidad_ab > 0) & (~hay_error_ae) & (suma_i_global > 10) & ae.notna()
+    )
+    condicion_av = (
+        (cantidad_ad > 0) & (~hay_error_af) & (suma_j_global < -10) & af.notna()
+    )
+
+    au = (
+        promedio_ab * pd.to_numeric(ae, errors="coerce").fillna(0.0)
+    ).where(condicion_au, 0.0)
+    av = (
+        promedio_ad * pd.to_numeric(af, errors="coerce").fillna(0.0)
+    ).where(condicion_av, 0.0)
+
+    return au, av
+
+
 # Nombres reales de columna de "Calculo E Costos" (confirmados por el
 # usuario contra un archivo real, hoja "E COSTOS"). Se calcula todo
 # con los nombres/letras internos usados hasta aca y se renombra
 # recien al final, mismo criterio que NOMBRES_FD_CSF/NOMBRES_SUBASTAS.
+#
+# OJO: AG:AL ("Prorratas") y AM:AR ("FD") comparten los mismos 6
+# nombres cortos (CPF(-), CSF(-), CTF(-), CPF(+), CSF(+), CTF(+)) --
+# asi esta en el archivo real (se distinguen por un encabezado de
+# grupo en las filas 1-2 que no se replica en este esquema de una
+# sola fila de encabezado, igual que Subastas!Q sin nombre o el
+# "Hora Mes" duplicado de FD). No es un error de tipeo.
 NOMBRES_CALCULO_E_COSTOS = {
     "Mes": "Mes",
     "Dia": "Dia",
@@ -2744,21 +3088,51 @@ NOMBRES_CALCULO_E_COSTOS = {
     "AD": "Curva monotona CMg Carga",
     "AE": "Energía descargada",
     "AF": "Energía cargada",
+    "AG": "CPF(-)",
+    "AH": "CSF(-)",
+    "AI": "CTF(-)",
+    "AJ": "CPF(+)",
+    "AK": "CSF(+)",
+    "AL": "CTF(+)",
+    "AM": "CPF(-)",
+    "AN": "CSF(-)",
+    "AO": "CTF(-)",
+    "AP": "CPF(+)",
+    "AQ": "CSF(+)",
+    "AR": "CTF(+)",
+    "AS": "Energía descarga con FD",
+    "AT": "Energía carga con FD",
+    "AU": "Ingreso descarga",
+    "AV": "Costo carga",
 }
 
 
 def completar_calculo_e_costos_grupos(
-    df_ecostos, df_subastas, dic_factor, umbral_soc_minimo, registrar=print
+    df_ecostos,
+    df_subastas,
+    dic_factor,
+    umbral_soc_minimo,
+    diccionario,
+    df_fd_csf,
+    df_fd_cpf,
+    registrar=print,
 ):
     """
-    Etapa 2 de "Calculo E Costos": agrega L, M, N, O, R, S, T, U, W,
-    X, Y, AB, AC, AD, AE, AF a df_ecostos (ya con la etapa base de
-    construir_calculo_e_costos), y renombra todas las columnas a sus
-    nombres reales (NOMBRES_CALCULO_E_COSTOS) antes de devolver. Ver
-    el comentario de seccion mas arriba para el detalle y las
+    Etapas 2 y 3 de "Calculo E Costos": agrega L, M, N, O, R, S, T,
+    U, W, X, Y, AB, AC, AD, AE, AF, AG, AH, AI, AJ, AK, AL, AM, AN,
+    AO, AP, AQ, AR, AS, AT, AU, AV a df_ecostos (ya con la etapa base
+    de construir_calculo_e_costos), y renombra todas las columnas a
+    sus nombres reales (NOMBRES_CALCULO_E_COSTOS) antes de devolver.
+    Ver los comentarios de seccion mas arriba para el detalle y las
     advertencias de cada columna.
 
     dic_factor, umbral_soc_minimo: de construir_dic_resumen_factor().
+    diccionario: hoja Diccionario de Centrales.xlsx (header=None).
+    df_fd_csf, df_fd_cpf: de construir_fd() (nombres reales ya
+    aplicados).
+
+    Fuera de esta funcion (ver plan seccion 25.10): AW, AX, AZ y toda
+    la hoja Calculo RE545.
     """
 
     df = df_ecostos.reset_index(drop=True).copy()
@@ -2790,6 +3164,39 @@ def completar_calculo_e_costos_grupos(
     ae, af = calcular_ae_af(df, dic_factor)
     df["AE"] = ae
     df["AF"] = af
+
+    tabla_prorrata = construir_prorrata_sscc(df_subastas)
+    dic_prorrata = construir_dic_prorrata(tabla_prorrata, registrar=registrar)
+
+    ag, ah = calcular_prorratas(df, dic_prorrata)
+    df["AG"] = ag
+    df["AH"] = ah
+    df["AI"] = 0.0
+    df["AJ"] = df["AG"]
+    df["AK"] = df["AH"]
+    df["AL"] = 0.0
+
+    dic_mapeo = construir_dic_mapeo_diccionario(diccionario)
+    dic_fd_csf = construir_dic_fd_bloque(df_fd_csf, "id", "CSF(+)", "CSF(-)")
+    dic_fd_cpf = construir_dic_fd_bloque(df_fd_cpf, "id", "CPF(+)", "CPF(-)")
+
+    am, an, ap, aq = calcular_fd_prorrateado(
+        df, dic_mapeo, dic_fd_csf, dic_fd_cpf
+    )
+    df["AM"] = am
+    df["AN"] = an
+    df["AO"] = 0.0
+    df["AP"] = ap
+    df["AQ"] = aq
+    df["AR"] = 0.0
+
+    as_, at = calcular_as_at(df)
+    df["AS"] = as_
+    df["AT"] = at
+
+    au, av = calcular_au_av(df)
+    df["AU"] = au
+    df["AV"] = av
 
     participa = int(df["L"].sum())
     registrar(
@@ -3568,13 +3975,15 @@ def generar_consolidado(
 
 def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     """
-    Genera/actualiza Pagos_BESS.xlsx (etapa base de "Calculo E
-    Costos": H + CMg + traspaso de Medidores, ver plan seccion 25).
+    Genera/actualiza Pagos_BESS.xlsx: "Calculo E Costos" hasta AV
+    (falta AW:AZ, ver plan seccion 25.10) y todo lo anterior (base +
+    etapas 2/3, plan seccion 25).
 
-    No recalcula Medidores: lo lee tal cual esta en la hoja
-    "Medidores" de Consolidado_entradas.xlsx, que debe generarse
-    primero con su propia ventana "Generar". Centrales.xlsx y
-    cmg.xlsx si se leen frescos.
+    No recalcula Medidores ni Subastas: los lee tal cual estan en
+    Consolidado_entradas.xlsx, que debe generarse primero con su
+    propia ventana "Generar". Centrales.xlsx, cmg.xlsx y el archivo
+    SSCC_Desempeño_* si se leen/recalculan frescos (igual que ya
+    hacia con CMg).
 
     Sin checkboxes todavia -- una sola hoja de salida, se ajustan
     detalles en una etapa posterior (pedido explicito del usuario).
@@ -3618,10 +4027,10 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
         raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
 
     registrar("Leyendo Centrales.xlsx...")
-    resumen, _ = leer_centrales(rutas["centrales"])
+    resumen, diccionario = leer_centrales(rutas["centrales"])
     mapa_barra = construir_mapa_barra(resumen)
     dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
-    avanzar(45)
+    avanzar(40)
 
     if not rutas["cmg"].is_file():
         raise ErrorEntrada(f"No se encontro {rutas['cmg']}")
@@ -3656,12 +4065,28 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
             f"(tildando 'Subastas')."
         )
 
+    avanzar(75)
+
+    archivo_sscc = buscar_archivo_sscc_desempeno(rutas["sscc_desempeno_dir"])
+    if not archivo_sscc:
+        raise ErrorEntrada(
+            f"No se encontro ningun archivo SSCC_Desempeño_* en "
+            f"{rutas['sscc_desempeno_dir']} (hace falta para AM:AR de "
+            f"Calculo E Costos)."
+        )
+
+    registrar(f"Leyendo {archivo_sscc.name}...")
+    df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
+    avanzar(85)
+
     registrar(
-        "Completando L, M, N, O, R, S, T, U, W, X, Y, AB, AC, AD, AE, AF "
-        "(AG:AZ quedan pendientes, ver plan seccion 25.6)..."
+        "Completando L, M, N, O, R, S, T, U, W, X, Y, AB, AC, AD, AE, AF, "
+        "AG, AH, AI, AJ, AK, AL, AM, AN, AO, AP, AQ, AR, AS, AT, AU, AV "
+        "(AW:AZ quedan pendientes, ver plan seccion 25.10)..."
     )
     df_ecostos = completar_calculo_e_costos_grupos(
         df_ecostos, df_subastas, dic_factor, umbral_soc_minimo,
+        diccionario, df_fd_csf, df_fd_cpf,
         registrar=registrar,
     )
     avanzar(90)

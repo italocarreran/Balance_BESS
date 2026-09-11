@@ -1835,15 +1835,89 @@ hasta acá y se renombra recién al final, en `completar_calculo_e_costos_grupos
 | `N` | `Energía SSCC (-) por remunerar` | `O` | `Energía SSCC (+) por remunerar` |
 | `R` | `ranking cmg` | | |
 
-Lo que queda pendiente (`AG:AZ`) según esta misma hoja:
+Lo que en su momento quedó pendiente (`AG:AZ`) según esta misma hoja — resuelto en su mayoría
+en 25.10, salvo `AW:AZ`:
 
 | Real | Rol |
 |---|---|
-| `CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)` (`AG:AL`, grupo "Prorratas") | Necesitan la tabla dinámica **Prorrata SSCC** (`Filas: Configuración, Hora_mes` / `Columnas: Control` / `Valores: Cuenta de Sub_Baj`, confirmada por el usuario pero todavía no construida en Python). |
-| `CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)` (`AM:AR`, grupo "FD") | Necesitan `FD!CSF(±)`/`CPF(±)` (ya los tenemos) **más una categoría `CTF`** que no existe en nuestra hoja `FD` (solo tiene bloques CSF y CPF) — origen todavía sin identificar. |
-| `Energía descarga/carga con FD` (`AS`, `AT`) | Combinan lo de arriba con `AE`/`AF`. |
-| `Ingreso descarga`, `Costo carga`, `Descuento FD`, `Total` (`AU:AX`, grupo "Componente 1") | `AW` (Descuento FD) necesita el umbral de subida/bajada por central+ventana — en el `.xlsm` original la referencia lleva a `Subastas!U:W`, pero el archivo de encabezados reales muestra en cambio `Subastas!R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`, `BAJADA`) como una tabla de resumen aparte, sin filas de datos de ejemplo — la posición exacta de esa tabla **sigue sin confirmarse**. |
-| `Monto a compensar` (`AZ`) | Depende de todo lo anterior. |
+| `CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)` (`AG:AL`, grupo "Prorratas") | **Implementado (25.10)**. |
+| `CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)` (`AM:AR`, grupo "FD") | **Implementado (25.10)**. `CTF` confirmado por el usuario: no existe, sale en 0 — coincide con que el VBA original también las deja hardcodeadas en 0. |
+| `Energía descarga/carga con FD` (`AS`, `AT`) | **Implementado (25.10)**. |
+| `Ingreso descarga`, `Costo carga` (`AU`, `AV`) | **Implementado (25.10)**. |
+| `Descuento FD`, `Total` (`AW`, `AX`, grupo "Componente 1") | **Todavía pendiente** — `AW` necesita el umbral de subida/bajada por central+ventana; ver 25.10. |
+| `Monto a compensar` (`AZ`) | **Todavía pendiente** — depende de `AX`. |
 
-No se implementa nada de esto todavía: falta resolver la Prorrata SSCC (pivot), encontrar el
-origen de `CTF`, y confirmar la posición real de la tabla de umbrales de Subastas.
+## 25.10. `AG:AV` — Prorrata SSCC, homologación FD y costo ponderado
+
+El usuario confirmó dos cosas que destrabaron esta etapa:
+
+1. **`CTF` no existe**: "creo que no tiene ctf no está en los FD y en la hoja de los ecostos
+   sale con 0". Coincide exactamente con el código: `salidaAGAX(i, 3) = 0` (`AI`),
+   `salidaAGAX(i, 6) = 0` (`AL`), `salidaAGAX(i, 9) = 0` (`AO`), `salidaAGAX(i, 12) = 0` (`AR`)
+   — están hardcodeadas en 0 en el VBA original, no dependen de ningún diccionario. No hacía
+   falta encontrar un origen para `CTF`: nunca existió como dato real en esta parte del cálculo.
+
+2. **El archivo de Subastas está corrido una columna**: "Las subastas que te mande vs las del
+   original están corridas una columna, la primera en el original está vacía". Esto explica la
+   discrepancia de la sección 25.6: aplicando ese corrimiento de una columna a lo que el VBA
+   documentaba (`Subastas!D` = tipo, `G,H,I,K` = clave), se obtiene exactamente
+   `Subastas!Sub_Baj` (tipo) + `Configuración+Mes+Dia+Hora_dia` (clave) — lo mismo que ya se
+   había implementado por inferencia en 25.6, ahora con una explicación clara de por qué las
+   letras del VBA no coincidían con los encabezados reales.
+
+Con eso, se implementó:
+
+### Prorrata SSCC (`AG, AH, AI, AJ, AK, AL`)
+
+`construir_prorrata_sscc()` arma la tabla dinámica en pandas (`pivot_table`, `index=
+[Configuración, Hora_mes]`, `columns=Control`, `values=Sub_Baj`, `aggfunc=count`) — **no es un
+archivo externo**, se deriva de `Subastas` (confirmado por el usuario, ver 25.4).
+`construir_dic_prorrata()` busca, entre las columnas que deja el pivot (una por cada valor de
+`Control`), la que contenga "CPF" y la que contenga "CSF" en el nombre — **inferido**, no
+confirmado letra por letra que `Control` tenga exactamente esos dos valores; si no las
+encuentra, avisa y usa 0. `calcular_prorratas()` homologa por central+`Hora Mes`.
+
+Replicando el VBA (`salidaAGAX(i,1)=valorAG; salidaAGAX(i,4)=valorAG` — **AG y AJ son el mismo
+valor**, igual `AH`/`AK`): `AJ = AG`, `AK = AH` (Prorratas "+" duplica literalmente las
+Prorratas "-"; no es un error, así está en el original). `AI = AL = 0` (`CTF`, ver arriba).
+
+### FD homologado (`AM, AN, AO, AP, AQ, AR`)
+
+`construir_dic_mapeo_diccionario()` replica `CrearDiccionarioPrimerValor(Diccionario, 1, 2)`:
+columna A → columna B de `Diccionario` (una TERCERA lectura de esa hoja, distinta de
+`construir_homologacion()` y de `_mapas_homologacion_fge()` — no fusionar). `_calcular_bloque()`
+replica `CalcularBloque` (`Int((valor-1)/4)+1`). `calcular_fd_prorrateado()` arma la central
+homologada + el bloque de `Y` (para descarga) o de `AC` (para carga), y busca esa clave en
+`FD!CSF(±)`/`CPF(±)` (ya construidos por `construir_fd()`, requiere ahora también el archivo
+`SSCC_Desempeño_*` para `generar_pagos_bess()`, igual que ya lo exige `generar_consolidado()`
+para la sección `"fd"`). Si la central no está en `Diccionario`, las 4 quedan en blanco
+(`pd.NA`, equivalente al `#N/A` del original); si está pero no hay match en `FD`, quedan en 0
+(fiel al original: ahí solo se registra un aviso, no se propaga un error). `AO = AR = 0` (`CTF`).
+
+### `AS`, `AT` — costo ponderado
+
+`_calcular_costo_ponderado()` replica `CalcularCostoPonderado`: si `AG+AH` (las cantidades de
+Prorrata) es mayor a 0, pondera `AM`/`AN` (o `AP`/`AQ`) por esas cantidades; si no, el factor es
+1. Si `AE`/`AF` es blanco, el resultado es blanco; si `AG+AH>0` pero el precio (`AM`/`AN`/`AP`/
+`AQ`) es blanco, también.
+
+### `AU`, `AV` — ingreso/costo por Componente 1
+
+`calcular_au_av()` replica el promedio de `AB` (para `AU`) / `AD` (para `AV`) dentro del grupo
+central+ventana, entre las filas con `AE`/`AF` válido y distinto de 0, multiplicado por `AE`/
+`AF` — pero solo si la suma **global** de energía (todas las centrales que comparten la misma
+`Copia_Ventana`, sin agrupar por central) supera 10 (`AU`) o es menor a -10 (`AV`). Esta suma
+global (`sumaIP`/`sumaJP` en el VBA) es una agrupación **distinta** de la de `N/O/R/Y/AB/AC/AD`
+(que sí es por central+ventana) — no confundirlas.
+
+### Lo que sigue pendiente: `AW`, `AX`, `AZ`
+
+`AW` ("Descuento FD") necesita un umbral de subida/bajada por central+ciclo que, en el `.xlsm`
+original, vive en una tabla resumen aparte de `Subastas` (no en el bloque principal B:Q).
+Aplicando el mismo corrimiento de columna de más arriba a lo que mostraba el archivo de
+encabezados (`Subastas!R:V` = `Configuración`, `Ciclo`, `Clave`, `SUBIDA`, `BAJADA`), la tabla
+real parecería estar en `S:W`, con `U`("Clave") = `Configuración & "&" & Ciclo`, y `V`/`W`
+conteniendo un valor bajo el título "SUBIDA"/"BAJADA" calculado con una fórmula `COUNTIFS` que
+a su vez depende de `Subastas!N` ("Energía SSCC"), que a su vez depende de `Calculo E Costos!P`
+— una dependencia circular con nuestro propio cálculo que todavía no se terminó de decantar. No
+se implementa `AW`/`AX`/`AZ` hasta resolver esto.
