@@ -137,12 +137,13 @@ de.
   las bloqueaba **no era un archivo externo**: se deriva de `Subastas` +
   `Subastas!N` contando filas por central+ciclo+tipo
   (`construir_dic_umbrales_subastas()`), igual que la Prorrata SSCC. Y
-  `Subastas!N` ("Energía SSCC") **no es una energía**: es el `Ciclo de
-  Carga del mes` de `Calculo E Costos` homologado por `Hora_mes` +
-  `Configuración` (`calcular_subastas_energia_sscc()`), que viene de
-  `Medidores` — por eso la "dependencia circular" que se había anotado no
-  existía. Fuera de alcance: la columna `AY` (que la macro original
-  tampoco escribe).
+  `Subastas!N` (llamada `"Ciclo"` en el archivo real, plan §26.8 — se
+  creyó "Energía SSCC" hasta corregirse) **no es una energía**: es el
+  `Ciclo de Carga del mes` de `Calculo E Costos` homologado por
+  `Hora_mes` + `Configuración` (`calcular_subastas_ciclo()`), que viene
+  de `Medidores` — por eso la "dependencia circular" que se había
+  anotado no existía. Fuera de alcance: la columna `AY` (que la macro
+  original tampoco escribe).
 
   **`Pagos_BESS.xlsx` tiene casillas por hoja** en su ventana "Generar"
   (`SECCIONES_PAGOS`, mismo patron que `SECCIONES_CONSOLIDADO`): una

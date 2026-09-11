@@ -1954,27 +1954,44 @@ def construir_fd(ruta_sscc, registrar=print):
 # SUBASTAS
 # --------------------------------------------------------------
 
-# Encabezados reales de Subastas!B:Q (confirmados por el usuario). "A"
-# (Concepto) no esta: la macro Cargar_Remuneracion_Subastas_Rapido no
-# la toca. "Q" no tiene encabezado en el archivo real (queda como
-# columna sin nombre, no se le inventa uno).
+# Encabezados reales de Subastas!B:Q -- CORREGIDOS con el archivo
+# Libro1.xlsx que trae la macro Cargar_Remuneracion_Subastas_Rapido y
+# formulas reales cruzadas contra encabezados reales (sesion de
+# correccion, ver BITACORA). La version anterior de este diccionario
+# tenia TODO corrido una posicion: le faltaba la columna "Concepto"
+# (B), la primera de las 11 que copia DB!B:L, que hasta esta sesion
+# se asumia (mal) que era "A" y que la macro no tocaba.
+#
+# La prueba definitiva: Subastas!B1 tiene la formula real
+#   =IF(AND(C1="CSF",D1="SUBIDA"),"CSF(+)",IF(AND(C1="CSF",D1="BAJADA"),
+#     "CSF(-)",IF(AND(C1="CTF",D1="SUBIDA"),"CTF(+)",
+#     IF(AND(C1="CTF",D1="BAJADA"),"CTF(-)","REVISAR"))))
+# que arma "Concepto" (B) a partir de DOS insumos: "Control" (C, el
+# tipo SIN direccion: CSF/CTF/CPF) y "Sub_Baj" (D, la direccion:
+# SUBIDA/BAJADA). La version anterior solo tenia UNA columna ahi
+# (llamada "Control", en la posicion de lo que en realidad es
+# "Concepto") -- faltaba la columna "Control" real.
+#
+# "A" SIGUE sin usarse (confirmado: ninguna celda con datos en esa
+# columna en el archivo real) -- no era un error de ubicacion, era
+# que faltaba contar una columna mas dentro del bloque B:L.
 NOMBRES_SUBASTAS = {
-    "B": "Control",
-    "C": "Sub_Baj",
-    "D": "Fecha",
-    "E": "Año",
-    "F": "Mes",
-    "G": "Dia",
-    "H": "Hora_dia",
-    "I": "Hora_mes",
-    "J": "Configuración",
-    "K": "Propietario",
-    "L": "Clave horaria",
-    "M": "Ciclo",
-    "N": "Energía SSCC",
-    "O": "FD",
-    "P": "FMA",
-    "Q": "",
+    "B": "Concepto",
+    "C": "Control",
+    "D": "Sub_Baj",
+    "E": "Fecha",
+    "F": "Año",
+    "G": "Mes",
+    "H": "Dia",
+    "I": "Hora_dia",
+    "J": "Hora_mes",
+    "K": "Configuración",
+    "L": "Propietario",
+    "M": "Clave horaria",
+    "N": "Ciclo",
+    "O": "Energía SSCC",
+    "P": "FD",
+    "Q": "FMA",
 }
 
 
@@ -1988,19 +2005,28 @@ def construir_subastas(ruta_subastas, registrar=print):
     filtro y la misma seleccion de columnas.
 
     Arma las columnas B:Q de Subastas (nombres reales en
-    NOMBRES_SUBASTAS, confirmados por el usuario):
-      - Control:Clave horaria (B:L): copia directa de DB!B:L
-        (filtrado por Propietario/DB!K contiene BESS/SAE).
-      - Ciclo (M, formula): = Propietario & Hora_dia & Hora_mes
-        (K&H&I).
-      - Energía SSCC (N): se deja vacia EN ESTA HOJA. Ya no es un
-        calculo desconocido (ver calcular_subastas_energia_sscc: es
-        el "Ciclo de Carga del mes" de Calculo E Costos homologado
-        por Hora_mes + Configuración), pero depende de Calculo E
-        Costos, que se arma despues y en el otro archivo
-        (Pagos_BESS.xlsx). Se calcula ahi, donde se usa.
-      - FD, FMA (O, P) y la columna sin nombre (Q): copias de DB!P,
-        DB!Y, DB!V respectivamente (asi lo indica la macro original).
+    NOMBRES_SUBASTAS, corregidos con el archivo real -- ver el
+    comentario de esa constante):
+      - Concepto:Propietario (B:L, 11 columnas): copia directa de
+        DB!B:L (filtrado por DB!K -- que en el archivo real resulta
+        ser "Configuración", no "Propietario"; el filtro sigue
+        siendo textualmente correcto porque los nombres de central
+        BESS/SAE empiezan con "SAE-", asi que "contiene BESS o SAE"
+        encuentra las mismas filas de cualquier forma).
+      - Clave horaria (M, formula): = Configuración & Dia & Hora_dia
+        (K&H&I con las letras REALES de Subastas; coincide con la
+        formula real M3=K3&H3&I3 del archivo).
+      - Ciclo (N): se deja vacia EN ESTA HOJA. Ya no es un calculo
+        desconocido (ver calcular_subastas_ciclo: es el "Ciclo de
+        Carga del mes" de Calculo E Costos homologado por Hora_mes +
+        Configuración), pero depende de Calculo E Costos, que se
+        arma despues y en el otro archivo (Pagos_BESS.xlsx). Se
+        calcula ahi, donde se usa. (Antes de esta sesion esta
+        columna se llamaba "Energía SSCC" -- nombre equivocado: lo
+        que la formula real trae es un numero de ciclo, no energia.)
+      - Energía SSCC, FD, FMA (O, P, Q): copias de DB!P, DB!Y, DB!V
+        respectivamente (asi lo indica la macro original) -- simples
+        copias, sin formula ni calculo dentro de Subastas.
     """
 
     ruta_subastas = Path(ruta_subastas)
@@ -2851,18 +2877,21 @@ def calcular_u_v_re545(df_re545, dic_capacidad, dic_eficiencia):
 # igual que en calcular_l y en los umbrales de E Costos):
 #   central       -> Configuración
 #   hora del mes  -> Hora_mes
-#   tipo          -> Control (la columna con los CPF/CSF, la misma
-#                    que ya usa construir_prorrata_sscc)
+#   tipo          -> Concepto (la columna con las etiquetas
+#                    CPF(-)/CSF(+)/etc ya armadas; "Control" -- una
+#                    columna DISTINTA -- solo tiene el tipo SIN
+#                    direccion, CSF/CTF/CPF, no sirve para esto)
 #
-# PENDIENTE DE CONFIRMAR (ver BITACORA): las tres columnas que se
-# suman se toman por POSICION (O, P, Q de nuestra hoja Subastas,
-# que es como las escribe la macro de carga), no por nombre. Los
-# nombres reales que trajo el archivo de encabezados llaman "FD" a
-# O y "FMA" a P, corridos una columna respecto de los titulos de
-# grupo de RE545 (que dicen Subastas/FD/FMA para O/P/Q). Es el
-# mismo corrimiento de una columna que el usuario ya describio para
-# el archivo de Subastas. Se eligio seguir la formula (posicion),
-# no el nombre, porque la formula es la fuente primaria.
+# CONFIRMADO (ver BITACORA, sesion de correccion con Libro1.xlsx):
+# la formula real del libro (seccion 5.3 del documento de
+# trazabilidad) usa Subastas!$B:$B como rango de coincidencia contra
+# el encabezado de columna de RE545 (ej. AC$3="CPF(-)") -- y
+# Subastas!B es "Concepto" en el archivo real, no "Control". Las
+# tres columnas que se suman SI son O, P, Q por posicion (Energía
+# SSCC, FD, FMA en el archivo real -- los titulos de grupo de RE545
+# dicen Subastas/FD/FMA para esas mismas tres, que es coherente:
+# "Subastas" como titulo de grupo generico para la primera, que la
+# formula real llama "Energía SSCC").
 # ------------------------------------------------------------
 
 # Los 6 encabezados que la formula usa como criterio (AC$3 y sus
@@ -2910,7 +2939,7 @@ def construir_dic_reservas_subastas(df_subastas):
         for central, hora_mes, tipo in zip(
             df_subastas["Configuración"],
             df_subastas["Hora_mes"],
-            df_subastas["Control"],
+            df_subastas["Concepto"],
         )
     ]
 
@@ -4495,30 +4524,35 @@ def calcular_au_av(df_ecostos):
 
 
 # ============================================================
-# CALCULO E COSTOS (etapa 4): Subastas!N, umbrales, AW, AX, AZ
+# CALCULO E COSTOS (etapa 4): Subastas!N (Ciclo), umbrales, AW, AX, AZ
 #
 # El usuario entrego el documento de trazabilidad completo
 # (docs/Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md), que trae las
 # tres piezas que faltaban y que estaban anotadas como bloqueantes:
 #
-# 1. Subastas!N ("Energía SSCC"). Formula del libro original
-#    (seccion 5.3 del documento):
+# 1. Subastas!N ("Ciclo" en el archivo real -- ver correccion de
+#    nombres en NOMBRES_SUBASTAS; se penso "Energía SSCC" hasta que
+#    Libro1.xlsx trajo el encabezado real). Formula del libro
+#    original (seccion 5.3 del documento):
 #      =IFERROR(XLOOKUP(1,
 #          ('Calculo E Costos'!$D$2:$D$50000=J3)*
 #          ('Calculo E Costos'!$G$2:$G$50000=K3),
 #          'Calculo E Costos'!$P$2:$P$50000,""),"")
-#    O sea: NO es una energia. Es el "Ciclo de Carga del mes"
-#    (Calculo E Costos!P = Copia_Ventana) de la primera fila de
-#    Calculo E Costos que coincide en "Hora mes" (D) y
-#    "Configuracion" (G). El nombre de la columna enga~na.
+#    O sea: es el "Ciclo de Carga del mes" (Calculo E Costos!P =
+#    Copia_Ventana) de la primera fila de Calculo E Costos que
+#    coincide en "Hora mes" (D) y "Configuracion" (G) -- coincide
+#    exactamente con que el encabezado real de esta columna sea
+#    "Ciclo", no una energia.
 #
 # 2. La tabla de umbrales de subida/bajada, que era EL bloqueante.
-#    Vive en Subastas!U:W del libro original (seccion 5.3):
+#    Vive en Subastas!S:W del libro original (confirmado con
+#    Libro1.xlsx: S=Configuración, T=Ciclo, U=Clave, V=SUBIDA,
+#    W=BAJADA):
 #      U3 = S3&"&"&T3                              (clave)
 #      V3 = COUNTIFS($N:$N,$T3,$D:$D,V$2,K:K,S3)   (V$2 = "SUBIDA")
 #      W3 = COUNTIFS($N:$N,$T3,$D:$D,W$2,K:K,S3)   (W$2 = "BAJADA")
 #    No es un archivo externo ni una hoja aparte: se deriva de
-#    Subastas + Subastas!N, igual que la Prorrata SSCC. Y la
+#    Subastas + Subastas!N (Ciclo), igual que la Prorrata SSCC. Y la
 #    "dependencia circular" que se habia anotado NO existe: N
 #    depende de Calculo E Costos!P (Copia_Ventana), que viene de
 #    Medidores y ya esta disponible desde la etapa base, antes de
@@ -4527,17 +4561,10 @@ def calcular_au_av(df_ecostos):
 # 3. El bloque "AU, AV, AW, AX Y AZ" de Actualizar_Calculos_Columnas
 #    (modulo J_Calculo_Ecostos) + CrearDiccionarioUmbralesSubastas.
 #
-# OJO CON LAS LETRAS: en el libro original la hoja Subastas esta
-# corrida una columna respecto de la nuestra (confirmado por el
-# usuario; el original tiene una primera columna vacia). Por eso las
-# letras de arriba se leen asi contra NUESTRA hoja:
-#     original D (tipo)      -> nuestra Sub_Baj
-#     original J (hora mes)  -> nuestra Hora_mes
-#     original K (central)   -> nuestra Configuración
-# Es el mismo corrimiento ya aplicado en calcular_l(). N, en cambio,
-# es una columna de formula a letra fija: original N = nuestra N.
-# Igual que en todo el resto del proyecto, aca se homologa por
-# NOMBRE de columna, no por posicion.
+# LETRAS: se homologa por NOMBRE de columna real de Subastas
+# (Sub_Baj, Hora_mes, Configuración -- confirmados y corregidos con
+# Libro1.xlsx, ver NOMBRES_SUBASTAS), no por posicion, igual que en
+# todo el resto del proyecto.
 #
 # Sigue fuera de alcance: toda la hoja "Calculo RE545". La columna
 # AY del archivo real tampoco se calcula aca: no la escribe la macro
@@ -4545,10 +4572,11 @@ def calcular_au_av(df_ecostos):
 # seccion 5.4) -- la macro salta de AX a AZ, y este codigo tambien.
 # ============================================================
 
-def calcular_subastas_energia_sscc(df_subastas, df_ecostos):
+def calcular_subastas_ciclo(df_subastas, df_ecostos):
     """
-    Resuelve Subastas!N ("Energía SSCC"), pendiente desde que se creo
-    la hoja Subastas. Replica el XLOOKUP de arriba: para cada fila de
+    Resuelve Subastas!N ("Ciclo" en el archivo real -- antes
+    documentado como "Energía SSCC" por error, corregido con
+    Libro1.xlsx). Replica el XLOOKUP de arriba: para cada fila de
     Subastas, el Copia_Ventana ("Ciclo de Carga del mes") de la
     PRIMERA fila de Calculo E Costos que coincide en Hora Mes +
     central. Sin coincidencia -> "" (vacio), como el IFERROR original.
@@ -4603,21 +4631,25 @@ def _clave_central_ciclo(central, ciclo):
     )
 
 
-def construir_dic_umbrales_subastas(df_subastas, energia_sscc):
+def construir_dic_umbrales_subastas(df_subastas, ciclo_subastas):
     """
-    Replica la tabla auxiliar Subastas!U:W (clave, SUBIDA, BAJADA) y
+    Replica la tabla auxiliar Subastas!S:W (Configuración, Ciclo,
+    Clave, SUBIDA, BAJADA -- confirmado con Libro1.xlsx) y
     CrearDiccionarioUmbralesSubastas: devuelve
     {"CENTRAL&CICLO": (umbral_subida, umbral_bajada)}.
 
     Cada umbral es el COUNTIFS del original: cuantas filas de
-    Subastas tienen ese ciclo (columna "Energía SSCC"), esa central
-    (Configuración) y ese tipo (Sub_Baj = SUBIDA / BAJADA).
+    Subastas tienen ese ciclo (columna "Ciclo" -- antes documentada
+    por error como "Energía SSCC", ver calcular_subastas_ciclo), esa
+    central (Configuración) y ese tipo (Sub_Baj = SUBIDA / BAJADA).
 
     La tabla del libro original es una lista fija de central x ciclo
     escrita a mano; aca las combinaciones salen de los datos. Es
     equivalente: una combinacion que la lista tiene pero los datos no
     daria 0/0, y con umbral 0 ninguna fila pasa el filtro
     "W <= umbral*4" (W arranca en 1), o sea AW = 0 igual.
+
+    ciclo_subastas: la Serie que devuelve calcular_subastas_ciclo().
     """
 
     dic = {}
@@ -4625,7 +4657,7 @@ def construir_dic_umbrales_subastas(df_subastas, energia_sscc):
     tipos = df_subastas["Sub_Baj"].map(_normaliza_valor_vba)
 
     for central, ciclo, tipo in zip(
-        df_subastas["Configuración"], energia_sscc, tipos
+        df_subastas["Configuración"], ciclo_subastas, tipos
     ):
         if not _tiene_valor(ciclo):
             continue
@@ -4920,13 +4952,13 @@ def completar_calculo_e_costos_grupos(
     df["AU"] = au
     df["AV"] = av
 
-    energia_sscc = calcular_subastas_energia_sscc(df_subastas, df)
-    dic_umbrales = construir_dic_umbrales_subastas(df_subastas, energia_sscc)
+    ciclo_subastas = calcular_subastas_ciclo(df_subastas, df)
+    dic_umbrales = construir_dic_umbrales_subastas(df_subastas, ciclo_subastas)
 
-    con_ciclo = int(energia_sscc.map(_tiene_valor).sum())
+    con_ciclo = int(ciclo_subastas.map(_tiene_valor).sum())
     registrar(
         f"  Subastas: {con_ciclo:,} de {len(df_subastas):,} fila(s) "
-        f"cruzaron con un ciclo de Calculo E Costos ('Energía SSCC'); "
+        f"cruzaron con un ciclo de Calculo E Costos ('Ciclo'); "
         f"{len(dic_umbrales):,} par(es) central+ciclo con umbral "
         f"SUBIDA/BAJADA."
     )

@@ -16,37 +16,43 @@ estado, no un historial.
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
-- **Bloqueante: confirmar la estructura real de columnas de `Subastas`**
-  contra un ejemplo que el usuario compartió de la planilla 11 original.
-  La foto muestra una fila de datos con `CSF(-)` (Control, calculado) 
-  seguido de `CSF` y de `BAJADA` en celdas consecutivas — eso sugiere una
-  columna "Servicio" (`CSF`/`CTF`/`CPF`, el tipo de servicio SIN la
-  dirección) que **no está en `NOMBRES_SUBASTAS` hoy**, entre `Control` y
-  `Sub_Baj`, coherente con la fórmula real de `Control`
-  (`=IF(AND(C1="CSF",D1="SUBIDA"),"CSF(+)",...)`, sección 5.3 del
-  documento de trazabilidad) que necesita DOS insumos (servicio +
-  dirección) para armar el label. Si esto es así, **toda la letra de
-  `Subastas` de `E` en adelante está corrida una posición** respecto de
-  lo que asume hoy `NOMBRES_SUBASTAS`/`construir_subastas()` — no se
-  tocó código todavía porque esto necesita confirmación letra por letra,
-  no otra inferencia (ya van varias con este archivo). Ver entrada de
-  esta sesión.
-- Confirmar con el usuario qué son los `[Configuración, Ciclo, Clave,
-  SUBIDA, BAJADA]` que se ven en la planilla real al lado de `Subastas`
-  (columnas más allá de `Q`) — coincide con la tabla de umbrales que
-  `construir_dic_umbrales_subastas()` ya calcula en Python (no la lee del
-  archivo), así que sirve como dato de validación cruzada una vez resuelto
-  el punto anterior.
+- ~~Bloqueante: confirmar la estructura real de columnas de `Subastas`~~
+  — **resuelto**: el usuario entregó un `Libro1.xlsx` con la macro real y
+  encabezados+fórmulas de la hoja `subastas` real. Confirmó que faltaba la
+  columna `Concepto` (B) — ver entrada de esta sesión ("Corrección grande:
+  `NOMBRES_SUBASTAS` estaba mal desde el principio"). `NOMBRES_SUBASTAS`
+  ya está corregido y validado con los valores exactos de ese archivo.
+- ~~Confirmar con el usuario qué son [Configuración, Ciclo, Clave, SUBIDA,
+  BAJADA]~~ — resuelto en la misma entrega: viven en `Subastas!S:W` (antes
+  se documentaba como `R:V`, un error menor de una letra). Coincide
+  exactamente con lo que `construir_dic_umbrales_subastas()` ya calculaba
+  en Python — sigue sirviendo como dato de validación cruzada si el
+  usuario comparte valores reales de esa tabla para comparar.
 - ~~Revisar con el usuario los valores reales de `Subastas!Sub_Baj`~~ —
-  probablemente explicado por el punto de arriba (columna corrida): si
-  `Sub_Baj` en realidad vive una posición más allá de lo asumido, el
-  filtro `BAJADA`/`SUBIDA` estaba comparando contra la columna
-  equivocada. Se resuelve junto con el punto anterior.
-- Validar contra un caso real que `Subastas!Control` tenga exactamente los
-  valores `CPF`/`CSF` (usado para separar la tabla dinámica Prorrata SSCC
-  en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
-  inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
-  `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
+  resuelto: `Sub_Baj` SÍ tiene `BAJADA`/`SUBIDA` reales, el dato nunca
+  estuvo mal. Lo que estaba mal era `NOMBRES_SUBASTAS`: el nombre
+  `"Sub_Baj"` estaba pegado a la posición equivocada (una posición antes
+  de donde realmente vive), así que el código, sin saberlo, terminaba
+  filtrando sobre los valores de `Control` (`CSF`/`CTF`/`CPF`, sin
+  dirección) en vez de sobre `BAJADA`/`SUBIDA` reales. Eso explica
+  exactamente el crash de la sesión anterior (0 filas tras el filtro
+  `.isin(["BAJADA","SUBIDA"])` — nunca iba a haber match comparando contra
+  texto que dice "CSF"). Falta re-confirmar con un caso real que ahora sí
+  aparezcan filas `BAJADA`/`SUBIDA` con la corrección aplicada.
+- ~~Validar contra un caso real que `Subastas!Control` tenga exactamente
+  los valores `CPF`/`CSF`~~ — aclarado: `Control` (real) tiene el tipo SIN
+  dirección (`CSF`/`CTF`/`CPF`, confirmado con el archivo real), y
+  `construir_dic_prorrata()` ya buscaba por substring "cpf"/"csf" — sigue
+  funcionando igual, sin cambios de código. Lo que SÍ cambió es que
+  `construir_dic_reservas_subastas()` (reservas por subasta de `Calculo
+  RE545`) usaba por error `Control` cuando necesitaba `Concepto` (las
+  etiquetas completas `CPF(-)`/`CSF(+)`/etc que usa la fórmula real de
+  `Subastas!$B:$B`) — corregido en esta sesión.
+- Correr un caso real completo (`Consolidado_entradas.xlsx` +
+  `Pagos_BESS.xlsx`) con la corrección de `Subastas` aplicada, para
+  confirmar que ahora sí aparecen filas `L=1` (participa en subasta) y
+  que las Prorratas/reservas de RE545 no quedan todas en 0. Es el
+  siguiente paso natural después de esta sesión.
 - `Calculo E Costos` y `Calculo RE545` están **completas** (ver plan §25
   y §26). Lo que sigue son las hojas de salida que las consumen:
   `PRORRATA_RETIROS`, `Compensacion total`, `Resumen` y el CSV
@@ -1261,3 +1267,119 @@ en la planilla 11 real.
 sufijos vistos, texto sin ruta queda intacto) y de `extraer_soc()` de punta a punta (con y sin
 `Diccionario`, y confirmando que `nombre_scada_original` sigue guardando la ruta completa sin
 tocar, solo `central` cambia). Regresión completa: pasa.
+
+---
+
+## 2026-09-11 (16) — Corrección grande: `NOMBRES_SUBASTAS` estaba mal desde el principio
+
+El usuario adjuntó `Libro1.xlsx` con la hoja `subastas` real (encabezados **y fórmulas**, no solo
+nombres) y pidió: "revisa la macro `Cargar_Remuneracion_Subastas_Rapido` y arma según el adjunto
+en el mismo formato de salida que tengo en la planilla 11". Se copió el archivo al repo como
+`docs/Libro1_Subastas_real.xlsx` (mismo criterio que los otros adjuntos que son fuente de una
+decisión). Cruzando ese archivo contra el código VBA de la macro (ya en el documento de
+trazabilidad) se encontró la causa raíz de la confusión que venía arrastrándose desde hace varias
+sesiones (el "corrimiento de columna" que nunca terminaba de cuadrar del todo).
+
+**La prueba definitiva** es la fórmula real de `Subastas!B1`:
+
+```
+=IF(AND(C1="CSF",D1="SUBIDA"),"CSF(+)",IF(AND(C1="CSF",D1="BAJADA"),"CSF(-)",
+  IF(AND(C1="CTF",D1="SUBIDA"),"CTF(+)",IF(AND(C1="CTF",D1="BAJADA"),"CTF(-)","REVISAR"))))
+```
+
+Esta fórmula arma la columna `B` a partir de DOS insumos: `C` (el tipo de servicio SIN dirección:
+`CSF`/`CTF`/`CPF`) y `D` (la dirección: `SUBIDA`/`BAJADA`). `NOMBRES_SUBASTAS` **solo tenía una
+columna ahí** (`B`="Control", asumiendo que guardaba el label completo como `"CSF(-)"`, y
+`C`="Sub_Baj" asumiendo que ahí vivía directamente `SUBIDA`/`BAJADA`) — le faltaba contar una
+columna entera: la real `B` = `Concepto` (el label completo, lo que veníamos llamando "Control"),
+`C` = `Control` (el tipo SIN dirección, una columna que nunca se había mapeado) y recién `D` =
+`Sub_Baj`. Confirmado letra por letra contra los datos reales del archivo (fila 3: `B3='CSF(-)'`,
+`C3='CSF'`, `D3='BAJADA'`, `K3='SAE-CRCA-PFV-DON-HUMBERTO'`, `L3='EGP_CHILE'`).
+
+**`NOMBRES_SUBASTAS` corregido, de punta a punta** (16 posiciones `B:Q`, todas confirmadas contra
+el archivo real):
+
+| Letra | Antes (mal) | Ahora (confirmado) |
+|---|---|---|
+| B | `Control` | **`Concepto`** |
+| C | `Sub_Baj` | **`Control`** |
+| D | `Fecha` | **`Sub_Baj`** |
+| E | `Año` | **`Fecha`** |
+| F | `Mes` | **`Año`** |
+| G | `Dia` | **`Mes`** |
+| H | `Hora_dia` | **`Dia`** |
+| I | `Hora_mes` | **`Hora_dia`** |
+| J | `Configuración` | **`Hora_mes`** |
+| K | `Propietario` | **`Configuración`** |
+| L | `Clave horaria` | **`Propietario`** |
+| M | `Ciclo` | **`Clave horaria`** |
+| N | `Energía SSCC` | **`Ciclo`** |
+| O | `FD` | **`Energía SSCC`** |
+| P | `FMA` | **`FD`** |
+| Q | *(sin nombre)* | **`FMA`** |
+
+Cada nombre "de antes" cayó exactamente una posición más adelante de donde debía — **no** era un
+corrimiento uniforme de todo el archivo (la explicación que se venía dando, "la primera columna
+del original está vacía"), era que faltaba UNA columna real (`Concepto`) al principio del bloque
+de 11 que copia la macro (`DB!B:L → Subastas!B:L`, confirmado con el `MsgBox` de la macro:
+`"DB B:L → Subastas B:L"`, `"DB P → Subastas O"`, `"DB Y → Subastas P"`, `"DB V → Subastas Q"`).
+`A` (antes de `B`=Concepto) sigue genuinamente sin usar — eso sí estaba bien.
+
+**Consecuencia feliz: casi nada de la lógica ya escrita estaba mal, solo los nombres.**
+`construir_subastas()` arma los valores por **posición** (columna 0 del bloque B:L, columna 1,
+etc.), y esas posiciones eran correctas — el bug estaba únicamente en qué nombre se le pegaba a
+cada posición al final (`NOMBRES_SUBASTAS`). Por ejemplo, la fórmula de "Clave horaria"
+(`=Configuración&Dia&Hora_dia`, confirmada con la fórmula real `M3=K3&H3&I3`) ya se calculaba
+así en el código (usando las letras internas `K`,`H`,`I` como *posiciones*, que por construcción
+coinciden con las letras reales de Excel en el bloque B:L) — solo estaba mal etiquetada como
+`"Ciclo"`. Verificado con los valores exactos de dos filas del archivo real (test sintético, ver
+abajo): el resultado coincide.
+
+**Cambios de código:**
+
+- `NOMBRES_SUBASTAS`: corregido (tabla de arriba).
+- `calcular_subastas_energia_sscc()` → renombrada **`calcular_subastas_ciclo()`**: la columna
+  `N` que esta función resuelve **no es "Energía SSCC", es "Ciclo"** — el nombre real de la
+  columna que trae el XLOOKUP (`Calculo E Costos!P` = "Ciclo de Carga del mes") coincide
+  exactamente con que sea un número de ciclo, no una energía. La lógica/fórmula que ya estaba
+  implementada es la correcta — solo el nombre estaba equivocado. `construir_dic_umbrales_
+  subastas()` renombra su parámetro `energia_sscc` → `ciclo_subastas` (mismo motivo).
+- `construir_dic_reservas_subastas()` (reservas por subasta de `Calculo RE545`, `AC:AU`): usaba
+  `df_subastas["Control"]` como criterio de tipo (`CPF(-)`/`CSF(+)`/etc) — **esto sí era un bug
+  real, no solo un nombre**: la fórmula real usa `Subastas!$B:$B` como rango de coincidencia
+  contra el encabezado de columna (`AC$3="CPF(-)"`), y `Subastas!B` es `Concepto` (el label
+  completo), no `Control` (que ahora sabemos que es solo el tipo sin dirección — nunca iba a
+  poder distinguir `(-)` de `(+)`). Corregido a `df_subastas["Concepto"]`.
+- `construir_prorrata_sscc()`/`construir_dic_prorrata()` (Prorrata SSCC, `AG:AL`): **sin
+  cambios** — el pivot ya usaba `columns="Control"`, y ahora que se sabe que `Control` real es
+  el tipo sin dirección (`CSF`/`CTF`/`CPF`), sigue siendo exactamente lo que el pivot necesita
+  (agrupa por tipo, no por tipo+dirección — coincide con que el VBA original duplique
+  literalmente `AJ=AG`/`AK=AH`, sin distinguir dirección en absoluto). Era una decisión correcta
+  desde el principio, ahora con más fundamento.
+
+**Pieza extra que este archivo confirmó, sin que hiciera falta pedirla:** la tabla de umbrales
+SUBIDA/BAJADA (`AW`, bloqueada durante varias sesiones hasta la "etapa 4") vive en
+`Subastas!S:W` (`S`=Configuración, `T`=Ciclo, `U`=Clave, `V`=SUBIDA, `W`=BAJADA) — coincide
+exactamente con lo que `construir_dic_umbrales_subastas()` ya calculaba en Python de forma
+independiente (no la lee del archivo, la deriva). Buena señal cruzada de que esa parte del
+cálculo está bien encaminada.
+
+**Verificación:** nuevo test (`test_subastas_real.py`, no persistido) que arma dos filas de
+`DB` con los valores EXACTOS de las filas 3 y 7 del `Libro1.xlsx` real (mismo texto, mismos
+números) y confirma que `construir_subastas()` separa correctamente `Concepto`/`Control`/
+`Sub_Baj`, ubica `Configuración`/`Propietario` en su lugar, calcula `Clave horaria` igual que la
+fórmula real, deja `Ciclo` vacío (se calcula después, en `Pagos_BESS.xlsx`) y copia `Energía
+SSCC`/`FD`/`FMA` en las posiciones correctas (`40.6`/`0.8533`/`0` y `74.5`/`1`/`0`, tal cual el
+archivo). Se corrigieron los tests de sesiones anteriores que usaban los nombres viejos
+(`test_etapa4.py`, `test_re545.py`) para que seteen `Concepto` además de `Control` donde
+corresponde. Regresión completa (E Costos etapas 2-4, RE545 etapas 1-4, secciones de
+`Pagos_BESS.xlsx`, SoC): pasa.
+
+**No se tocó** (fuera de alcance de esta corrección, quedan igual): `FD`/`E COSTOS`/`Resumen` del
+mismo `Libro1.xlsx` — se revisaron de pasada y coinciden con lo ya implementado (`NOMBRES_FD_CSF`,
+`NOMBRES_FD_CPF`, `NOMBRES_CALCULO_E_COSTOS`), sin cambios.
+
+**Todavía pendiente** (ver "Pendientes abiertos"): correr un caso real completo con esta
+corrección aplicada, para confirmar que ahora sí aparecen filas `L=1` y que Prorratas/reservas de
+RE545 no quedan en 0 (la falta de la columna `Concepto` explicaría, retroactivamente, por qué el
+caso real de la sesión anterior daba 0 filas `BAJADA`/`SUBIDA`).
