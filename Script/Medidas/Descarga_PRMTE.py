@@ -12,8 +12,8 @@ Viene de "1_generacion_prmte.py". Cambios respecto del original:
     nombre: antes, correr dos meses en la misma carpeta mezclaba los
     lotes de los dos ("medidas_batch_*.parquet" los levantaba todos) y
     daba por procesados puntos de otro mes;
-  - el user_key se recibe por parametro (es una credencial, no puede
-    vivir en el codigo);
+  - el user_key sale de una sola constante (comun.USER_KEY) en vez de
+    estar repetido en cada script;
   - el avance se informa por callback a la ventana en vez de tqdm.
 
 Es la parte lenta del proceso: miles de llamadas HTTP. Por eso se
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .comun import ErrorMedidas
+from .comun import ErrorMedidas, USER_KEY
 
 
 URL_MEDIDAS = "https://medidas.api.coordinador.cl/medidas/api/medidas/{periodo}/"
@@ -127,7 +127,7 @@ def extraer_datos_api(sesion, id_punto_medida, id_canal, periodo, user_key):
 
 
 def descargar(
-    puntos, periodo, user_key, carpeta_trabajo,
+    puntos, periodo, carpeta_trabajo, user_key=None,
     registrar=print, progreso=None, desde=0, hasta=100,
 ):
     """
@@ -152,11 +152,12 @@ def descargar(
             "de medidas."
         ) from error
 
+    user_key = user_key or USER_KEY
+
     if not user_key:
         raise ErrorMedidas(
-            "Falta la clave de la API del Coordinador (user_key). "
-            "Cargala en la ventana, arriba: se guarda por PC/usuario "
-            "en config.json y no se sube al repositorio."
+            "Falta la clave de la API del Coordinador: cargala en "
+            "USER_KEY, en Script/Medidas/comun.py."
         )
 
     carpeta_trabajo = Path(carpeta_trabajo)

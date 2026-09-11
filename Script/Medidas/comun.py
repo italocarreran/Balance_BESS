@@ -14,6 +14,23 @@ class ErrorMedidas(Exception):
     """Error previsible al armar Medidas_SAE.xlsx."""
 
 
+# ============================================================
+# CLAVE DE LA API DEL COORDINADOR
+#
+# Las dos APIs que usa Medidas (medidas.* y operacion.*) piden la
+# misma user_key. Va aca, en el codigo, a pedido explicito del
+# usuario: los scripts originales la traian escrita adentro y asi se
+# queda. Un solo lugar para las dos (antes estaba repetida en dos
+# archivos, y con valores distintos).
+#
+# Ojo con dos cosas:
+#   - queda versionada: quien tenga acceso al repositorio la tiene;
+#   - si el Coordinador la cambia, se cambia aca y nada mas.
+# ============================================================
+
+USER_KEY = ""
+
+
 EXTENSIONES_EXCEL = (".xlsx", ".xlsm", ".xlsb", ".xls")
 
 

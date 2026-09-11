@@ -32,7 +32,7 @@ import time
 
 import pandas as pd
 
-from .comun import ErrorMedidas
+from .comun import ErrorMedidas, USER_KEY
 
 
 URL_OPREAL = "https://operacion.api.coordinador.cl/opreal-medidas/v1/bydate"
@@ -66,7 +66,7 @@ def _json_a_dataframe(datos):
 
 
 def descargar_mes(
-    anio, mes, ultimo_dia, user_key, registrar=print,
+    anio, mes, ultimo_dia, user_key=None, registrar=print,
     progreso=None, desde=0, hasta=100,
 ):
     """
@@ -83,9 +83,12 @@ def descargar_mes(
             "requirements.txt)."
         ) from error
 
+    user_key = user_key or USER_KEY
+
     if not user_key:
         raise ErrorMedidas(
-            "Falta la clave de la API del Coordinador (user_key)."
+            "Falta la clave de la API del Coordinador: cargala en "
+            "USER_KEY, en Script/Medidas/comun.py."
         )
 
     sesion = requests.Session()

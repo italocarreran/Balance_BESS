@@ -6747,7 +6747,8 @@ def barras_desde_resumen_bess(resumen_bess):
 # Medidas_SAE.xlsx: LOS CUATRO PASOS DE UN VIAJE
 #
 # La logica vive en Script/Medidas/ (un modulo por cada uno de los
-# scripts sueltos que habia antes). Aca queda lo que es del caso:
+# scripts sueltos que habia antes), incluida la clave de las dos APIs
+# (Script/Medidas/comun.py, USER_KEY). Aca queda lo que es del caso:
 # resolver rutas, sacar de Centrales.xlsx la lista de centrales de la
 # API de operacion real, pegar las dos fuentes y escribir el Excel.
 #
@@ -6788,7 +6789,7 @@ def _resumir_diagnostico_medidas(diagnostico, registrar):
 
 
 def generar_medidas_sae(
-    carpeta_base, aamm, user_key=None, registrar=print, progreso=None
+    carpeta_base, aamm, registrar=print, progreso=None
 ):
     """
     Genera/actualiza <CARPETA_BASE>/Medidas/Medidas_SAE.xlsx corriendo
@@ -6804,9 +6805,9 @@ def generar_medidas_sae(
     El paso 4 es opcional: si la hoja no existe o esta vacia, se
     escribe solo lo que viene del paso 3.
 
-    user_key: clave de la API del Coordinador. No vive en el codigo ni
-    en el repositorio -- la ingresa el usuario en la ventana y se
-    guarda en config.json (ignorado por git).
+    La clave de las dos APIs sale de USER_KEY, en
+    Script/Medidas/comun.py (a pedido del usuario vive en el codigo,
+    igual que en los scripts originales).
     """
 
     def avanzar(valor):
@@ -6855,7 +6856,7 @@ def generar_medidas_sae(
 
         registrar("Descargando medidas por punto de medida...")
         df_crudo, _ = Descarga_PRMTE.descargar(
-            puntos, periodo, user_key, rutas["trabajo_medidas"],
+            puntos, periodo, rutas["trabajo_medidas"],
             registrar=registrar, progreso=progreso, desde=5, hasta=55,
         )
 
@@ -6883,7 +6884,7 @@ def generar_medidas_sae(
                 )
 
             df_opreal = Generacion_Real.descargar_mes(
-                anio, mes, ultimo_dia, user_key, registrar=registrar,
+                anio, mes, ultimo_dia, registrar=registrar,
                 progreso=progreso, desde=60, hasta=85,
             )
             df_opreal = Generacion_Real.filtrar_y_desempatar(

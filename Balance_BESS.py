@@ -48,10 +48,10 @@ Medidas/_trabajo/ (los lotes que baja la API, la marca de
 reanudacion) NO aparece en el diagrama a pedido del usuario: no es una
 entrada ni una salida del caso, son andamios del proceso.
 
-El calculo vive en Script/ (ver Script/__init__.py). La ubicacion de
-este .py no influye en nada salvo en donde se guarda config.json, que
-ademas de la carpeta y el periodo guarda la clave de la API del
-Coordinador (user_key) -- por PC/usuario, fuera del repositorio.
+El calculo vive en Script/ (ver Script/__init__.py), incluida la clave
+de las dos APIs del Coordinador que usa Medidas (Script/Medidas/
+comun.py, USER_KEY). La ubicacion de este .py no influye en nada salvo
+en donde se guarda config.json.
 """
 
 import json
@@ -229,7 +229,6 @@ def main():
 
     var_base = tk.StringVar(value=cfg.get("carpeta_base", ""))
     var_aamm = tk.StringVar(value=cfg.get("aamm", ""))
-    var_user_key = tk.StringVar(value=cfg.get("user_key", ""))
     var_estado = tk.StringVar(value="Listo")
     var_tiempo = tk.StringVar(value="00:00:00")
 
@@ -337,58 +336,6 @@ def main():
         wraplength=820,
         justify="left",
     ).pack(side="left", padx=(10, 0))
-
-    # --------------------------------------------------------
-    # CLAVE DE LA API DEL COORDINADOR (user_key)
-    #
-    # Es una credencial: no puede vivir en el codigo ni subirse al
-    # repositorio. Se guarda en config.json, que es por PC/usuario y
-    # esta en .gitignore -- mismo lugar donde ya se recuerdan la
-    # carpeta base y el periodo. Solo hace falta para el boton
-    # "Actualizar" de Medidas_SAE.xlsx (las dos APIs del Coordinador);
-    # el resto del programa funciona sin ella.
-    # --------------------------------------------------------
-
-    frame_clave = tk.LabelFrame(
-        contenedor, text="Clave de la API del Coordinador (user_key)",
-        padx=10, pady=8,
-    )
-    frame_clave.pack(fill="x", padx=20, pady=6)
-
-    entry_clave = tk.Entry(
-        frame_clave, textvariable=var_user_key, width=42, show="•",
-        font=("Segoe UI", 10),
-    )
-    entry_clave.pack(side="left")
-
-    var_ver_clave = tk.BooleanVar(value=False)
-
-    def alternar_clave():
-        entry_clave.config(show="" if var_ver_clave.get() else "•")
-
-    tk.Checkbutton(
-        frame_clave, text="Ver", variable=var_ver_clave,
-        command=alternar_clave, font=("Segoe UI", 8),
-    ).pack(side="left", padx=(6, 0))
-
-    tk.Label(
-        frame_clave,
-        text=(
-            "Solo hace falta para generar Medidas_SAE.xlsx. Se guarda "
-            "en config.json (por PC/usuario, no se sube al "
-            "repositorio)."
-        ),
-        fg=COLOR_NEUTRO,
-        font=("Segoe UI", 8),
-        wraplength=640,
-        justify="left",
-    ).pack(side="left", padx=(10, 0))
-
-    def clave_cambiada(*_):
-        guardar_config({"user_key": var_user_key.get().strip()})
-
-    entry_clave.bind("<FocusOut>", clave_cambiada)
-    entry_clave.bind("<Return>", clave_cambiada)
 
     # --------------------------------------------------------
     # DIAGRAMA DE LA ESTRUCTURA DEL CASO
@@ -822,19 +769,6 @@ def main():
             messagebox.showwarning("Falta el periodo", str(error))
             return
 
-        clave = var_user_key.get().strip()
-
-        if not clave:
-            messagebox.showwarning(
-                "Falta la clave de la API",
-                "Cargá arriba la clave de la API del Coordinador "
-                "(user_key): sin ella no se pueden bajar las medidas.",
-            )
-            entry_clave.focus_set()
-            return
-
-        guardar_config({"user_key": clave})
-
         if not messagebox.askyesno(
             f"Generar {nucleo.ARCHIVO_MEDIDAS_SAE}",
             f"Se van a bajar las medidas del periodo {aamm} de las dos "
@@ -847,7 +781,7 @@ def main():
 
         lanzar(
             nucleo.generar_medidas_sae,
-            dict(carpeta_base=ruta, aamm=aamm, user_key=clave),
+            dict(carpeta_base=ruta, aamm=aamm),
             nucleo.ARCHIVO_MEDIDAS_SAE,
         )
 

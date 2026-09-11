@@ -32,8 +32,7 @@ python Balance_BESS.py
 4. **Cada acción es un botón en la fila que le corresponde** — no hay
    ventanas intermedias ni un botón "Ejecutar" único:
    - `Medidas/Medidas_SAE.xlsx` → **Actualizar** (baja el mes completo de las
-     dos APIs del Coordinador y arma el archivo; pide la `user_key`, ver
-     abajo).
+     dos APIs del Coordinador y arma el archivo).
    - `Cmg/cmg<AAMM>_def_15minutal.csv` → **Traer cmg_15min** (lo baja de la
      unidad de red).
    - `Cmg/cmg.xlsx` → **Generar** (lo arma con ese CSV).
@@ -135,9 +134,12 @@ Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
   La hoja entera es opcional: si no existe, no se agrega ninguna central por
   ese camino y el resto del proceso corre igual.
 
-  **`user_key`**: las dos APIs piden una clave. Se carga en la ventana, se
-  guarda en `config.json` (por PC/usuario, ignorado por git) y **no está en
-  el código** — antes vivía escrita dentro de los scripts.
+  **`user_key`**: las dos APIs piden la misma clave. Vive en el código, en
+  `Script/Medidas/comun.py` (constante `USER_KEY`) — un solo lugar para las
+  dos, en vez de repetida en cada script como estaba antes. Si el
+  Coordinador la cambia, se cambia ahí y nada más. Tené presente que, al
+  estar en el código, queda versionada: cualquiera con acceso al
+  repositorio la tiene.
 
 - **cmg.xlsx**: única excepción con nombre literal fijo, dentro de `Cmg/`.
   Tampoco hay que armarlo a mano, y son dos pasos, cada uno con su botón en

@@ -77,7 +77,8 @@ importable como cualquier módulo.
   deshabilitados (`corriendo`/`habilitar_botones`). Como el árbol se
   repinta entero en cada `revisar()`, las referencias a los botones se
   renuevan ahí (`botones_arbol`).
-- **Consume:** `Script.nucleo` (`revisar_estructura`, `traer_csv_cmg`,
+- **Consume:** `Script.nucleo` (`revisar_estructura`, `generar_medidas_sae`,
+  `traer_csv_cmg`,
   `generar_cmg`, `generar_consolidado`, `generar_pagos_bess`,
   `SECCIONES_CONSOLIDADO`, `SECCIONES_PAGOS`, `validar_aamm`,
   `ErrorEntrada`, `extrae_cmg`); `config.json` (última carpeta base y
@@ -123,8 +124,9 @@ importable como cualquier módulo.
     reemplazo**: esas centrales se sacaron del archivo de homologación, así
     que no llegan por el otro camino — el paso 3 las **agrega**, con la
     `clave` que diga esa hoja;
-  - el `user_key` de la API se recibe por parámetro. Es una credencial: no
-    puede vivir en el código ni en el repositorio (ver `Balance_BESS.py`);
+  - el `user_key` de las dos APIs sale de una sola constante
+    (`comun.USER_KEY`). Sigue en el código, a pedido explícito del usuario,
+    pero deja de estar repetido en dos archivos y con valores distintos;
   - los lotes descargados y la marca de reanudación van a
     `<CARPETA_BASE>/Medidas/_trabajo/`, que la ventana no muestra;
   - **(no pedido, es un bug)** los lotes y la marca de reanudación llevan el
@@ -424,7 +426,7 @@ importable como cualquier módulo.
     secciones (si no se pide `"medidores"`, no exige
     Medidas_SAE/SoC/Centrales/Ofertas). Si el archivo no existe, se crea.
     Reemplaza a la vieja `ejecutar()`.
-  - `generar_medidas_sae(carpeta_base, aamm, user_key=None, registrar=print, progreso=None)`
+  - `generar_medidas_sae(carpeta_base, aamm, registrar=print, progreso=None)`
     — genera/actualiza `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` corriendo
     los cuatro pasos seguidos (botón **Actualizar** de esa fila). El paso de
     la API de operación real es opcional: sin la hoja `Medidas API` se

@@ -1939,9 +1939,13 @@ cambio de hora hacia atrás hay ambigüedad real, se toma la primera ocurrencia 
 log. Si el cruce da 0 coincidencias, se corta con un error explícito en vez de escribir un
 `Medidas_SAE.xlsx` al que le faltan esas centrales.
 
-**Credencial:** los scripts traían el `user_key` de la API escrito adentro (vacío en el 1, `"-"` en
-el 3). Es una credencial: ahora se ingresa en la ventana (campo enmascarado, con casilla "Ver") y
-se guarda en `config.json`, que está en `.gitignore`. Se agregó la regla a `METODOLOGIA.md` §5.
+**Credencial:** los scripts traían el `user_key` escrito adentro (vacío en el 1, `"-"` en el 3).
+Primero lo saqué a un campo de la ventana guardado en `config.json`, señalando que al ser una
+credencial no debería quedar versionada; **el usuario decidió dejarlo en el código** y se hizo así.
+Queda en una sola constante, `USER_KEY` en `Script/Medidas/comun.py`, para las dos APIs — el
+problema real que tenía era estar repetido en dos archivos y con valores distintos. Consecuencia
+asumida, anotada en `METODOLOGIA.md` §5: queda versionada, así que el repositorio no puede volverse
+público sin rotarla antes.
 
 **Dos bugs de los scripts originales, arreglados** (no estaban en el pedido):
 

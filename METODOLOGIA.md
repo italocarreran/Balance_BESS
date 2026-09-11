@@ -177,11 +177,13 @@ resto del proceso es puro pandas y sí se puede verificar.
   función de `nucleo` en un hilo aparte reportando al log/barra de la
   ventana (helper `lanzar()`), y mientras algo corre quedan todos
   deshabilitados.
-- **Credenciales:** ninguna clave de API va en el código ni en el
-  repositorio. La `user_key` del Coordinador se ingresa en la ventana y se
-  guarda en `config.json`, que está en `.gitignore`. Los scripts sueltos que
-  se fueron incorporando las traían escritas adentro: al migrarlos, esa es
-  la primera línea que hay que sacar.
+- **Credenciales:** la `user_key` de las APIs del Coordinador vive en el
+  código (`Script/Medidas/comun.py`, constante `USER_KEY`), por decisión
+  explícita del usuario — los scripts originales ya la traían escrita
+  adentro. Lo que sí se exige es que haya **una sola**, en esa constante, y
+  no una copia por script: antes estaba repetida en dos archivos y con
+  valores distintos. Consecuencia asumida: queda versionada, así que el
+  repositorio no puede volverse público sin rotarla antes.
 - **Persistencia de configuración:** `config.json` junto al `.py`, con una
   clave por PC/usuario (`get_usuario()` = `hostname_usuario`), para que
   varias personas puedan compartir la misma copia del script sin pisarse la
