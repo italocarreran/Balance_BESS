@@ -54,6 +54,12 @@ estado, no un historial.
   hasta ahora, los nombres de la fila 2 ya vienen idénticos a
   `Medidas_SAE.xlsx` — sospechar que el `Diccionario` quizás ni haga falta
   para el SoC, pero falta confirmarlo con otro período/archivo.
+- Correr `generar_cmg()` una vez contra el CSV real de `T:\CMgReales 15MIN`
+  para confirmar que las barras de `Resumen BESS!Barra inyección` están
+  escritas exactamente igual que la columna `BARRA` del CSV (con el relleno
+  de guiones bajos, ej. `TOCOPILLA_____110`) y que el CSV real trae las 7
+  columnas que dejan `BARRA` en D y `Cuarto de Hora` en H (ver
+  `_validar_layout_cmg`).
 - Validar la Prorrata SSCC normalizada (corregida esta sesión) contra más
   filas de la planilla 11 real — solo se confirmaron 2 casos puntuales
   (los que el usuario reportó), aunque el mecanismo (normalizar por fila)
@@ -1726,3 +1732,59 @@ reales) no era un bug nuevo — era el mismo bug de `AU` de la sesión 20 propag
 `BV` → `Margen ultima hora`/`Total Reservas* FD *FMA`/`Edisp_T` del resumen. Con los dos fixes (20
 y 21) aplicados juntos en el pipeline real (donde el resumen se reconstruye siempre a partir del
 `AU` ya corregido), no hace falta ningún fix adicional para esa cadena.
+
+---
+
+## 2026-09-11 (22) — `cmg.xlsx` ahora lo genera el programa (botón "Generar" en su fila del árbol)
+
+**Pedido del usuario:** `cmg.xlsx` (entrada de `Cmg/`) se armaba a mano corriendo un script suelto
+(`Extrae_CMG_barras.py`) al lado del CSV. Quería (1) un botón "Generar" al lado del nombre en la
+ventana de Balance_BESS, (2) que el CSV de origen se busque en la ruta de red
+`T:\CMgReales 15MIN\AAAA\AAMM\Mensual\CMg\Cmg para balance` en vez de al lado del `.py`, y (3) que
+las barras a filtrar salgan de `Centrales.xlsx` (hoja `Resumen BESS`) en vez de estar escritas en
+el código.
+
+**Lo que se hizo:**
+
+- `nucleo.py`: sección nueva "GENERACION DE cmg.xlsx DESDE EL CSV 15-MINUTAL" con
+  `ruta_csv_cmg_15min()`, `barras_desde_resumen_bess()`, `construir_cmg_desde_csv()`,
+  `_validar_layout_cmg()` y `generar_cmg(carpeta_base, aamm, ruta_csv=None, ...)` — misma firma
+  `registrar`/`progreso` que `generar_consolidado`/`generar_pagos_bess`, así entra sin cambios en
+  el `lanzar_generacion()` que ya existe en la ventana.
+- Constantes nuevas: `RAIZ_CMG_REALES` (`T:\CMgReales 15MIN`), `SUBCARPETAS_CMG_REALES`,
+  `PLANTILLA_CSV_CMG_15MIN`, `SEPARADOR_CSV_CMG`, `CODIFICACION_CSV_CMG`,
+  `COLUMNA_CSV_CMG_VALOR`. La letra de unidad queda en UN solo lugar por si cambia.
+- Las barras salen de `construir_mapa_barra()` (la misma función que ya alimenta
+  `Calculo E Costos!Barra`), no de una lectura nueva: así el filtro del CSV y la homologación
+  posterior **no se pueden desincronizar**. Se comparan en mayúsculas (mismo criterio que
+  `_buscar_cmg`) pero se conserva el texto tal cual viene del CSV.
+- `Balance_BESS.py`: la fila `cmg.xlsx` del árbol lleva su propio botón "Generar". No abre ventana
+  con casillas como las dos salidas — no hay nada que elegir. Pide confirmación si el archivo ya
+  existe. `pintar_arbol()` guarda ahora las referencias de los botones dibujados dentro del árbol
+  (`botones_arbol`), y `terminar()` tolera que ese widget ya no exista (el árbol se repinta entero
+  en cada `revisar()`).
+- La fila `cmg.xlsx` del diagrama dice además si el CSV de origen del período está disponible o
+  no, que es lo que decide si el botón va a poder hacer algo.
+
+**Detalle que importa y es fácil de romper:** `leer_cmg()` lee `cmg.xlsx` **por posición**
+(D = Barra, F = valor de Q, H = Cuarto de Hora, I = CMg promedio). El layout que sale de
+`construir_cmg_desde_csv()` (columnas del CSV + `Cuarto de Hora` + promedio horario) es justo ese,
+pero depende de que el CSV siga trayendo 7 columnas. Por eso `_validar_layout_cmg()` avisa en el
+log si `BARRA` deja de caer en D o `Cuarto de Hora` en H, y corta con `ErrorEntrada` si quedan
+menos de 9 columnas.
+
+**Lo que NO cambió respecto del script original:** la numeración del `Cuarto de Hora` global sigue
+saliendo de los bloques que el CSV realmente trae (no se asumen 96 por día), así que los días de
+cambio de hora con 92/100 cuartos siguen funcionando; ahora además se listan en el log los días
+que no tienen 24 h.
+
+**Verificación:** caso sintético end-to-end (CSV de 2 días —uno con 23 h—, 3 barras en el CSV y 3
+en `Centrales.xlsx`, una de ellas sin datos): genera `cmg.xlsx`, avisa de la barra sin datos,
+detecta el día de 23 h, y el archivo resultante se vuelve a leer con `leer_cmg()` +
+`construir_dic_cmg()` dando las claves `BARRA|cuarto` esperadas. `python -m py_compile
+Balance_BESS.py nucleo.py` pasa. La ventana en sí no se pudo abrir (no hay `tkinter` en el
+contenedor de la sesión): el cableado del botón se revisó a mano.
+
+**Pendiente:** correrlo una vez contra el CSV real de la unidad `T:` para confirmar que las barras
+de `Centrales.xlsx` están escritas exactamente igual que en el CSV (con el relleno de guiones
+bajos, ej. `TOCOPILLA_____110`). Si alguna no coincide, el log lo dice barra por barra.

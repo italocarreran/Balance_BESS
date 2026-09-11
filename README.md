@@ -49,7 +49,9 @@ python Balance_BESS.py
 ├── Ofertas/
 │   └── <algún archivo Excel cuyo nombre contenga "OfertasSSCC">
 ├── Cmg/
-│   └── cmg.xlsx             (nombre literal, no cambia con el período)
+│   └── cmg.xlsx             (nombre literal, no cambia con el período;
+│                             lo genera el propio programa, botón
+│                             "Generar" al lado del nombre)
 ├── SSCC_Desempeño/
 │   └── <algún archivo Excel cuyo nombre empiece con "SSCC_Desempeño_">
 ├── Subastas/
@@ -73,6 +75,18 @@ Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
   automáticamente el más reciente por fecha de modificación — así lo hacen
   las macros originales de la planilla.
 - **cmg.xlsx**: única excepción con nombre literal fijo, dentro de `Cmg/`.
+  Tampoco hay que armarlo a mano: el botón **Generar** que aparece al lado
+  de esa fila en el diagrama lo construye desde el CSV 15-minutal oficial,
+
+  ```
+  T:\CMgReales 15MIN\<AAAA>\<AAMM>\Mensual\CMg\Cmg para balance\cmg<AAMM>_def_15minutal.csv
+  ```
+
+  filtrando las barras que trae la columna `Barra inyección` de la hoja
+  `Resumen BESS` de `Centrales.xlsx` (no hay ninguna lista de barras
+  escrita en el código: se agregan o se sacan editando `Centrales.xlsx`).
+  El período `AAMM` es el mismo de la ventana, y la raíz `T:` está en una
+  sola constante (`nucleo.RAIZ_CMG_REALES`) por si cambia de letra.
 
 La carpeta base puede estar en cualquier ubicación (disco local, red,
 OneDrive); moverla o mover `Balance_BESS.py` a otro lugar no cambia el
