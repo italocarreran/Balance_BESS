@@ -142,7 +142,25 @@ de.
   `Configuración` (`calcular_subastas_energia_sscc()`), que viene de
   `Medidores` — por eso la "dependencia circular" que se había anotado no
   existía. Fuera de alcance: la columna `AY` (que la macro original
-  tampoco escribe) y toda la hoja `Calculo RE545`.
+  tampoco escribe).
+
+  **Calculo RE545** (plan §26): la hoja hermana, **completa** (`A:CE`).
+  La alimenta la MISMA macro de traspaso: `A:G`, `K` y `P` van iguales a
+  las dos hojas y lo que se reparte es la energía, según
+  `Medidores!Ventana_No_Completa` (`= 1` → E Costos; cualquier otra cosa,
+  incluido vacío → RE545). Solo RE545 recibe `T` (`Ventana de
+  valorizacion`) y `R` (`CMg Promedio`, `CMg!I`) — por eso
+  `construir_dic_cmg()` guarda el par `(CMg!F, CMg!I)`. Es casi toda
+  fórmulas en la hoja, no valores escritos por macro (al revés que
+  E Costos). Tiene **dos tablas de distinto largo**: el bloque principal
+  (una fila por cuarto de hora) y el resumen `AW:BG` (una fila por
+  central+ventana), que se escriben lado a lado. `AY` (`Oferta
+  Completa`) no es fórmula ni macro: es la columna `Completa` del
+  resumen central+ventana que ya alimenta `Medidores!T`. **Trampa:**
+  `R`, `S`, `T`, `U` y `V` existen en las dos hojas y significan cosas
+  distintas en cada una (`U` es `Total` en E Costos y `EiniT` en RE545);
+  lo mismo con el `VLOOKUP` sobre `Resumen BESS`, donde el índice 2 es
+  `Pmax (MW)` y el 4 es `Capacidad (MWh)` (ver plan §26.7).
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
