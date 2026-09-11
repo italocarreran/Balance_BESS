@@ -61,9 +61,6 @@ estado, no un historial.
   hacía la macro original (ver plan §23.3).
 - Confirmar el nombre definitivo de `Pagos_BESS.xlsx` (provisorio, elegido
   por el usuario como "pagos_bess o algo así por ahora").
-- Agregar casillas por sección a la ventana "Generar" de `Pagos_BESS.xlsx`
-  (hoy es todo o nada, una sola hoja) — "ajustamos detalles después"
-  (pedido explícito del usuario, ver entrada de esta sesión).
 - Probar la ventana nueva (diagrama + botones "Generar") con una carpeta
   base real: solo se probó por ahora con `python -m py_compile` (no hay
   entorno grafico en esta sesión para abrir la ventana) y con pruebas
@@ -1048,3 +1045,55 @@ etapas 1-3 de RE545: pasan.
 
 **Lo que sigue** (nuevo frente, ninguna analizada todavía): las hojas de salida que consumen estas
 dos — `PRORRATA_RETIROS`, `Compensacion total`, `Resumen` y el CSV.
+
+---
+
+## 2026-09-11 (12) — Casillas por hoja en la ventana "Generar" de `Pagos_BESS.xlsx`
+
+El usuario pidió cerrar el pendiente que había quedado anotado ("ajustamos detalles después"):
+la ventana "Generar" de `Pagos_BESS.xlsx` era todo o nada (una sola hoja, sin casillas), a
+diferencia de la de `Consolidado_entradas.xlsx` (`SECCIONES_CONSOLIDADO`). Ahora que la hoja
+tiene dos salidas (`Calculo E Costos` y `Calculo RE545`, completas desde la sesión anterior),
+pedido explícito: **dos casillas, una por hoja**.
+
+**Cambios en `nucleo.py`** (mismo patrón que `SECCIONES_CONSOLIDADO`/`generar_consolidado`):
+
+- `SECCIONES_PAGOS`: tupla con `("ecostos", "Calculo E Costos", descripción, ("Calculo E
+  Costos",))` y `("re545", "Calculo RE545", descripción, ("Calculo RE545",))`.
+- `escribir_pagos_bess()` gana `ruta_existente` y `hojas_regenerar` (antes solo tenía
+  `df_ecostos`/`df_re545`/`df_resumen_re545`/`registrar`). Con `hojas_regenerar=None` se
+  comporta exactamente igual que antes (retrocompatible: los tests de sesiones anteriores que
+  la llaman posicionalmente sin estos parámetros nuevos siguen funcionando tal cual). Con un
+  `set`, la hoja que NO está en el set se copia tal cual desde `ruta_existente` en vez de
+  escribirse desde el DataFrame — reusa `_copiar_hoja_existente()`, la misma función que ya
+  usaba `escribir_salida()` para `Consolidado_entradas.xlsx`. Si no hay versión anterior para
+  preservar, la hoja queda vacía y se registra un aviso (mismo criterio, sin duplicar código).
+- `generar_pagos_bess()` gana el parámetro obligatorio `secciones_activas` (antes no lo tenía;
+  es un cambio incompatible a propósito, como ya había pasado con `generar_consolidado()`).
+  Valida secciones desconocidas y "ninguna tildada" antes de tocar ningún archivo. Las lecturas
+  compartidas (`Medidores`, `Subastas`, `Centrales.xlsx`, `cmg.xlsx`) se hacen siempre que haga
+  falta alguna sección; lo que se condiciona es el CÁLCULO de cada hoja:
+  - `dic_eficiencia`/`dic_capacidad` (que solo usa RE545: `V`, `U`/`BC`/`BN`) solo se arman si
+    `"re545"` está tildada.
+  - El archivo `SSCC_Desempeño_*` (que solo usa `Calculo E Costos`, para `AM:AR`) solo se exige
+    y se lee si `"ecostos"` está tildada. **Confirmado con un caso real armado a propósito**:
+    tildar solo `"re545"` corre sin pedir ese archivo aunque no exista en la carpeta del caso;
+    tildar solo `"ecostos"` sí lo exige y falla con un mensaje claro si falta.
+  - `df_ecostos`/`df_re545`/`df_resumen_re545` quedan en `None` si su sección no está tildada, y
+    así se le pasan a `escribir_pagos_bess()` junto con el `hojas_regenerar` correspondiente.
+
+**Cambios en `Balance_BESS.py`:** `abrir_ventana_generar_pagos()` reescrita para recorrer
+`nucleo.SECCIONES_PAGOS` igual que `abrir_ventana_generar_consolidado()` recorre
+`SECCIONES_CONSOLIDADO` — un `LabelFrame` con casilla + descripción por sección, valida que haya
+al menos una tildada, y pasa `secciones_activas` a `generar_pagos_bess()`.
+
+**Verificación:** tests sintéticos de `escribir_pagos_bess()` (primera corrida escribe las dos
+hojas; segunda corrida con solo `"ecostos"` recalcula esa hoja y preserva RE545 tal cual estaba,
+sin vaciarlo; tercera corrida con solo `"re545"` al revés; caso sin versión anterior para
+preservar → hoja vacía + aviso) y de `generar_pagos_bess()` (secciones vacías/desconocidas →
+`ErrorEntrada`). Además un caso **con archivos reales** armado a propósito (`Centrales.xlsx`,
+`cmg.xlsx`, `Consolidado_entradas.xlsx` con `Medidores`/`Subastas`) para confirmar en la práctica
+que "solo RE545" no pide `SSCC_Desempeño_*` y que "solo E Costos" sí, y que una corrida que falla
+a mitad de camino (por archivo faltante) no toca el `Pagos_BESS.xlsx` ya existente. Regresión
+completa de las sesiones anteriores (Calculo E Costos etapas 2-4, Calculo RE545 etapas 1-4):
+pasa. No se probó la ventana tkinter en sí (sin entorno gráfico en esta sesión, como siempre).

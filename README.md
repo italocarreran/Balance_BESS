@@ -31,8 +31,10 @@ python Balance_BESS.py
    diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
 4. Al final del diagrama están `Consolidado_entradas.xlsx` y
    `Pagos_BESS.xlsx`, cada una con su botón **Generar...**. Ese botón abre
-   una ventana aparte donde se elige qué partes recalcular esta vez; lo que
-   no se tilda se conserva tal cual estaba en el archivo existente.
+   una ventana aparte donde se elige qué partes recalcular esta vez (una
+   casilla por hoja); lo que no se tilda se conserva tal cual estaba en el
+   archivo existente. `Pagos_BESS.xlsx` tiene dos casillas: `Calculo E
+   Costos` y `Calculo RE545`.
 
 ## Estructura de carpeta de un caso
 

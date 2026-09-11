@@ -144,6 +144,15 @@ de.
   existía. Fuera de alcance: la columna `AY` (que la macro original
   tampoco escribe).
 
+  **`Pagos_BESS.xlsx` tiene casillas por hoja** en su ventana "Generar"
+  (`SECCIONES_PAGOS`, mismo patron que `SECCIONES_CONSOLIDADO`): una
+  para `Calculo E Costos`, otra para `Calculo RE545`. La hoja que se
+  destilda se preserva tal cual estaba en el archivo existente (no se
+  recalcula ni se borra), mismo criterio de `escribir_salida()` para
+  `Consolidado_entradas.xlsx`. Solo `Calculo E Costos` exige el archivo
+  `SSCC_Desempeño_*`; `Calculo RE545` no lo necesita, asi que tildar
+  solo esa seccion no lo pide.
+
   **Calculo RE545** (plan §26): la hoja hermana, **completa** (`A:CE`).
   La alimenta la MISMA macro de traspaso: `A:G`, `K` y `P` van iguales a
   las dos hojas y lo que se reparte es la energía, según

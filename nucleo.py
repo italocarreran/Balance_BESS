@@ -2331,44 +2331,100 @@ def construir_calculo_e_costos(
     return df
 
 
+_HOJAS_PAGOS = (HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545)
+
+
 def escribir_pagos_bess(
-    ruta_salida, df_ecostos, df_re545=None, df_resumen_re545=None,
+    ruta_salida,
+    df_ecostos=None,
+    df_re545=None,
+    df_resumen_re545=None,
+    ruta_existente=None,
+    hojas_regenerar=None,
     registrar=print,
 ):
     """
-    Escribe Pagos_BESS.xlsx: la hoja "Calculo E Costos" y, si se le
-    pasa, la hoja "Calculo RE545" (que todavia esta por etapas, ver
-    completar_calculo_re545). El usuario pidio explicitamente que esto
-    viva en un archivo separado de Consolidado_entradas.xlsx
-    ("pagos_bess o algo asi por ahora") -- el nombre es provisorio.
+    Escribe Pagos_BESS.xlsx: la hoja "Calculo E Costos" (si se pasa
+    df_ecostos) y la hoja "Calculo RE545" (si se pasa df_re545, con
+    la tabla resumen df_resumen_re545 al lado si tambien se pasa). El
+    usuario pidio explicitamente que esto viva en un archivo separado
+    de Consolidado_entradas.xlsx ("pagos_bess o algo asi por ahora")
+    -- el nombre es provisorio.
+
+    hojas_regenerar: None (por defecto) escribe cada hoja para la que
+    se paso su DataFrame, sin mas (asi funcionaba antes de que
+    generar_pagos_bess() tuviera casillas por seccion). Si es un set
+    con alguno de los nombres de _HOJAS_PAGOS ("Calculo E Costos",
+    "Calculo RE545"), la(s) que NO esten en el set se copian tal cual
+    desde ruta_existente en vez de escribirse desde el DataFrame --
+    mismo criterio que escribir_salida()/hojas_regenerar para
+    Consolidado_entradas.xlsx (una hoja destildada en la ventana
+    "Generar" se preserva, no se recalcula). Si una hoja a preservar
+    no existe en ruta_existente, queda vacia y se registra un aviso.
     """
 
     ruta_salida = Path(ruta_salida)
 
-    with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
-        df_ecostos.to_excel(
-            writer,
-            sheet_name=HOJA_CALCULO_ECOSTOS,
-            index=False,
-        )
+    regenerar = (
+        set(_HOJAS_PAGOS) if hojas_regenerar is None else set(hojas_regenerar)
+    )
 
-        if df_re545 is not None:
-            df_re545.to_excel(
-                writer,
-                sheet_name=HOJA_CALCULO_RE545,
-                index=False,
+    wb_existente = None
+    if hojas_regenerar is not None and ruta_existente is not None:
+        ruta_existente = Path(ruta_existente)
+        if ruta_existente.is_file():
+            wb_existente = openpyxl.load_workbook(
+                ruta_existente, data_only=True
             )
 
-            if df_resumen_re545 is not None:
-                # Tabla de otro largo, al lado del bloque principal
-                # con una columna en blanco de separacion (mismo
-                # criterio que los bloques CSF/CPF de FD).
-                df_resumen_re545.to_excel(
+    avisos_preservacion = []
+
+    def _preservar_o_avisar(writer, nombre_hoja):
+        if _copiar_hoja_existente(wb_existente, nombre_hoja, writer.book):
+            return
+        pd.DataFrame().to_excel(writer, sheet_name=nombre_hoja, index=False)
+        mensaje = (
+            f"No se regenero la hoja '{nombre_hoja}' (seccion no "
+            f"tildada) y no se encontro una version anterior para "
+            f"preservarla; quedo vacia."
+        )
+        avisos_preservacion.append(mensaje)
+
+    with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
+
+        if HOJA_CALCULO_ECOSTOS in regenerar:
+            if df_ecostos is not None:
+                df_ecostos.to_excel(
+                    writer,
+                    sheet_name=HOJA_CALCULO_ECOSTOS,
+                    index=False,
+                )
+        else:
+            _preservar_o_avisar(writer, HOJA_CALCULO_ECOSTOS)
+
+        if HOJA_CALCULO_RE545 in regenerar:
+            if df_re545 is not None:
+                df_re545.to_excel(
                     writer,
                     sheet_name=HOJA_CALCULO_RE545,
                     index=False,
-                    startcol=len(df_re545.columns) + 1,
                 )
+
+                if df_resumen_re545 is not None:
+                    # Tabla de otro largo, al lado del bloque
+                    # principal con una columna en blanco de
+                    # separacion (mismo criterio que CSF/CPF de FD).
+                    df_resumen_re545.to_excel(
+                        writer,
+                        sheet_name=HOJA_CALCULO_RE545,
+                        index=False,
+                        startcol=len(df_re545.columns) + 1,
+                    )
+        else:
+            _preservar_o_avisar(writer, HOJA_CALCULO_RE545)
+
+    for mensaje in avisos_preservacion:
+        registrar(f"  [AVISO] {mensaje}")
 
     registrar(f"Archivo generado: {ruta_salida}")
 
@@ -5413,6 +5469,26 @@ SECCIONES_CONSOLIDADO = (
 )
 
 
+SECCIONES_PAGOS = (
+    (
+        "ecostos",
+        "Calculo E Costos",
+        f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
+        f"{ARCHIVO_CENTRALES}, {ARCHIVO_CMG} y el archivo "
+        f"{CARPETA_SSCC_DESEMPENO}/ (para el FD homologado de AM:AR).",
+        (HOJA_CALCULO_ECOSTOS,),
+    ),
+    (
+        "re545",
+        "Calculo RE545",
+        f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
+        f"{ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- no necesita el "
+        f"archivo {CARPETA_SSCC_DESEMPENO}/.",
+        (HOJA_CALCULO_RE545,),
+    ),
+)
+
+
 def generar_consolidado(
     carpeta_base, aamm, secciones_activas, registrar=print, progreso=None
 ):
@@ -5591,26 +5667,49 @@ def generar_consolidado(
     return rutas["salida"]
 
 
-def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
+def generar_pagos_bess(
+    carpeta_base, secciones_activas, registrar=print, progreso=None
+):
     """
-    Genera/actualiza Pagos_BESS.xlsx: la hoja "Calculo E Costos"
-    completa (etapa base + etapas 2, 3 y 4, plan seccion 25). Queda
-    afuera la columna AY (que la macro original tampoco escribe) y
-    toda la hoja "Calculo RE545".
+    Genera/actualiza Pagos_BESS.xlsx, recalculando solo las hojas de
+    las secciones tildadas (ids de SECCIONES_PAGOS: "ecostos",
+    "re545") y preservando el resto tal cual estaba en el archivo
+    existente (ver escribir_pagos_bess/hojas_regenerar) -- mismo
+    criterio que generar_consolidado()/SECCIONES_CONSOLIDADO. La usa
+    la ventana "Generar" de esa fila.
 
     No recalcula Medidores ni Subastas: los lee tal cual estan en
     Consolidado_entradas.xlsx, que debe generarse primero con su
-    propia ventana "Generar". Centrales.xlsx, cmg.xlsx y el archivo
-    SSCC_Desempeño_* si se leen/recalculan frescos (igual que ya
-    hacia con CMg).
-
-    Sin checkboxes todavia -- una sola hoja de salida, se ajustan
-    detalles en una etapa posterior (pedido explicito del usuario).
+    propia ventana "Generar". Centrales.xlsx y cmg.xlsx si se leen/
+    recalculan frescos. El archivo SSCC_Desempeño_* solo se exige si
+    "ecostos" esta tildada -- "re545" no usa FD.
     """
 
     def avanzar(valor):
         if progreso:
             progreso(valor)
+
+    secciones_activas = set(secciones_activas)
+    ids_validos = {seccion[0] for seccion in SECCIONES_PAGOS}
+    desconocidas = secciones_activas - ids_validos
+
+    if desconocidas:
+        raise ErrorEntrada(
+            f"Seccion(es) desconocida(s): {sorted(desconocidas)}"
+        )
+
+    if not secciones_activas:
+        raise ErrorEntrada(
+            "No se tildo ninguna seccion para generar/actualizar."
+        )
+
+    quiere_ecostos = "ecostos" in secciones_activas
+    quiere_re545 = "re545" in secciones_activas
+
+    hojas_regenerar = set()
+    for id_seccion, _, _, hojas in SECCIONES_PAGOS:
+        if id_seccion in secciones_activas:
+            hojas_regenerar.update(hojas)
 
     rutas = resolver_rutas(carpeta_base)
 
@@ -5640,7 +5739,7 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
         )
 
     registrar(f"  filas: {len(df_medidores):,}")
-    avanzar(20)
+    avanzar(10)
 
     if not rutas["centrales"].is_file():
         raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
@@ -5649,9 +5748,14 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     resumen, diccionario = leer_centrales(rutas["centrales"])
     mapa_barra = construir_mapa_barra(resumen)
     dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
-    dic_eficiencia = construir_dic_resumen_eficiencia(resumen)
-    dic_capacidad = construir_dic_resumen_capacidad(resumen)
-    avanzar(40)
+
+    # Eficiencia y Capacidad solo las usa RE545 (V y U/BC/BN).
+    dic_eficiencia = dic_capacidad = None
+    if quiere_re545:
+        dic_eficiencia = construir_dic_resumen_eficiencia(resumen)
+        dic_capacidad = construir_dic_resumen_capacidad(resumen)
+
+    avanzar(20)
 
     if not rutas["cmg"].is_file():
         raise ErrorEntrada(f"No se encontro {rutas['cmg']}")
@@ -5659,14 +5763,7 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     registrar(f"Leyendo {ARCHIVO_CMG}...")
     df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
     dic_cmg = construir_dic_cmg(df_cmg)
-    avanzar(55)
-
-    registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
-               "traspaso de Medidores)...")
-    df_ecostos = construir_calculo_e_costos(
-        df_medidores, mapa_barra, dic_cmg, registrar=registrar
-    )
-    avanzar(70)
+    avanzar(30)
 
     registrar(f"Leyendo hoja 'Subastas' de {rutas['salida'].name}...")
 
@@ -5686,74 +5783,100 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
             f"(tildando 'Subastas')."
         )
 
-    avanzar(75)
+    avanzar(40)
 
-    archivo_sscc = buscar_archivo_sscc_desempeno(rutas["sscc_desempeno_dir"])
-    if not archivo_sscc:
-        raise ErrorEntrada(
-            f"No se encontro ningun archivo SSCC_Desempeño_* en "
-            f"{rutas['sscc_desempeno_dir']} (hace falta para AM:AR de "
-            f"Calculo E Costos)."
+    df_ecostos = None
+    df_re545 = None
+    df_resumen_re545 = None
+
+    if quiere_ecostos:
+
+        registrar(
+            "Construyendo Calculo E Costos (etapa base: H + CMg + "
+            "traspaso de Medidores)..."
+        )
+        df_ecostos = construir_calculo_e_costos(
+            df_medidores, mapa_barra, dic_cmg, registrar=registrar
+        )
+        avanzar(50)
+
+        archivo_sscc = buscar_archivo_sscc_desempeno(
+            rutas["sscc_desempeno_dir"]
+        )
+        if not archivo_sscc:
+            raise ErrorEntrada(
+                f"No se encontro ningun archivo SSCC_Desempeño_* en "
+                f"{rutas['sscc_desempeno_dir']} (hace falta para AM:AR "
+                f"de Calculo E Costos)."
+            )
+
+        registrar(f"Leyendo {archivo_sscc.name}...")
+        df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
+        avanzar(60)
+
+        registrar(
+            "Completando L, M, N, O, R, S, T, U, W, X, Y, AB, AC, AD, AE, "
+            "AF, AG, AH, AI, AJ, AK, AL, AM, AN, AO, AP, AQ, AR, AS, AT, "
+            "AU, AV, AW, AX, AZ..."
+        )
+        df_ecostos = completar_calculo_e_costos_grupos(
+            df_ecostos, df_subastas, dic_factor, umbral_soc_minimo,
+            diccionario, df_fd_csf, df_fd_cpf,
+            registrar=registrar,
         )
 
-    registrar(f"Leyendo {archivo_sscc.name}...")
-    df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
-    avanzar(85)
+    avanzar(70)
 
-    registrar(
-        "Completando L, M, N, O, R, S, T, U, W, X, Y, AB, AC, AD, AE, AF, "
-        "AG, AH, AI, AJ, AK, AL, AM, AN, AO, AP, AQ, AR, AS, AT, AU, AV, "
-        "AW, AX, AZ..."
-    )
-    df_ecostos = completar_calculo_e_costos_grupos(
-        df_ecostos, df_subastas, dic_factor, umbral_soc_minimo,
-        diccionario, df_fd_csf, df_fd_cpf,
-        registrar=registrar,
-    )
+    if quiere_re545:
+
+        registrar(
+            "Construyendo Calculo RE545 (etapa base: traspaso de "
+            "Medidores + L, M, N, O, S, U, V)..."
+        )
+        df_re545 = construir_calculo_re545(
+            df_medidores, mapa_barra, dic_cmg, registrar=registrar
+        )
+        df_re545_base = completar_calculo_re545(
+            df_re545, df_subastas, umbral_soc_minimo, dic_capacidad,
+            dic_eficiencia, registrar=registrar,
+        )
+
+        # AY ("Oferta Completa") del resumen por central+ventana sale
+        # de la misma tabla que ya alimenta Medidores!T, reconstruida
+        # aca a partir de la hoja Medidores ya generada.
+        resumen_ventana_oferta = construir_resumen_ventana_oferta(
+            df_medidores["clave"],
+            df_medidores["Ventana"],
+            df_medidores["Oferta_Completa_Dia"],
+            registrar=registrar,
+        )
+        df_resumen_re545 = construir_resumen_ventanas_re545(
+            df_re545_base, resumen_ventana_oferta, dic_capacidad,
+            registrar=registrar,
+        )
+
+        registrar("  Calculo RE545: Componente 1 y Componente 2 (BI:CE)...")
+        for interno, serie in calcular_componentes_re545(
+            df_re545_base, df_resumen_re545, dic_factor
+        ).items():
+            df_re545_base[interno] = serie
+
+        df_resumen_re545 = completar_checks_resumen_re545(
+            df_resumen_re545, df_re545_base
+        )
+
+        df_re545 = renombrar_calculo_re545(df_re545_base)
+
     avanzar(90)
-
-    registrar(
-        "Construyendo Calculo RE545 (etapa base: traspaso de Medidores + "
-        "L, M, N, O, S, U, V)..."
-    )
-    df_re545 = construir_calculo_re545(
-        df_medidores, mapa_barra, dic_cmg, registrar=registrar
-    )
-    df_re545_base = completar_calculo_re545(
-        df_re545, df_subastas, umbral_soc_minimo, dic_capacidad,
-        dic_eficiencia, registrar=registrar,
-    )
-
-    # AY ("Oferta Completa") del resumen por central+ventana sale de
-    # la misma tabla que ya alimenta Medidores!T, reconstruida aca a
-    # partir de la hoja Medidores ya generada.
-    resumen_ventana_oferta = construir_resumen_ventana_oferta(
-        df_medidores["clave"],
-        df_medidores["Ventana"],
-        df_medidores["Oferta_Completa_Dia"],
-        registrar=registrar,
-    )
-    df_resumen_re545 = construir_resumen_ventanas_re545(
-        df_re545_base, resumen_ventana_oferta, dic_capacidad,
-        registrar=registrar,
-    )
-
-    registrar("  Calculo RE545: Componente 1 y Componente 2 (BI:CE)...")
-    for interno, serie in calcular_componentes_re545(
-        df_re545_base, df_resumen_re545, dic_factor
-    ).items():
-        df_re545_base[interno] = serie
-
-    df_resumen_re545 = completar_checks_resumen_re545(
-        df_resumen_re545, df_re545_base
-    )
-
-    df_re545 = renombrar_calculo_re545(df_re545_base)
-    avanzar(95)
 
     registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
     escribir_pagos_bess(
-        rutas["salida_pagos"], df_ecostos, df_re545, df_resumen_re545,
+        rutas["salida_pagos"],
+        df_ecostos,
+        df_re545,
+        df_resumen_re545,
+        ruta_existente=rutas["salida_pagos"],
+        hojas_regenerar=hojas_regenerar,
         registrar=registrar,
     )
 
