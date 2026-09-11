@@ -124,19 +124,34 @@ alguno autentica con el nombre de otra persona).
 No hay todavía scripts de apoyo (`scripts/sincronizar.sh`,
 `scripts/verificar.sh`). Mientras no existan, la verificación antes de
 cerrar una sesión es manual: correr `python -m py_compile Balance_BESS.py
-nucleo.py` y, si hay un caso de prueba disponible, `nucleo.ejecutar(...)`
-contra él.
+nucleo.py` y, si hay un caso de prueba disponible, `nucleo.generar_
+consolidado(...)`/`nucleo.generar_pagos_bess(...)` contra él.
 
 ---
 
 ## 5. Convenciones de código establecidas
 
 - **Interfaz de usuario:** una única ventana tkinter (patrón "carpeta base +
-  Examinar + checklist de entradas + Ejecutar + log + barra de progreso +
-  contador de tiempo"). Los estados del checklist son exactamente tres:
-  `ok` (verde), `falta` (rojo, bloquea Ejecutar) y `pendiente` (ámbar, no
-  bloquea). No agregar un cuarto estado sin actualizar `SIMBOLO` y
-  `COLOR_ESTADO` en `Balance_BESS.py` a la vez.
+  Examinar + periodo AAMM + diagrama de la estructura del caso + log +
+  barra de progreso + contador de tiempo"). El diagrama es un árbol de
+  texto tipo consola (prefijos `├──`/`└──`/`│`, patrón tomado de un
+  `Revisor_Reliquidacion.py` que el usuario dio como referencia): cada
+  fila de `nucleo.revisar_estructura()` se pinta con su profundidad
+  deducida del texto (`_profundidad_fila()` en `Balance_BESS.py` — nucleo
+  no conoce conceptos de árbol/interfaz). Los estados son exactamente
+  tres: `ok` (verde), `falta` (rojo) y `pendiente` (ámbar). No agregar un
+  cuarto estado sin actualizar `SIMBOLO` y `COLOR_ESTADO` en
+  `Balance_BESS.py` a la vez.
+  Las dos salidas (`Consolidado_entradas.xlsx`, `Pagos_BESS.xlsx`) son las
+  últimas dos filas de ese mismo diagrama, cada una con un botón
+  **Generar...** que abre su propia ventana — no hay un botón "Ejecutar"
+  único para todo el proceso. La ventana de `Consolidado_entradas.xlsx`
+  tiene una casilla por sección de `nucleo.SECCIONES_CONSOLIDADO`; lo que
+  el usuario destilda se **conserva** tal cual estaba (no se recalcula ni
+  se borra, ver `escribir_salida()`/`hojas_regenerar`). Ambas ventanas
+  corren su función de `nucleo` en un hilo aparte y reportan al log/barra
+  de progreso de la ventana PRINCIPAL (helper `lanzar_generacion()`), no a
+  widgets propios.
 - **Persistencia de configuración:** `config.json` junto al `.py`, con una
   clave por PC/usuario (`get_usuario()` = `hostname_usuario`), para que
   varias personas puedan compartir la misma copia del script sin pisarse la
@@ -344,3 +359,17 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   `Actualizar_Calculos_Columnas`, ~1500 líneas con dependencias profundas);
   el resto de columnas y `Calculo RE545` quedan para una etapa posterior
   (plan §25).
+- **Cada salida tiene su propio botón "Generar" con casillas por sección,
+  en vez de un único botón "Ejecutar" para todo.** Pedido explícito del
+  usuario, con un archivo de referencia (`Revisor_Reliquidacion.py`) para
+  el estilo de ventana (diagrama de carpetas + botón por fila). Al
+  destildar una sección en la ventana de `Consolidado_entradas.xlsx`, esa
+  parte se **conserva** tal cual estaba (copia cruda de la hoja existente,
+  no un recálculo ni un vaciado) — confirmado explícitamente con el
+  usuario frente a las otras dos alternativas (recalcular todo siempre, o
+  dejar vacío lo no tildado). Las 4 casillas de esa ventana no son 1:1 con
+  cada archivo de entrada: `"medidores"` agrupa Medidas_SAE + SoC +
+  Centrales + OfertasSSCC porque `construir_medidores()` los necesita
+  siempre juntos, no se pueden actualizar por separado a ese nivel de
+  detalle. `Pagos_BESS.xlsx` por ahora no tiene casillas (una sola hoja de
+  salida) — "ajustamos detalles después" (palabras del usuario).

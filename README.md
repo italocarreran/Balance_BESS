@@ -27,11 +27,12 @@ python Balance_BESS.py
    año+mes simplificado (ej. `2607` para julio de 2026). No se adivina del
    nombre de ningún archivo — es el dato que el programa usa para ubicar el
    SoC del período dentro de `Medidas/`.
-3. La ventana detecta automáticamente las entradas y muestra un checklist
-   (`OK` / `FALTA` / `PENDIENTE`).
-4. El botón **Ejecutar** se habilita cuando no falta nada requerido y genera
-   `Consolidado_entradas.xlsx` y `Pagos_BESS.xlsx` directamente en la carpeta
-   base.
+3. La ventana detecta automáticamente las entradas y las dibuja como un
+   diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
+4. Al final del diagrama están `Consolidado_entradas.xlsx` y
+   `Pagos_BESS.xlsx`, cada una con su botón **Generar...**. Ese botón abre
+   una ventana aparte donde se elige qué partes recalcular esta vez; lo que
+   no se tilda se conserva tal cual estaba en el archivo existente.
 
 ## Estructura de carpeta de un caso
 

@@ -11,6 +11,7 @@ import re
 import unicodedata
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
 
 
@@ -2608,6 +2609,37 @@ def _escribir_tabla_con_titulo(
 _COLUMNA_Q_INDICE = 16
 
 
+def _copiar_hoja_existente(wb_origen, nombre_hoja, wb_destino):
+    """
+    Copia una hoja (solo valores, sin formulas ni formato) de un
+    workbook openpyxl a otro. La usa escribir_salida() para preservar
+    una hoja que el usuario decidio NO regenerar en la ventana
+    "Generar" (ver hojas_regenerar). Devuelve False si wb_origen es
+    None o no tiene esa hoja (no hay nada que preservar).
+    """
+
+    if wb_origen is None or nombre_hoja not in wb_origen.sheetnames:
+        return False
+
+    hoja_o = wb_origen[nombre_hoja]
+    hoja_d = wb_destino.create_sheet(title=nombre_hoja)
+
+    for fila in hoja_o.iter_rows():
+        for celda in fila:
+            hoja_d.cell(
+                row=celda.row, column=celda.column, value=celda.value
+            )
+
+    for letra, dim in hoja_o.column_dimensions.items():
+        if dim.width:
+            hoja_d.column_dimensions[letra].width = dim.width
+
+    return True
+
+
+_HOJAS_CONSOLIDADO = ("Medidores", "Ofertas SSCC", "CMg", "FD", "Subastas")
+
+
 def escribir_salida(
     df,
     ruta_salida,
@@ -2619,6 +2651,9 @@ def escribir_salida(
     df_fd_csf=None,
     df_fd_cpf=None,
     df_subastas=None,
+    ruta_existente=None,
+    hojas_regenerar=None,
+    registrar=print,
 ):
     """
     Escribe Consolidado_entradas.xlsx: la tabla Medidores (A:U, una
@@ -2627,12 +2662,50 @@ def escribir_salida(
     hoja (HOJA_OFERTAS_SSCC, una debajo de la otra), CMg, FD (el
     bloque CSF y el bloque CPF lado a lado, de distinto largo cada
     uno - ver construir_fd), Subastas, y un Log.
+
+    hojas_regenerar: None (por defecto) regenera las 5 hojas de datos
+    con lo que se haya pasado. Si es un set con algunos nombres de
+    _HOJAS_CONSOLIDADO, las que NO esten en el set se copian tal cual
+    desde ruta_existente en vez de recalcularse -- lo usa
+    generar_consolidado() cuando el usuario destilda una entrada en
+    la ventana "Generar". Si una hoja a preservar no existe en
+    ruta_existente, queda vacia y se registra un aviso (en el log de
+    esta corrida y como fila del Log).
     """
 
     ruta_salida = Path(ruta_salida)
 
+    regenerar = (
+        set(_HOJAS_CONSOLIDADO)
+        if hojas_regenerar is None
+        else set(hojas_regenerar)
+    )
+
+    wb_existente = None
+    if hojas_regenerar is not None and ruta_existente is not None:
+        ruta_existente = Path(ruta_existente)
+        if ruta_existente.is_file():
+            wb_existente = openpyxl.load_workbook(
+                ruta_existente, data_only=True
+            )
+
+    avisos_preservacion = []
+
+    def _preservar_o_avisar(writer, nombre_hoja):
+        if _copiar_hoja_existente(wb_existente, nombre_hoja, writer.book):
+            return
+        pd.DataFrame().to_excel(writer, sheet_name=nombre_hoja, index=False)
+        mensaje = (
+            f"No se regenero la hoja '{nombre_hoja}' (entrada no "
+            f"tildada) y no se encontro una version anterior para "
+            f"preservarla; quedo vacia."
+        )
+        avisos_preservacion.append(mensaje)
+        registrar(f"  [AVISO] {mensaje}")
+
     registros = (
         [("aviso", a) for a in avisos]
+        + [("aviso", a) for a in avisos_preservacion]
         + [("incidencia_soc", i) for i in incidencias]
     )
 
@@ -2643,40 +2716,50 @@ def escribir_salida(
 
     with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
 
-        df.to_excel(
-            writer,
-            sheet_name="Medidores",
-            index=False,
-        )
-
-        columna = 0
-
-        if df_wxy is not None:
-            _, columna = _escribir_tabla_con_titulo(
+        if "Medidores" in regenerar:
+            df.to_excel(
                 writer,
-                HOJA_OFERTAS_SSCC,
-                df_wxy,
-                "Ofertas SSCC por dia (equivalente a Medidores!W:Y)",
-                columna_inicio=columna,
-            )
-
-        if df_resumen_ventana is not None:
-            _escribir_tabla_con_titulo(
-                writer,
-                HOJA_OFERTAS_SSCC,
-                df_resumen_ventana,
-                "Resumen ventana oferta (equivalente a Medidores!AB:AE)",
-                columna_inicio=columna,
-            )
-
-        if df_cmg is not None:
-            df_cmg.to_excel(
-                writer,
-                sheet_name="CMg",
+                sheet_name="Medidores",
                 index=False,
             )
+        else:
+            _preservar_o_avisar(writer, "Medidores")
 
-        if df_fd_csf is not None or df_fd_cpf is not None:
+        if "Ofertas SSCC" in regenerar:
+
+            columna = 0
+
+            if df_wxy is not None:
+                _, columna = _escribir_tabla_con_titulo(
+                    writer,
+                    HOJA_OFERTAS_SSCC,
+                    df_wxy,
+                    "Ofertas SSCC por dia (equivalente a Medidores!W:Y)",
+                    columna_inicio=columna,
+                )
+
+            if df_resumen_ventana is not None:
+                _escribir_tabla_con_titulo(
+                    writer,
+                    HOJA_OFERTAS_SSCC,
+                    df_resumen_ventana,
+                    "Resumen ventana oferta (equivalente a Medidores!AB:AE)",
+                    columna_inicio=columna,
+                )
+        else:
+            _preservar_o_avisar(writer, HOJA_OFERTAS_SSCC)
+
+        if "CMg" in regenerar:
+            if df_cmg is not None:
+                df_cmg.to_excel(
+                    writer,
+                    sheet_name="CMg",
+                    index=False,
+                )
+        else:
+            _preservar_o_avisar(writer, "CMg")
+
+        if "FD" in regenerar:
 
             if df_fd_csf is not None:
                 df_fd_csf.to_excel(
@@ -2693,13 +2776,18 @@ def escribir_salida(
                     index=False,
                     startcol=_COLUMNA_Q_INDICE,
                 )
+        else:
+            _preservar_o_avisar(writer, "FD")
 
-        if df_subastas is not None:
-            df_subastas.to_excel(
-                writer,
-                sheet_name="Subastas",
-                index=False,
-            )
+        if "Subastas" in regenerar:
+            if df_subastas is not None:
+                df_subastas.to_excel(
+                    writer,
+                    sheet_name="Subastas",
+                    index=False,
+                )
+        else:
+            _preservar_o_avisar(writer, "Subastas")
 
         df_log.to_excel(
             writer,
@@ -2712,127 +2800,210 @@ def escribir_salida(
 
 # ============================================================
 # PROCESO COMPLETO
+#
+# Dos salidas independientes, cada una con su ventana "Generar" en
+# Balance_BESS.py:
+#
+#   - generar_consolidado(): Consolidado_entradas.xlsx. El usuario
+#     tilda que "secciones" quiere recalcular esta vez; el resto se
+#     preserva tal cual estaba (ver escribir_salida/hojas_regenerar).
+#   - generar_pagos_bess(): Pagos_BESS.xlsx. Por ahora sin checkboxes
+#     (una sola hoja) -- lee Medidores de Consolidado_entradas.xlsx
+#     ya generado, no lo recalcula.
+#
+# SECCIONES_CONSOLIDADO agrupa los 4 checkboxes de esa ventana con
+# las hojas que produce cada uno. "medidores" junta Medidas_SAE, SoC,
+# Centrales (Diccionario) y OfertasSSCC porque construir_medidores()
+# necesita los 4 juntos: no se pueden tildar por separado a ese nivel
+# de detalle sin recalcular con datos parcialmente viejos.
 # ============================================================
 
-def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
-    """
-    Corre la etapa Medidores de punta a punta.
+SECCIONES_CONSOLIDADO = (
+    (
+        "medidores",
+        "Medidores + Ofertas SSCC",
+        f"Usa {ARCHIVO_MEDIDAS_SAE}, el SoC del periodo, "
+        f"{ARCHIVO_CENTRALES} (hoja Diccionario) y el archivo "
+        f"OfertasSSCC -- los 4 se leen juntos para armar estas dos "
+        f"hojas, no se pueden actualizar por separado.",
+        ("Medidores", "Ofertas SSCC"),
+    ),
+    (
+        "cmg",
+        "CMg",
+        f"Usa {ARCHIVO_CMG}.",
+        ("CMg",),
+    ),
+    (
+        "fd",
+        "FD",
+        f"Usa el archivo {CARPETA_SSCC_DESEMPENO}/ (hojas CPF/CSF "
+        f"Horario).",
+        ("FD",),
+    ),
+    (
+        "subastas",
+        "Subastas",
+        f"Usa el archivo {CARPETA_SUBASTAS}/.",
+        ("Subastas",),
+    ),
+)
 
-    aamm:      periodo ingresado por el usuario en la ventana (4
-               digitos, ej. '2607').
-    registrar: funcion para mensajes.
-    progreso:  funcion que recibe 0..100.
+
+def generar_consolidado(
+    carpeta_base, aamm, secciones_activas, registrar=print, progreso=None
+):
+    """
+    Genera/actualiza Consolidado_entradas.xlsx, recalculando solo las
+    hojas de las secciones tildadas (ids de SECCIONES_CONSOLIDADO) y
+    preservando el resto tal cual estaba en el archivo existente (ver
+    escribir_salida). La usa la ventana "Generar" de esa fila.
+
+    secciones_activas: iterable de ids de SECCIONES_CONSOLIDADO
+    ("medidores", "cmg", "fd", "subastas") a recalcular esta vez.
     """
 
     def avanzar(valor):
         if progreso:
             progreso(valor)
 
-    aamm = validar_aamm(aamm)
+    secciones_activas = set(secciones_activas)
+    ids_validos = {seccion[0] for seccion in SECCIONES_CONSOLIDADO}
+    desconocidas = secciones_activas - ids_validos
 
-    rutas, _ = revisar_estructura(carpeta_base, aamm)
-
-    if not rutas["medidas_sae"].is_file():
+    if desconocidas:
         raise ErrorEntrada(
-            f"No se encontro {rutas['medidas_sae']}"
+            f"Seccion(es) desconocida(s): {sorted(desconocidas)}"
         )
 
-    if not rutas["centrales"].is_file():
+    if not secciones_activas:
         raise ErrorEntrada(
-            f"No se encontro {rutas['centrales']}"
+            "No se tildo ninguna entrada para generar/actualizar."
         )
 
-    archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
-    if not archivo_ofertas:
-        raise ErrorEntrada(
-            f"No se encontro ningun archivo *OfertasSSCC* en "
-            f"{rutas['ofertas_dir']}"
-        )
+    hojas_regenerar = set()
+    for id_seccion, _, _, hojas in SECCIONES_CONSOLIDADO:
+        if id_seccion in secciones_activas:
+            hojas_regenerar.update(hojas)
 
-    if not rutas["cmg"].is_file():
-        raise ErrorEntrada(
-            f"No se encontro {rutas['cmg']}"
-        )
+    rutas = resolver_rutas(carpeta_base)
 
-    archivo_sscc = buscar_archivo_sscc_desempeno(
-        rutas["sscc_desempeno_dir"]
-    )
-    if not archivo_sscc:
-        raise ErrorEntrada(
-            f"No se encontro ningun archivo SSCC_Desempeño_* en "
-            f"{rutas['sscc_desempeno_dir']}"
-        )
+    df_medidores = None
+    avisos, incidencias = [], []
+    df_wxy = df_resumen_ventana = None
+    df_cmg = df_fd_csf = df_fd_cpf = df_subastas = None
 
-    archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
-    if not archivo_subastas:
-        raise ErrorEntrada(
-            f"No se encontro ningun archivo "
-            f"3_REMUNERACIÓN_SUBASTAS_E_ID_* en "
-            f"{rutas['subastas_dir']}"
-        )
-
-    archivo_soc = buscar_soc(rutas["medidas_dir"], aamm)
-    anio, mes = periodo_desde_aamm(aamm)
-
-    registrar(f"Periodo indicado: {anio}-{mes:02d} ({aamm})")
     avanzar(5)
 
-    registrar("Leyendo Centrales.xlsx...")
-    resumen, diccionario = leer_centrales(rutas["centrales"])
-    mapa = construir_homologacion(diccionario)
-    registrar(f"  homologaciones cargadas: {len(mapa):,}")
-    avanzar(20)
+    if "medidores" in secciones_activas:
 
-    registrar(f"Leyendo {archivo_soc.name}...")
-    df_soc, incidencias = extraer_soc(archivo_soc, mapa)
-    registrar(
-        f"  bloques leidos: "
-        f"{df_soc['central'].nunique()}   "
-        f"registros: {len(df_soc):,}"
-    )
+        aamm_val = validar_aamm(aamm)
 
-    for incidencia in incidencias:
-        registrar(f"  [SOC] {incidencia}")
+        if not rutas["medidas_sae"].is_file():
+            raise ErrorEntrada(
+                f"No se encontro {rutas['medidas_sae']}"
+            )
 
-    avanzar(50)
+        if not rutas["centrales"].is_file():
+            raise ErrorEntrada(
+                f"No se encontro {rutas['centrales']}"
+            )
 
-    registrar(f"Leyendo {ARCHIVO_MEDIDAS_SAE}...")
-    df_sae = leer_medidas_sae(rutas["medidas_sae"])
-    registrar(f"  filas: {len(df_sae):,}")
-    avanzar(70)
+        archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
+        if not archivo_ofertas:
+            raise ErrorEntrada(
+                f"No se encontro ningun archivo *OfertasSSCC* en "
+                f"{rutas['ofertas_dir']}"
+            )
 
-    registrar("Construyendo Medidores...")
-    (
-        df_medidores,
-        avisos,
-        df_wxy,
-        df_resumen_ventana,
-    ) = construir_medidores(
-        df_sae,
-        df_soc,
-        anio,
-        mes,
-        archivo_ofertas,
-        diccionario,
-        registrar=registrar,
-    )
+        archivo_soc = buscar_soc(rutas["medidas_dir"], aamm_val)
+        anio, mes = periodo_desde_aamm(aamm_val)
 
-    for aviso in avisos:
-        registrar(f"  [AVISO] {aviso}")
+        registrar(f"Periodo indicado: {anio}-{mes:02d} ({aamm_val})")
 
-    avanzar(80)
+        registrar("Leyendo Centrales.xlsx...")
+        _, diccionario = leer_centrales(rutas["centrales"])
+        mapa = construir_homologacion(diccionario)
+        registrar(f"  homologaciones cargadas: {len(mapa):,}")
+        avanzar(20)
 
-    registrar(f"Leyendo {ARCHIVO_CMG}...")
-    df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
-    avanzar(85)
+        registrar(f"Leyendo {archivo_soc.name}...")
+        df_soc, incidencias = extraer_soc(archivo_soc, mapa)
+        registrar(
+            f"  bloques leidos: "
+            f"{df_soc['central'].nunique()}   "
+            f"registros: {len(df_soc):,}"
+        )
 
-    registrar(f"Leyendo {archivo_sscc.name}...")
-    df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
-    avanzar(90)
+        for incidencia in incidencias:
+            registrar(f"  [SOC] {incidencia}")
 
-    registrar(f"Leyendo {archivo_subastas.name}...")
-    df_subastas = construir_subastas(archivo_subastas, registrar=registrar)
-    avanzar(95)
+        avanzar(35)
+
+        registrar(f"Leyendo {ARCHIVO_MEDIDAS_SAE}...")
+        df_sae = leer_medidas_sae(rutas["medidas_sae"])
+        registrar(f"  filas: {len(df_sae):,}")
+        avanzar(50)
+
+        registrar("Construyendo Medidores...")
+        (
+            df_medidores,
+            avisos,
+            df_wxy,
+            df_resumen_ventana,
+        ) = construir_medidores(
+            df_sae,
+            df_soc,
+            anio,
+            mes,
+            archivo_ofertas,
+            diccionario,
+            registrar=registrar,
+        )
+
+        for aviso in avisos:
+            registrar(f"  [AVISO] {aviso}")
+
+    avanzar(60)
+
+    if "cmg" in secciones_activas:
+        if not rutas["cmg"].is_file():
+            raise ErrorEntrada(f"No se encontro {rutas['cmg']}")
+        registrar(f"Leyendo {ARCHIVO_CMG}...")
+        df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
+
+    avanzar(72)
+
+    if "fd" in secciones_activas:
+        archivo_sscc = buscar_archivo_sscc_desempeno(
+            rutas["sscc_desempeno_dir"]
+        )
+        if not archivo_sscc:
+            raise ErrorEntrada(
+                f"No se encontro ningun archivo SSCC_Desempeño_* en "
+                f"{rutas['sscc_desempeno_dir']}"
+            )
+        registrar(f"Leyendo {archivo_sscc.name}...")
+        df_fd_csf, df_fd_cpf = construir_fd(
+            archivo_sscc, registrar=registrar
+        )
+
+    avanzar(84)
+
+    if "subastas" in secciones_activas:
+        archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
+        if not archivo_subastas:
+            raise ErrorEntrada(
+                f"No se encontro ningun archivo "
+                f"3_REMUNERACIÓN_SUBASTAS_E_ID_* en "
+                f"{rutas['subastas_dir']}"
+            )
+        registrar(f"Leyendo {archivo_subastas.name}...")
+        df_subastas = construir_subastas(
+            archivo_subastas, registrar=registrar
+        )
+
+    avanzar(92)
 
     registrar(f"Escribiendo {rutas['salida'].name}...")
     escribir_salida(
@@ -2846,22 +3017,94 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
         df_fd_csf,
         df_fd_cpf,
         df_subastas,
+        ruta_existente=rutas["salida"],
+        hojas_regenerar=hojas_regenerar,
+        registrar=registrar,
     )
-    avanzar(97)
-
-    registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
-               "traspaso de Medidores)...")
-    mapa_barra = construir_mapa_barra(resumen)
-    dic_cmg = construir_dic_cmg(df_cmg)
-    df_ecostos = construir_calculo_e_costos(
-        df_medidores, mapa_barra, dic_cmg, registrar=registrar
-    )
-
-    registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
-    escribir_pagos_bess(rutas["salida_pagos"], df_ecostos, registrar=registrar)
 
     avanzar(100)
     registrar(f"Listo: {rutas['salida']}")
+
+    return rutas["salida"]
+
+
+def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
+    """
+    Genera/actualiza Pagos_BESS.xlsx (etapa base de "Calculo E
+    Costos": H + CMg + traspaso de Medidores, ver plan seccion 25).
+
+    No recalcula Medidores: lo lee tal cual esta en la hoja
+    "Medidores" de Consolidado_entradas.xlsx, que debe generarse
+    primero con su propia ventana "Generar". Centrales.xlsx y
+    cmg.xlsx si se leen frescos.
+
+    Sin checkboxes todavia -- una sola hoja de salida, se ajustan
+    detalles en una etapa posterior (pedido explicito del usuario).
+    """
+
+    def avanzar(valor):
+        if progreso:
+            progreso(valor)
+
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["salida"].is_file():
+        raise ErrorEntrada(
+            f"No se encontro {rutas['salida']}. Primero hay que "
+            f"generar Consolidado_entradas.xlsx (boton 'Generar' de "
+            f"esa fila)."
+        )
+
+    registrar(f"Leyendo hoja 'Medidores' de {rutas['salida'].name}...")
+
+    try:
+        df_medidores = pd.read_excel(rutas["salida"], sheet_name="Medidores")
+    except ValueError as error:
+        raise ErrorEntrada(
+            f"{rutas['salida'].name} no tiene la hoja 'Medidores' "
+            f"todavia. Genera Consolidado_entradas.xlsx primero "
+            f"(tildando 'Medidores + Ofertas SSCC')."
+        ) from error
+
+    if df_medidores.empty:
+        raise ErrorEntrada(
+            f"La hoja 'Medidores' de {rutas['salida'].name} esta "
+            f"vacia. Genera Consolidado_entradas.xlsx primero "
+            f"(tildando 'Medidores + Ofertas SSCC')."
+        )
+
+    registrar(f"  filas: {len(df_medidores):,}")
+    avanzar(20)
+
+    if not rutas["centrales"].is_file():
+        raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
+
+    registrar("Leyendo Centrales.xlsx...")
+    resumen, _ = leer_centrales(rutas["centrales"])
+    mapa_barra = construir_mapa_barra(resumen)
+    avanzar(45)
+
+    if not rutas["cmg"].is_file():
+        raise ErrorEntrada(f"No se encontro {rutas['cmg']}")
+
+    registrar(f"Leyendo {ARCHIVO_CMG}...")
+    df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
+    dic_cmg = construir_dic_cmg(df_cmg)
+    avanzar(65)
+
+    registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
+               "traspaso de Medidores)...")
+    df_ecostos = construir_calculo_e_costos(
+        df_medidores, mapa_barra, dic_cmg, registrar=registrar
+    )
+    avanzar(90)
+
+    registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
+    escribir_pagos_bess(
+        rutas["salida_pagos"], df_ecostos, registrar=registrar
+    )
+
+    avanzar(100)
     registrar(f"Listo: {rutas['salida_pagos']}")
 
-    return df_medidores, avisos, incidencias
+    return rutas["salida_pagos"]

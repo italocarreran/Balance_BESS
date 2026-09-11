@@ -8,21 +8,44 @@ de.
 
 ## `Balance_BESS.py`
 
-- **Qué hace:** ventana tkinter única de la etapa Medidores. Deja elegir la
-  carpeta base del caso e ingresar el **período (AAMM, 4 dígitos, ej.
-  `2607`)** en un campo de texto, valida automáticamente la estructura
-  pintando un checklist (OK/FALTA/PENDIENTE), ejecuta el cálculo en un hilo
-  aparte con log y barra de progreso, y ofrece abrir la carpeta de salida
-  al terminar. El AAMM ya no se infiere del nombre de ningún archivo: lo
-  escribe el usuario y ese valor es la fuente de verdad del período.
-- **Consume:** `nucleo` (`revisar_estructura(carpeta, aamm)`,
-  `ejecutar(carpeta, aamm, ...)`, `resolver_rutas`, `ErrorEntrada`);
-  `config.json` (última carpeta base y último AAMM recordados, por
-  PC/usuario).
+- **Qué hace:** ventana tkinter única. Deja elegir la carpeta base del caso
+  e ingresar el **período (AAMM, 4 dígitos, ej. `2607`)** en un campo de
+  texto, y debajo dibuja un **diagrama de la estructura del caso** (árbol de
+  texto tipo consola, prefijos `├──`/`└──`/`│`, patrón tomado del
+  `Revisor_Reliquidacion.py` que el usuario dio como referencia) con el
+  estado de cada entrada (OK/FALTA/PENDIENTE). El AAMM no se infiere del
+  nombre de ningún archivo: lo escribe el usuario.
+
+  Las dos salidas (`Consolidado_entradas.xlsx`, `Pagos_BESS.xlsx`) son las
+  dos últimas filas del mismo diagrama, cada una con su botón **Generar...**
+  que abre una ventana aparte:
+  - *Generar Consolidado_entradas.xlsx*: una casilla por sección de
+    `nucleo.SECCIONES_CONSOLIDADO` ("Medidores + Ofertas SSCC", "CMg", "FD",
+    "Subastas"; todas tildadas por defecto). Lo destildado se **conserva**
+    tal cual estaba en el archivo existente (no se recalcula ni se borra) —
+    ver `nucleo.generar_consolidado`.
+  - *Generar Pagos_BESS.xlsx*: sin casillas todavía (una sola hoja de
+    salida); explica que usa la hoja `Medidores` ya generada (no la
+    recalcula) más `Centrales.xlsx`/`cmg.xlsx` frescos — ver
+    `nucleo.generar_pagos_bess`.
+
+  Ambas ventanas corren su función de `nucleo` en un hilo aparte
+  (`lanzar_generacion()`, helper compartido) y reportan al log/barra de
+  progreso/timer de la ventana **principal**, no a widgets propios: no hay
+  un botón "Ejecutar" único, cada salida se genera por separado.
+- **Consume:** `nucleo` (`revisar_estructura`, `resolver_rutas`,
+  `generar_consolidado`, `generar_pagos_bess`, `SECCIONES_CONSOLIDADO`,
+  `ErrorEntrada`); `config.json` (última carpeta base y último AAMM
+  recordados, por PC/usuario).
 - **Produce:** `config.json` actualizado con la carpeta base y el AAMM
   elegidos; dispara en `nucleo` la escritura de `Consolidado_entradas.xlsx`
-  y `Pagos_BESS.xlsx` dentro de la carpeta base del caso.
-- **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`).
+  y/o `Pagos_BESS.xlsx` dentro de la carpeta base del caso (por separado,
+  según que ventana "Generar" se haya usado).
+- **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`);
+  helpers de presentación del árbol (`_profundidad_fila`,
+  `_es_ultimo_en_su_nivel`, `_prefijos_arbol`) que traducen la lista plana
+  de `revisar_estructura()` a prefijos tipo consola — deliberadamente NO
+  viven en `nucleo.py`, que no conoce conceptos de interfaz.
 - **Depende de:** `nucleo.py` (mismo directorio, import directo).
 
 ---
@@ -131,10 +154,28 @@ de.
     → `df_ecostos`; `escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print)`.
   - `construir_medidores(df_sae, df_soc, anio, mes, ruta_ofertas, diccionario, registrar=print)`
     → `(df_medidores, avisos, df_wxy, df_resumen_ventana)`.
-  - `escribir_salida(df, ruta_salida, avisos, incidencias, df_wxy=None, df_resumen_ventana=None, df_cmg=None, df_fd_csf=None, df_fd_cpf=None, df_subastas=None)`.
-  - `ejecutar(carpeta_base, aamm, registrar=print, progreso=None)` —
-    orquesta el proceso completo de punta a punta (ambos archivos de
-    salida).
+  - `escribir_salida(df, ruta_salida, avisos, incidencias, df_wxy=None, df_resumen_ventana=None, df_cmg=None, df_fd_csf=None, df_fd_cpf=None, df_subastas=None, ruta_existente=None, hojas_regenerar=None, registrar=print)`
+    — `hojas_regenerar=None` (por defecto) regenera las 5 hojas de datos;
+    si es un `set` con algunos nombres de `_HOJAS_CONSOLIDADO`, las que NO
+    estén en el set se copian tal cual desde `ruta_existente`
+    (`_copiar_hoja_existente()`, copia cruda vía `openpyxl`, sin fórmulas ni
+    formato) en vez de recalcularse.
+  - `SECCIONES_CONSOLIDADO` — tupla de `(id, etiqueta, descripción, hojas)`
+    por cada casilla de la ventana "Generar" de `Consolidado_entradas.xlsx`
+    (`"medidores"` agrupa Medidas_SAE + SoC + Centrales + OfertasSSCC,
+    porque `construir_medidores()` los necesita siempre juntos; `"cmg"`,
+    `"fd"`, `"subastas"` son independientes).
+  - `generar_consolidado(carpeta_base, aamm, secciones_activas, registrar=print, progreso=None)`
+    — genera/actualiza `Consolidado_entradas.xlsx` recalculando solo las
+    secciones tildadas; valida los archivos de entrada únicamente para las
+    secciones tildadas (si `"medidores"` no está tildada, no exige
+    Medidas_SAE/SoC/Centrales/Ofertas). Reemplaza a la vieja `ejecutar()`.
+  - `generar_pagos_bess(carpeta_base, registrar=print, progreso=None)` —
+    genera/actualiza `Pagos_BESS.xlsx`; lee `Medidores` desde
+    `Consolidado_entradas.xlsx` ya generado (no lo recalcula), y
+    Centrales.xlsx/cmg.xlsx frescos. Sin `aamm` como parámetro: la etapa
+    base de Calculo E Costos no lo necesita (todo sale de `Medidores`, que
+    ya trae Mes/Dia/Hora).
 - **Parámetros fijos:** `INICIO_VENTANA = 10`, `UMBRAL_SOC = 0.06` (ver plan
   de migración §8).
 - **Constantes de columnas:** `LETRA_A_CAMPO` (dict A→U de `Medidores`, su

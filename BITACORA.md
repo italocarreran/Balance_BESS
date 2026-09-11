@@ -36,6 +36,14 @@ estado, no un historial.
   hacía la macro original (ver plan §23.3).
 - Confirmar el nombre definitivo de `Pagos_BESS.xlsx` (provisorio, elegido
   por el usuario como "pagos_bess o algo así por ahora").
+- Agregar casillas por sección a la ventana "Generar" de `Pagos_BESS.xlsx`
+  (hoy es todo o nada, una sola hoja) — "ajustamos detalles después"
+  (pedido explícito del usuario, ver entrada de esta sesión).
+- Probar la ventana nueva (diagrama + botones "Generar") con una carpeta
+  base real: solo se probó por ahora con `python -m py_compile` (no hay
+  entorno grafico en esta sesión para abrir la ventana) y con pruebas
+  sintéticas de la lógica de árbol (`_prefijos_arbol`) y de generación
+  parcial (`generar_consolidado`, `generar_pagos_bess`) por separado.
 - Evaluar si `guardar_config()` necesita escritura atómica (ver
   `METODOLOGIA.md` §7).
 
@@ -464,3 +472,92 @@ columna, no por posición.
 2 centrales) reproduciendo exactamente la estructura del error real; `leer_centrales()` +
 `construir_mapa_barra()` devolvieron el mapa esperado. Sin persistir en el repo (convención de
 pruebas).
+
+---
+
+## 2026-09-11 (3) — Ventana nueva: diagrama de carpetas + "Generar" por salida
+
+El usuario adjuntó `Revisor_Reliquidacion.py` (otro proyecto suyo) como referencia de cómo
+quiere que se vea la ventana: un diagrama de texto de la estructura de carpetas/archivos
+(prefijos `├──`/`└──`/`│`, monoespaciada) con un botón por fila cuando corresponde, en vez del
+checklist plano que había hasta ahora. Pedido concreto: al lado de `Consolidado_entradas.xlsx`
+un botón "Generar" que abra una ventana con una casilla por entrada (Medidas, CMg, Ofertas,
+etc.) para elegir qué recalcular, y lo mismo para `Pagos_BESS.xlsx` ("ajustamos detalles
+después").
+
+Antes de tocar código se preguntó al usuario (`AskUserQuestion`) el punto más consecuente: qué
+pasa con una entrada destildada al apretar Actualizar. Eligió explícitamente **"se preserva lo
+que ya había"** (frente a "se regenera todo igual" o "queda vacío"), y confirmó el layout
+general (carpeta+AAMM igual que hoy, árbol debajo — reemplazando al checklist plano, ya que el
+árbol muestra el mismo estado OK/FALTA/PENDIENTE).
+
+**`nucleo.py` — regeneración parcial (cambio de arquitectura, no solo de UI):**
+
+- `_copiar_hoja_existente(wb_origen, nombre_hoja, wb_destino)`: copia una hoja completa (solo
+  valores, sin fórmulas ni formato) de un workbook `openpyxl` a otro. Es el mecanismo real de
+  "preservar": nunca se intenta reconstruir `Ofertas SSCC` o `FD` (bloques de distinto largo,
+  con títulos y `startcol`) a partir de un DataFrame leído de vuelta — se copia la hoja física
+  tal cual, evitando reinventar su estructura.
+- `escribir_salida()` gana `ruta_existente` y `hojas_regenerar` (`None` = comportamiento
+  clásico, regenera las 5 hojas). Cuando `hojas_regenerar` es un set, las hojas fuera de ese set
+  se preservan vía `_copiar_hoja_existente()`; si no existían antes, quedan vacías y se registra
+  un aviso (log de la corrida + fila del `Log`) en vez de fallar en silencio.
+- `SECCIONES_CONSOLIDADO`: agrupa las 4 casillas de la ventana con las hojas que produce cada
+  una. Decisión de diseño: **no hay una casilla por archivo de entrada**, sino una casilla
+  `"medidores"` que junta Medidas_SAE + SoC + Centrales(Diccionario) + OfertasSSCC, porque
+  `construir_medidores()` los necesita siempre los 4 juntos — tildar solo "Ofertas" y dejar
+  "Medidas" destildada no permitiría recalcular nada coherente. `"cmg"`, `"fd"`, `"subastas"`
+  quedan independientes porque cada uno sale de una sola función/archivo.
+- `generar_consolidado(carpeta_base, aamm, secciones_activas, registrar, progreso)`: reemplaza
+  a la vieja `ejecutar()`. Valida (y exige) los archivos de entrada **solo para las secciones
+  tildadas** — si `"medidores"` no está tildada, no hace falta tener Medidas_SAE/SoC/Centrales/
+  Ofertas presentes ni siquiera un AAMM válido.
+- `generar_pagos_bess(carpeta_base, registrar, progreso)`: separado de `generar_consolidado()`
+  (ya no hace todo un `ejecutar()` monolítico). Lee `Medidores` de `Consolidado_entradas.xlsx`
+  ya generado (`pd.read_excel`, no se recalcula) en vez de recibir `df_medidores` en memoria
+  como antes — refleja que ahora son dos flujos independientes disparados por botones distintos.
+  Perdió el parámetro `aamm` (no lo usaba: todo sale de `Medidores`, que ya trae Mes/Dia/Hora).
+- La vieja `ejecutar(carpeta_base, aamm, ...)` se **eliminó** (no solo se dejó como wrapper):
+  nada la llama ya que la ventana dispara `generar_consolidado`/`generar_pagos_bess` por
+  separado, y mantenerla como código muerto no aportaba nada.
+
+**`Balance_BESS.py` — reescritura de la ventana:**
+
+- `_profundidad_fila()`, `_es_ultimo_en_su_nivel()`, `_prefijos_arbol()`: arman los prefijos
+  tipo árbol a partir de la lista plana `(etiqueta, estado, detalle)` que ya devolvía
+  `revisar_estructura()`, sin pedirle a `nucleo.py` que sepa de árboles/interfaz. La profundidad
+  se deduce del TEXTO de la etiqueta (`"algo/"` = carpeta de primer nivel, `"  hoja ..."` =
+  nieto, el resto = archivo hijo de la carpeta anterior) en vez de que `nucleo.py` devuelva un
+  campo de profundidad — mantiene a `nucleo.py` sin conceptos de UI.
+- El panel "Entradas detectadas" (`pintar_checklist`, filas planas) se reemplaza por "Estructura
+  del caso" (`pintar_arbol`, con los prefijos de arriba). Al final del árbol se agregan a mano
+  las dos filas de salida (`Consolidado_entradas.xlsx`, `Pagos_BESS.xlsx`), cada una con su
+  botón "Generar...".
+- Se eliminó el botón único "Ejecutar": cada salida se dispara desde su propia ventana
+  (`abrir_ventana_generar_consolidado`, `abrir_ventana_generar_pagos`), con casillas (la primera)
+  o solo una explicación (la segunda, sin casillas todavía). `lanzar_generacion()` es el helper
+  compartido: corre la función de `nucleo` en un hilo, y hace que `registrar`/`progreso` escriban
+  en el log/barra de la ventana PRINCIPAL (no hay log propio por ventana secundaria), para no
+  duplicar esos widgets.
+- Al terminar una generación se vuelve a llamar `revisar()` para refrescar el árbol (por si el
+  archivo de salida cambió de OK/FALTA), y se cierra la ventana "Generar" correspondiente.
+
+**Verificación:** sin entorno gráfico disponible en esta sesión (no hay `tkinter` instalado acá,
+solo se pudo correr `python -m py_compile` sobre `Balance_BESS.py`/`nucleo.py`). Se probó por
+separado, con scripts sintéticos borrados al cerrar la sesión:
+- La lógica de árbol (`_profundidad_fila`/`_prefijos_arbol`, copiadas fuera de `Balance_BESS.py`
+  para poder importarlas sin `tkinter`) contra la lista real que devuelve
+  `revisar_estructura()` en una carpeta de prueba: el árbol impreso en consola tiene la forma
+  esperada.
+- `escribir_salida()` con `hojas_regenerar`: preserva hojas no tildadas desde `ruta_existente`,
+  regenera las tildadas, y avisa (sin fallar) cuando una hoja a preservar no existía todavía.
+- `generar_consolidado()`: no exige Medidas/Ofertas/Centrales si `"medidores"` no está tildada;
+  corre de punta a punta con solo `"cmg"` tildada; rechaza secciones desconocidas y el caso de no
+  tildar nada.
+- `generar_pagos_bess()`: exige `Consolidado_entradas.xlsx` con `Medidores` antes de correr, y
+  de punta a punta con datos reales (vía `Centrales.xlsx`/`cmg.xlsx` reales) da los mismos
+  resultados que la implementación anterior.
+
+**No probado:** la ventana real (no hay `tkinter` en este entorno) — falta que el usuario la
+abra y confirme que el diagrama se ve como esperaba y que los botones "Generar" funcionan en la
+práctica.

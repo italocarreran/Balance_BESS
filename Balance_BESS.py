@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Balance BESS / SSCC — etapa Medidores.
+Balance BESS / SSCC.
 
 Ventana unica: se elige la carpeta base del caso y el programa
-resuelve solas todas las entradas por ruta relativa.
+resuelve solas todas las entradas por ruta relativa. Debajo del
+selector de carpeta y del periodo (AAMM) se muestra un diagrama de la
+estructura esperada, con el estado de cada entrada (OK/FALTA/
+PENDIENTE). Consolidado_entradas.xlsx y Pagos_BESS.xlsx tienen cada
+uno su boton "Generar", que abre una ventana aparte para elegir que
+partes recalcular.
 
     <CARPETA_BASE>/
         Medidas/
@@ -19,7 +24,8 @@ resuelve solas todas las entradas por ruta relativa.
             SSCC_Desempeño_<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Subastas/
             3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (idem)
-        Consolidado_entradas.xlsx      <- salida
+        Consolidado_entradas.xlsx      <- salida (boton "Generar")
+        Pagos_BESS.xlsx                <- salida (boton "Generar")
 
 La ubicacion de este .py no influye en nada salvo en donde se
 guarda config.json.
@@ -47,6 +53,7 @@ COLOR_OK = "#1a6b1a"
 COLOR_FALTA = "#b00020"
 COLOR_PENDIENTE = "#a06000"
 COLOR_NEUTRO = "#555555"
+COLOR_BASE_OK = "#1a4fb0"
 
 SIMBOLO = {
     "ok": "OK",
@@ -120,6 +127,78 @@ def formato_tiempo(segundos):
 
 
 # ============================================================
+# DIAGRAMA DE CARPETAS (arbol de texto tipo consola)
+#
+# revisar_estructura() de nucleo.py devuelve una lista plana de
+# (etiqueta, estado, detalle). Para dibujarla como arbol (igual que
+# el patron de Revisor_Reliquidacion.py que pidio el usuario) hace
+# falta saber la PROFUNDIDAD de cada fila; se deduce del texto de la
+# etiqueta en vez de pedirle a nucleo.py que conozca conceptos de
+# interfaz (arbol/prefijos), que no le corresponden.
+# ============================================================
+
+def _profundidad_fila(etiqueta):
+    if etiqueta in ("Carpeta base", "Periodo (AAMM)"):
+        return 0
+    if etiqueta.startswith("  hoja "):
+        return 2
+    if etiqueta.endswith("/"):
+        return 0
+    return 1
+
+
+def _es_ultimo_en_su_nivel(profundidades, i):
+    """
+    True si, mirando hacia adelante desde i, se sube de nivel antes
+    de encontrar otra fila con la MISMA profundidad (o se llega al
+    final de la lista): o sea, si i es la ultima de su grupo.
+    """
+    nivel = profundidades[i]
+    for j in range(i + 1, len(profundidades)):
+        if profundidades[j] < nivel:
+            return True
+        if profundidades[j] == nivel:
+            return False
+    return True
+
+
+def _prefijos_arbol(profundidades):
+    """
+    Prefijos tipo consola (├── / └── / │) para una lista plana de
+    profundidades (0 = raiz), calculando el relleno de cada ancestro
+    segun si ESE ancestro es o no el ultimo de su propio grupo.
+    """
+    n = len(profundidades)
+    ultimos = [_es_ultimo_en_su_nivel(profundidades, i) for i in range(n)]
+    prefijos = []
+
+    for i, nivel in enumerate(profundidades):
+
+        if nivel == 0:
+            prefijos.append("")
+            continue
+
+        relleno = ""
+        for ancestro_nivel in range(1, nivel):
+            indice_ancestro = next(
+                (
+                    k for k in range(i - 1, -1, -1)
+                    if profundidades[k] == ancestro_nivel
+                ),
+                None,
+            )
+            relleno += (
+                "    "
+                if (indice_ancestro is None or ultimos[indice_ancestro])
+                else "│   "
+            )
+
+        prefijos.append(relleno + ("└── " if ultimos[i] else "├── "))
+
+    return prefijos
+
+
+# ============================================================
 # VENTANA
 # ============================================================
 
@@ -128,17 +207,16 @@ def main():
     cfg = leer_config()
 
     root = tk.Tk()
-    root.title("Balance BESS / SSCC — etapa Medidores")
-    root.geometry("980x720")
+    root.title("Balance BESS / SSCC")
+    root.geometry("1100x780")
 
-    var_base = tk.StringVar(
-        value=cfg.get("carpeta_base", "")
-    )
-    var_aamm = tk.StringVar(
-        value=cfg.get("aamm", "")
-    )
+    var_base = tk.StringVar(value=cfg.get("carpeta_base", ""))
+    var_aamm = tk.StringVar(value=cfg.get("aamm", ""))
     var_estado = tk.StringVar(value="Listo")
     var_tiempo = tk.StringVar(value="00:00:00")
+
+    estado_listo = {"consolidado": False}
+    ventanas_generar = {}
 
     # --------------------------------------------------------
     # BOTONES FIJOS ABAJO (primero, para que no los tape nada)
@@ -152,9 +230,7 @@ def main():
     # --------------------------------------------------------
 
     canvas = tk.Canvas(root, borderwidth=0, highlightthickness=0)
-    scroll = tk.Scrollbar(
-        root, orient="vertical", command=canvas.yview
-    )
+    scroll = tk.Scrollbar(root, orient="vertical", command=canvas.yview)
     canvas.configure(yscrollcommand=scroll.set)
     scroll.pack(side="right", fill="y")
     canvas.pack(side="left", fill="both", expand=True)
@@ -166,17 +242,13 @@ def main():
 
     def ajustar(event=None):
         canvas.configure(scrollregion=canvas.bbox("all"))
-        canvas.itemconfig(
-            ventana_canvas, width=canvas.winfo_width()
-        )
+        canvas.itemconfig(ventana_canvas, width=canvas.winfo_width())
 
     contenedor.bind("<Configure>", ajustar)
     canvas.bind("<Configure>", ajustar)
     canvas.bind_all(
         "<MouseWheel>",
-        lambda e: canvas.yview_scroll(
-            int(-e.delta / 120), "units"
-        ),
+        lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"),
     )
 
     # --------------------------------------------------------
@@ -184,17 +256,14 @@ def main():
     # --------------------------------------------------------
 
     frame_carpeta = tk.LabelFrame(
-        contenedor,
-        text="Carpeta base del caso",
-        padx=10,
-        pady=8,
+        contenedor, text="Carpeta base del caso", padx=10, pady=8
     )
     frame_carpeta.pack(fill="x", padx=20, pady=(14, 6))
 
     lbl_base = tk.Label(
         frame_carpeta,
         textvariable=var_base,
-        wraplength=820,
+        wraplength=940,
         justify="center",
         cursor="hand2",
         font=("Segoe UI", 9),
@@ -204,9 +273,7 @@ def main():
     lbl_base.bind(
         "<Button-1>",
         lambda e: (
-            abrir_en_explorador(var_base.get())
-            if var_base.get()
-            else None
+            abrir_en_explorador(var_base.get()) if var_base.get() else None
         ),
     )
 
@@ -215,10 +282,7 @@ def main():
     # --------------------------------------------------------
 
     frame_periodo = tk.LabelFrame(
-        contenedor,
-        text="Periodo del caso (AAMM)",
-        padx=10,
-        pady=8,
+        contenedor, text="Periodo del caso (AAMM)", padx=10, pady=8
     )
     frame_periodo.pack(fill="x", padx=20, pady=6)
 
@@ -242,56 +306,56 @@ def main():
         frame_periodo,
         text=(
             "4 digitos: año+mes simplificado. Ej. 2607 para julio "
-            "de 2026. Se usa para ubicar el SoC del periodo."
+            "de 2026. Solo hace falta para (re)generar Medidores + "
+            "Ofertas SSCC."
         ),
         fg=COLOR_NEUTRO,
         font=("Segoe UI", 8),
-        wraplength=700,
+        wraplength=780,
         justify="left",
     ).pack(side="left", padx=(10, 0))
 
     # --------------------------------------------------------
-    # PANEL DE VALIDACION
+    # DIAGRAMA DE LA ESTRUCTURA DEL CASO
     # --------------------------------------------------------
 
-    frame_check = tk.LabelFrame(
-        contenedor,
-        text="Entradas detectadas",
-        padx=10,
-        pady=8,
+    frame_arbol = tk.LabelFrame(
+        contenedor, text="Estructura del caso", padx=8, pady=8
     )
-    frame_check.pack(fill="x", padx=20, pady=6)
+    frame_arbol.pack(fill="both", expand=True, padx=20, pady=6)
 
-    filas_check = tk.Frame(frame_check)
-    filas_check.pack(fill="x")
+    enc_arbol = tk.Frame(frame_arbol)
+    enc_arbol.pack(fill="x")
+    tk.Label(
+        enc_arbol, text="Estructura", font=("Segoe UI", 8, "bold"),
+        width=52, anchor="w",
+    ).pack(side="left")
+    tk.Label(
+        enc_arbol, text="Estado", font=("Segoe UI", 8, "bold"),
+        width=11, anchor="w",
+    ).pack(side="left")
+    tk.Label(
+        enc_arbol, text="Detalle", font=("Segoe UI", 8, "bold"),
+        anchor="w",
+    ).pack(side="left")
 
-    def pintar_checklist(filas):
+    filas_arbol = tk.Frame(frame_arbol)
+    filas_arbol.pack(fill="x")
 
-        for hijo in filas_check.winfo_children():
-            hijo.destroy()
+    def _fila_arbol(parent, prefijo, texto, estado=None, detalle="",
+                     negrita=False, boton=None):
+        fila = tk.Frame(parent)
+        fila.pack(fill="x", pady=1)
 
-        if not filas:
-            tk.Label(
-                filas_check,
-                text="Selecciona una carpeta base.",
-                fg=COLOR_NEUTRO,
-                anchor="w",
-            ).pack(fill="x")
-            return
+        tk.Label(
+            fila,
+            text=prefijo + texto,
+            font=("Consolas", 9, "bold" if negrita else "normal"),
+            width=52,
+            anchor="w",
+        ).pack(side="left")
 
-        for etiqueta, estado, detalle in filas:
-
-            fila = tk.Frame(filas_check)
-            fila.pack(fill="x", pady=1)
-
-            tk.Label(
-                fila,
-                text=etiqueta,
-                width=28,
-                anchor="w",
-                font=("Segoe UI", 9),
-            ).pack(side="left")
-
+        if estado is not None:
             tk.Label(
                 fila,
                 text=SIMBOLO.get(estado, estado),
@@ -300,16 +364,72 @@ def main():
                 fg=COLOR_ESTADO.get(estado, COLOR_NEUTRO),
                 font=("Segoe UI", 9, "bold"),
             ).pack(side="left")
+        else:
+            tk.Label(fila, text="", width=11).pack(side="left")
 
+        tk.Label(
+            fila,
+            text=detalle,
+            anchor="w",
+            fg=COLOR_NEUTRO,
+            font=("Segoe UI", 8),
+            wraplength=420,
+            justify="left",
+        ).pack(side="left", fill="x", expand=True)
+
+        if boton is not None:
+            texto_boton, comando = boton
+            tk.Button(
+                fila, text=texto_boton, font=("Segoe UI", 8, "bold"),
+                bg="#fdf0d5", command=comando,
+            ).pack(side="right", padx=6)
+
+        return fila
+
+    def pintar_arbol(filas):
+
+        for hijo in filas_arbol.winfo_children():
+            hijo.destroy()
+
+        if not filas:
             tk.Label(
-                fila,
-                text=detalle,
-                anchor="w",
+                filas_arbol,
+                text="Selecciona una carpeta base.",
                 fg=COLOR_NEUTRO,
-                font=("Segoe UI", 8),
-                wraplength=520,
-                justify="left",
-            ).pack(side="left", fill="x", expand=True)
+                anchor="w",
+            ).pack(fill="x")
+            return
+
+        profundidades = [_profundidad_fila(etiqueta) for etiqueta, _, _ in filas]
+        prefijos = _prefijos_arbol(profundidades)
+
+        for (etiqueta, estado, detalle), profundidad, prefijo in zip(
+            filas, profundidades, prefijos
+        ):
+            _fila_arbol(
+                filas_arbol,
+                prefijo,
+                etiqueta,
+                estado=estado,
+                detalle=detalle,
+                negrita=(profundidad == 0),
+            )
+
+        # Las dos salidas van al final del mismo diagrama, como filas
+        # de primer nivel (mismo criterio visual que Medidas/,
+        # Auxiliares/, etc.), cada una con su boton "Generar".
+        _fila_arbol(
+            filas_arbol, "", nucleo.ARCHIVO_SALIDA,
+            detalle="se genera/actualiza con el boton Generar ->",
+            negrita=True,
+            boton=("Generar...", abrir_ventana_generar_consolidado),
+        )
+        _fila_arbol(
+            filas_arbol, "", nucleo.ARCHIVO_SALIDA_PAGOS,
+            detalle="se genera/actualiza con el boton Generar ->",
+            negrita=True,
+            boton=("Generar...", abrir_ventana_generar_pagos),
+        )
 
     # --------------------------------------------------------
     # PROGRESO Y LOG
@@ -319,35 +439,23 @@ def main():
     frame_estado.pack(fill="x", padx=20, pady=(10, 2))
 
     tk.Label(
-        frame_estado,
-        textvariable=var_estado,
-        anchor="w",
+        frame_estado, textvariable=var_estado, anchor="w",
         font=("Segoe UI", 9),
     ).pack(side="left")
 
     tk.Label(
-        frame_estado,
-        textvariable=var_tiempo,
-        font=("Consolas", 10, "bold"),
-        fg="#2d7a2d",
+        frame_estado, textvariable=var_tiempo,
+        font=("Consolas", 10, "bold"), fg="#2d7a2d",
     ).pack(side="right")
 
-    barra = ttk.Progressbar(
-        contenedor, mode="determinate", maximum=100
-    )
+    barra = ttk.Progressbar(contenedor, mode="determinate", maximum=100)
     barra.pack(fill="x", padx=20, pady=(0, 8))
 
-    frame_log = tk.LabelFrame(
-        contenedor, text="Registro", padx=6, pady=6
-    )
+    frame_log = tk.LabelFrame(contenedor, text="Registro", padx=6, pady=6)
     frame_log.pack(fill="both", expand=True, padx=20, pady=6)
 
-    txt_log = tk.Text(
-        frame_log, height=16, font=("Consolas", 9), wrap="word"
-    )
-    scroll_log = tk.Scrollbar(
-        frame_log, command=txt_log.yview
-    )
+    txt_log = tk.Text(frame_log, height=14, font=("Consolas", 9), wrap="word")
+    scroll_log = tk.Scrollbar(frame_log, command=txt_log.yview)
     txt_log.configure(yscrollcommand=scroll_log.set)
     scroll_log.pack(side="right", fill="y")
     txt_log.pack(side="left", fill="both", expand=True)
@@ -365,16 +473,12 @@ def main():
 
     def tick():
         if timer["corriendo"]:
-            var_tiempo.set(
-                formato_tiempo(time.time() - timer["inicio"])
-            )
+            var_tiempo.set(formato_tiempo(time.time() - timer["inicio"]))
             root.after(500, tick)
 
     # --------------------------------------------------------
     # REVISION DE LA CARPETA
     # --------------------------------------------------------
-
-    estado_listo = {"ok": False}
 
     def revisar(*_):
 
@@ -382,42 +486,35 @@ def main():
 
         if not ruta or not Path(ruta).is_dir():
             lbl_base.config(fg=COLOR_FALTA)
-            pintar_checklist([])
-            estado_listo["ok"] = False
-            btn_ejecutar.config(state="disabled")
+            pintar_arbol([])
+            estado_listo["consolidado"] = False
+            btn_abrir_salida.config(state="disabled")
             return
 
-        lbl_base.config(fg="#1a4fb0")
+        lbl_base.config(fg=COLOR_BASE_OK)
 
         try:
-            _, filas = nucleo.revisar_estructura(
-                ruta, var_aamm.get().strip()
-            )
+            _, filas = nucleo.revisar_estructura(ruta, var_aamm.get().strip())
         except Exception as error:
-            pintar_checklist(
-                [("Error al revisar", "falta", str(error))]
-            )
-            estado_listo["ok"] = False
-            btn_ejecutar.config(state="disabled")
+            pintar_arbol([("Error al revisar", "falta", str(error))])
+            estado_listo["consolidado"] = False
+            btn_abrir_salida.config(state="disabled")
             return
 
-        pintar_checklist(filas)
+        pintar_arbol(filas)
 
-        # Solo bloquea lo que falta; lo pendiente no impide correr
         faltan = [f for f in filas if f[1] == "falta"]
 
-        estado_listo["ok"] = not faltan
-
-        btn_ejecutar.config(
-            state="normal" if not faltan else "disabled"
-        )
-
         if faltan:
-            var_estado.set(
-                f"Faltan {len(faltan)} entradas requeridas."
-            )
+            var_estado.set(f"Faltan {len(faltan)} entradas requeridas.")
         else:
-            var_estado.set("Entradas completas. Puedes ejecutar.")
+            var_estado.set("Entradas completas.")
+
+        rutas = nucleo.resolver_rutas(ruta)
+        estado_listo["consolidado"] = rutas["salida"].is_file()
+        btn_abrir_salida.config(
+            state="normal" if rutas["salida"].is_file() else "disabled"
+        )
 
     def seleccionar():
         inicial = var_base.get()
@@ -445,20 +542,20 @@ def main():
     entry_aamm.bind("<Return>", aamm_cambiado)
 
     # --------------------------------------------------------
-    # EJECUCION
+    # LANZADOR GENERICO DE GENERACION (hilo aparte, log/progreso
+    # compartidos con la ventana principal)
     # --------------------------------------------------------
 
-    def ejecutar():
+    def lanzar_generacion(funcion, kwargs, ventana, boton_actualizar,
+                           etiqueta_salida):
+        """
+        Corre funcion(**kwargs, registrar=..., progreso=...) en un
+        hilo aparte. registrar/progreso escriben en el log y la
+        barra de progreso de la ventana PRINCIPAL (via root.after,
+        para no tocar tkinter desde el hilo).
+        """
 
-        if not estado_listo["ok"]:
-            messagebox.showwarning(
-                "Entradas incompletas",
-                "Faltan entradas requeridas. Revisa el panel.",
-            )
-            return
-
-        btn_ejecutar.config(state="disabled", bg="#aaaaaa")
-        btn_examinar_salida.config(state="disabled")
+        boton_actualizar.config(state="disabled")
         barra["value"] = 0
         txt_log.delete("1.0", "end")
 
@@ -466,23 +563,18 @@ def main():
         timer["inicio"] = time.time()
         tick()
 
-        resultado = {"ok": False, "salida": None}
+        resultado = {"ok": False}
 
         def trabajo():
             try:
                 var_estado.set("Procesando...")
-
-                nucleo.ejecutar(
-                    var_base.get(),
-                    var_aamm.get().strip(),
+                funcion(
+                    **kwargs,
                     registrar=lambda m: root.after(0, log, m),
                     progreso=lambda v: root.after(
                         0, barra.configure, {"value": v}
                     ),
                 )
-
-                rutas = nucleo.resolver_rutas(var_base.get())
-                resultado["salida"] = rutas["salida"]
                 resultado["ok"] = True
 
             except nucleo.ErrorEntrada as error:
@@ -491,8 +583,7 @@ def main():
 
             except Exception as error:
                 root.after(
-                    0,
-                    log,
+                    0, log,
                     f"\nERROR INESPERADO:\n{error}\n\n"
                     f"{traceback.format_exc()}",
                 )
@@ -503,47 +594,179 @@ def main():
 
         def terminar(res):
             timer["corriendo"] = False
-            btn_ejecutar.config(state="normal", bg="#2d7a2d")
+            boton_actualizar.config(state="normal")
+            revisar()
 
             if res["ok"]:
                 var_estado.set("Terminado correctamente.")
                 barra["value"] = 100
-                btn_examinar_salida.config(state="normal")
                 messagebox.showinfo(
-                    "Listo",
-                    f"Se genero:\n{res['salida']}",
+                    "Listo", f"Se genero/actualizo:\n{etiqueta_salida}"
                 )
+                if ventana is not None and ventana.winfo_exists():
+                    ventana.destroy()
             else:
                 var_estado.set("Termino con errores.")
                 messagebox.showerror(
-                    "Error",
-                    res.get("error", "Revisa el registro."),
+                    "Error", res.get("error", "Revisa el registro.")
                 )
 
         threading.Thread(target=trabajo, daemon=True).start()
+
+    # --------------------------------------------------------
+    # VENTANA "GENERAR" — Consolidado_entradas.xlsx
+    # --------------------------------------------------------
+
+    def abrir_ventana_generar_consolidado():
+
+        if "consolidado" in ventanas_generar and ventanas_generar["consolidado"].winfo_exists():
+            ventanas_generar["consolidado"].lift()
+            return
+
+        top = tk.Toplevel(root)
+        ventanas_generar["consolidado"] = top
+        top.title(f"Generar {nucleo.ARCHIVO_SALIDA}")
+        top.geometry("620x420")
+
+        tk.Label(
+            top,
+            text=(
+                "Elegi que entradas recalcular esta vez. Lo que dejes "
+                "destildado se conserva tal cual esta hoy en "
+                f"{nucleo.ARCHIVO_SALIDA} (si ya existe)."
+            ),
+            wraplength=580, justify="left", anchor="w",
+            font=("Segoe UI", 9),
+        ).pack(fill="x", padx=14, pady=(14, 8))
+
+        variables = {}
+
+        for id_seccion, etiqueta, descripcion, _ in nucleo.SECCIONES_CONSOLIDADO:
+            var = tk.BooleanVar(value=True)
+            variables[id_seccion] = var
+
+            fila = tk.LabelFrame(top, text=etiqueta, padx=8, pady=4)
+            fila.pack(fill="x", padx=14, pady=4)
+
+            tk.Checkbutton(
+                fila, text="Recalcular esta vez", variable=var,
+                font=("Segoe UI", 9, "bold"),
+            ).pack(anchor="w")
+
+            tk.Label(
+                fila, text=descripcion, fg=COLOR_NEUTRO,
+                font=("Segoe UI", 8), wraplength=560, justify="left",
+                anchor="w",
+            ).pack(anchor="w")
+
+        pie = tk.Frame(top)
+        pie.pack(fill="x", side="bottom", pady=10)
+
+        def actualizar():
+            activas = {
+                id_seccion for id_seccion, var in variables.items()
+                if var.get()
+            }
+            if not activas:
+                messagebox.showwarning(
+                    "Nada tildado",
+                    "Tilda al menos una entrada para generar/actualizar.",
+                )
+                return
+
+            top.attributes("-topmost", False)
+            lanzar_generacion(
+                nucleo.generar_consolidado,
+                dict(
+                    carpeta_base=var_base.get(),
+                    aamm=var_aamm.get().strip(),
+                    secciones_activas=activas,
+                ),
+                top,
+                btn_actualizar,
+                nucleo.ARCHIVO_SALIDA,
+            )
+
+        btn_actualizar = tk.Button(
+            pie, text="Actualizar", bg="#2d7a2d", fg="white",
+            font=("Segoe UI", 10, "bold"), command=actualizar,
+        )
+        btn_actualizar.pack(side="left", padx=14)
+
+        tk.Button(
+            pie, text="Cancelar", command=top.destroy
+        ).pack(side="left", padx=6)
+
+    # --------------------------------------------------------
+    # VENTANA "GENERAR" — Pagos_BESS.xlsx
+    # --------------------------------------------------------
+
+    def abrir_ventana_generar_pagos():
+
+        if "pagos" in ventanas_generar and ventanas_generar["pagos"].winfo_exists():
+            ventanas_generar["pagos"].lift()
+            return
+
+        top = tk.Toplevel(root)
+        ventanas_generar["pagos"] = top
+        top.title(f"Generar {nucleo.ARCHIVO_SALIDA_PAGOS}")
+        top.geometry("560x260")
+
+        tk.Label(
+            top,
+            text=(
+                f"Genera/actualiza {nucleo.ARCHIVO_SALIDA_PAGOS} "
+                f"(hoja '{nucleo.HOJA_CALCULO_ECOSTOS}', etapa base: "
+                f"H + CMg + traspaso de Medidores).\n\n"
+                f"Usa la hoja 'Medidores' ya generada en "
+                f"{nucleo.ARCHIVO_SALIDA} (no la recalcula: primero "
+                f"hay que generar esa con su propio boton), mas "
+                f"Centrales.xlsx y cmg.xlsx frescos.\n\n"
+                f"Por ahora es todo o nada (una sola hoja de salida); "
+                f"mas adelante se agregan casillas por parte, como en "
+                f"{nucleo.ARCHIVO_SALIDA}."
+            ),
+            wraplength=520, justify="left", anchor="w",
+            font=("Segoe UI", 9),
+        ).pack(fill="both", expand=True, padx=14, pady=14)
+
+        pie = tk.Frame(top)
+        pie.pack(fill="x", side="bottom", pady=10)
+
+        def actualizar():
+            lanzar_generacion(
+                nucleo.generar_pagos_bess,
+                dict(carpeta_base=var_base.get()),
+                top,
+                btn_actualizar,
+                nucleo.ARCHIVO_SALIDA_PAGOS,
+            )
+
+        btn_actualizar = tk.Button(
+            pie, text="Actualizar", bg="#2d7a2d", fg="white",
+            font=("Segoe UI", 10, "bold"), command=actualizar,
+        )
+        btn_actualizar.pack(side="left", padx=14)
+
+        tk.Button(
+            pie, text="Cancelar", command=top.destroy
+        ).pack(side="left", padx=6)
+
+    # --------------------------------------------------------
+    # BOTONES FIJOS ABAJO
+    # --------------------------------------------------------
 
     def abrir_salida():
         rutas = nucleo.resolver_rutas(var_base.get())
         abrir_en_explorador(rutas["salida"], es_archivo=True)
 
-    btn_ejecutar = tk.Button(
-        frame_botones,
-        text="Ejecutar",
-        bg="#2d7a2d",
-        fg="white",
-        font=("Segoe UI", 10, "bold"),
-        state="disabled",
-        command=ejecutar,
-    )
-    btn_ejecutar.pack(side="left", padx=10, expand=True)
-
-    btn_examinar_salida = tk.Button(
+    btn_abrir_salida = tk.Button(
         frame_botones,
         text="Abrir carpeta de salida",
         state="disabled",
         command=abrir_salida,
     )
-    btn_examinar_salida.pack(side="left", padx=10, expand=True)
+    btn_abrir_salida.pack(side="left", padx=10, expand=True)
 
     tk.Button(
         frame_botones, text="Salir", command=root.destroy
@@ -553,8 +776,12 @@ def main():
     # ARRANQUE
     # --------------------------------------------------------
 
-    pintar_checklist([])
-    log("Selecciona la carpeta base del caso e ingresa el periodo (AAMM).")
+    pintar_arbol([])
+    log(
+        "Selecciona la carpeta base del caso e ingresa el periodo "
+        "(AAMM). Los botones 'Generar' de Consolidado_entradas.xlsx "
+        "y Pagos_BESS.xlsx aparecen al final del diagrama de abajo."
+    )
 
     if var_aamm.get():
         log(f"Periodo recordado: {var_aamm.get()}")
