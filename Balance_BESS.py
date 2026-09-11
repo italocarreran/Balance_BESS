@@ -18,8 +18,9 @@ unico-:
             Centrales.xlsx
                 hoja 'Resumen BESS'
                 hoja 'Diccionario'
-                hoja 'Medidas API'
             <algo>Homologacion<algo>.xlsx
+                hoja 'homol'
+                hoja 'Gen real'
         Ofertas/
             <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Cmg/

@@ -58,8 +58,11 @@ estado, no un historial.
   real: confirmar la forma de la respuesta y que el `intervalo` de las dos
   APIs sea el inicio del cuarto de hora en las dos (de eso depende el cruce
   contra el calendario compartido).
-- Confirmar si la columna `Factor` de la hoja `Medidas API` hace falta o si
-  todas las centrales van con 1 (el script original no aplicaba signo).
+- Confirmar si la columna `Canal` de la hoja `Gen real` tiene que significar
+  algo: la API de operación real no expone canales, así que hoy se acepta
+  (para que la hoja tenga la misma forma que `homol`) pero se ignora.
+- Confirmar si la columna `Flujo` de la hoja `Gen real` hace falta o si todas
+  las centrales van con 1 (el script original no aplicaba signo).
 - Abrir la ventana en Windows y confirmar el ancho de la columna "Acción"
   (`ANCHO_ACCION`, hoy 150 px) contra los botones más largos ("Traer
   cmg_15min", "Actualizar todo") y el alto de fila (`ALTO_ACCION`, 26 px).
@@ -1996,3 +1999,42 @@ el contenedor) y la ventana (no hay `tkinter`). Ver pendientes.
 - Confirmar con el usuario si `Factor` hace falta o si todas las centrales de la hoja van con 1.
   El script original no aplicaba ningún signo; lo agregué porque, sin él, un retiro no tiene cómo
   expresarse — pero con el archivo real puede resultar que la API ya entregue el signo.
+
+---
+
+## 2026-09-11 (25) — La homologación de Gen real se muda al archivo de homologación
+
+El usuario entregó el `Homologacion ClavesTF y PRMTE.xlsx` real y cambió de opinión sobre dónde va
+la lista de centrales de operación real: **no** en `Centrales.xlsx` (como se había hecho en la
+sesión 24) sino en el **mismo archivo de homologación**, en una hoja `Gen real`, "con la misma info
+que ahí: clave, Punto de Medida, Canal, Flujo". Tiene sentido: es homologación igual que `homol`, y
+así se mantiene con el mismo archivo en vez de repartida en dos.
+
+**El archivo real** (útil para futuras sesiones): una sola hoja `homol`, 74 filas, columnas
+`clave | Punto de Medida | Canal | Flujo`. `Punto de Medida` es el `idPuntoMedida`
+(`DNHUMBER_033_FB1_EGP`), `Canal` es el `slugCanal` (`kWhD` / `kWhR`) y `Flujo` es ±1. 7 claves,
+37 puntos de medida. Los lectores se probaron contra él antes de tocar nada.
+
+**Lo que se movió:** `nucleo.leer_medidas_api()` y la constante `HOJA_MEDIDAS_API` desaparecen;
+ahora es `Homologacion.leer_gen_real()` + `HOJA_GEN_REAL`. `generar_medidas_sae()` ya **no necesita
+`Centrales.xlsx` para nada** (era su única dependencia con ese archivo). En el diagrama, el archivo
+de homologación se desglosa por hojas igual que `Centrales.xlsx`: `homol` (obligatoria) y
+`Gen real` (opcional, se ve PENDIENTE si no está).
+
+**La decisión que tuve que tomar solo, porque el usuario está fuera:** de las cuatro columnas, tres
+se leen solas (`clave` es la clave del balance; `Flujo` es el ±1 que en la sesión 24 se llamaba
+`Factor`; `Punto de Medida` tiene que ser el `topologyName` de la API de operación real, que es lo
+único que identifica a una central en esa API). La que no tiene lectura obvia es **`Canal`**: la
+API de operación real no expone canales. Se acepta la columna (para que la hoja tenga la misma
+forma que `homol`, que es lo que se pidió) pero **no se usa** para nada. Queda anotado como
+pendiente por si tenía que significar algo.
+
+**Verificación:** el test sintético de punta a punta de la sesión 24, con el `Gen real` ahora en el
+archivo de homologación y con las columnas en el orden real (`clave` primero): mismos resultados
+exactos que antes (`SAE-UNO` −192, `SAE-ANDES-III` 0 por inyección+retiro, `PFV-ANDES-IV` 196 con
+el desempate), o sea que mover la hoja no cambió ningún comportamiento. Más: `leer_homologacion()`
+y `leer_gen_real()` contra el archivo real subido (74 filas / hoja ausente → lista vacía), el árbol
+renderizado con ese archivo en `Auxiliares/`, y la regresión de CMg. `py_compile` de todo.
+
+**Pendiente nuevo:** confirmar si la columna `Canal` de la hoja `Gen real` tiene que significar
+algo. Hoy se ignora.

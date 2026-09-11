@@ -17,8 +17,8 @@ cambios de fondo pedidos por el usuario:
 
   - el Excel de homologacion vive en Auxiliares/, al lado de
     Centrales.xlsx, en vez de al lado del .py;
-  - la lista de centrales del paso 3 sale de la hoja "Medidas API" de
-    Centrales.xlsx en vez de estar escrita en el codigo.
+  - la lista de centrales del paso 3 sale de la hoja "Gen real" de ese
+    mismo Excel de homologacion, en vez de estar escrita en el codigo.
 
 Ninguno de estos modulos importa `nucleo` (misma regla que Cmg/):
 reciben rutas y datos, y levantan ErrorMedidas, que nucleo traduce a

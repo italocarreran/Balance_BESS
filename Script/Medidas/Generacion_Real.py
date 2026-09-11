@@ -8,13 +8,12 @@ Viene de "3_Generacion_Real.py". Tres cambios de fondo, pedidos por el
 usuario:
 
   - la lista de centrales ya no esta escrita en el codigo
-    (FILTROS_TOPOLOGY): sale de la hoja "Medidas API" de
-    Centrales.xlsx, que ademas dice con que `clave` tiene que aparecer
-    cada una en Medidas_SAE.xlsx;
-  - ya no es un REEMPLAZO. Estas centrales se sacan del archivo de
-    homologacion, asi que no llegan por el otro camino: lo que hace
-    este modulo es AGREGAR las filas de la lista a la tabla del
-    balance;
+    (FILTROS_TOPOLOGY): sale de la hoja "Gen real" del Excel de
+    homologacion, que ademas dice con que `clave` tiene que aparecer
+    cada una en Medidas_SAE.xlsx (ver Homologacion.HOJA_GEN_REAL);
+  - ya no es un REEMPLAZO. Estas centrales se sacan de la hoja
+    'homol', asi que no llegan por el otro camino: lo que hace este
+    modulo es AGREGAR las filas de la lista a la tabla del balance;
   - no escribe Excel: devuelve DataFrames.
 
 Tambien se dejo de generar el 'log_inconsistencias_medidas.xlsx' del
@@ -163,8 +162,9 @@ def filtrar_y_desempatar(df, centrales, registrar=print):
     idMeasure mayor (criterio definitivo del script original; ante el
     mismo idMeasure, prefiere una medida distinta de cero).
 
-    centrales: filas de la hoja "Medidas API" -- dicts con
-    'topologyName', 'clave' y 'factor'.
+    centrales: filas de la hoja "Gen real" -- dicts con
+    'topologyName', 'clave' y 'factor' (ver
+    Homologacion.leer_gen_real).
     """
 
     if not centrales:
@@ -189,9 +189,9 @@ def filtrar_y_desempatar(df, centrales, registrar=print):
 
     if df.empty:
         raise ErrorMedidas(
-            "Ninguna de las centrales de la hoja 'Medidas API' de "
-            "Centrales.xlsx aparece en la API de operacion real. El "
-            "nombre tiene que ser el 'topologyName' exacto (por "
+            "Ninguna de las centrales de la hoja 'Gen real' aparece "
+            "en la API de operacion real. La columna 'Punto de Medida' "
+            "de esa hoja tiene que traer el 'topologyName' exacto (por "
             "ejemplo 'SAE PFV Andes Solar III (Inyección)')."
         )
 
@@ -232,7 +232,7 @@ def expandir_a_cuartos(df_horario, centrales, registrar=print):
     """
     Cada fila horaria se abre en 4 cuartos de hora con la energia
     repartida en partes iguales, y se le pega la `clave` (y el factor
-    de signo) que le corresponde segun la hoja "Medidas API".
+    de signo) que le corresponde segun la hoja "Gen real".
 
     Devuelve un DataFrame con `intervalo` (hora local, inicio del
     cuarto), `clave` y `Gen_Unidad`.
@@ -316,7 +316,7 @@ def pegar_calendario(df_cuartos, calendario, registrar=print):
         registrar(
             f"  AVISO: {repetidos} cuarto(s) de hora con hora local "
             f"repetida (cambio de hora). Para las centrales de la hoja "
-            f"'Medidas API' se toma la primera ocurrencia: la API de "
+            f"'Gen real' se toma la primera ocurrencia: la API de "
             f"operacion real no entrega hora UTC para distinguirlas."
         )
 

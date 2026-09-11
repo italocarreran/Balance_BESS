@@ -54,7 +54,7 @@ Script/
         Homologacion.py        <- punto de medida + canal -> clave
         Descarga_PRMTE.py      <- API de medidas, por punto de medida
         Claves_Balance.py      <- calendario de cuartos + agrupación por clave
-        Generacion_Real.py     <- API de operación real (hoja "Medidas API")
+        Generacion_Real.py     <- API de operación real (hoja "Gen real")
 ```
 
 La idea es ir sacando de `nucleo.py` un módulo por etapa, como ya se hizo
@@ -70,9 +70,9 @@ con `Cmg/`; por ahora el resto sigue en un solo archivo.
 │   └── <algún archivo .xlsx cuyo nombre contenga "SOC" y el AAMM,
 │        ej. SOC_2607.xlsx, "resumen soc julio 2607.xlsx">
 ├── Auxiliares/
-│   ├── Centrales.xlsx       (hojas "Resumen BESS", "Diccionario" y
-│   │                         "Medidas API")
+│   ├── Centrales.xlsx       (hojas "Resumen BESS" y "Diccionario")
 │   └── <algún archivo Excel cuyo nombre contenga "Homologacion">
+│                            (hojas "homol" y "Gen real")
 ├── Ofertas/
 │   └── <algún archivo Excel cuyo nombre contenga "OfertasSSCC">
 ├── Cmg/
@@ -109,27 +109,29 @@ Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
      (`medidas.api.coordinador.cl`), por lotes y **reanudable**: si se corta,
      la corrida siguiente retoma donde quedó;
   3. arma el calendario de cuartos de hora del mes y agrupa por `clave`;
-  4. **agrega** las centrales listadas en la hoja `Medidas API` de
-     `Centrales.xlsx`, cuya medida viene de la API de operación real
-     (`operacion.api.coordinador.cl`) y no del archivo de homologación.
+  4. **agrega** las centrales listadas en la hoja `Gen real` del **mismo**
+     Excel de homologación, cuya medida viene de la API de operación real
+     (`operacion.api.coordinador.cl`) y no de la API por punto de medida.
 
   Es el proceso más lento del programa (miles de llamadas a la API). Los
   archivos intermedios van a `Medidas/_trabajo/` y no aparecen en la ventana.
 
-  La hoja **`Medidas API`** tiene tres columnas (el encabezado puede llevar
-  un título arriba, como `Resumen BESS`):
+  La hoja **`Gen real`** tiene las **mismas cuatro columnas que `homol`**,
+  con una lectura propia de cada una:
 
-  | topologyName | clave | Factor |
-  |---|---|---|
-  | `SAE PFV Andes Solar III (Inyección)` | `SAE-ANDES-III` | `1` |
-  | `SAE PFV Andes Solar III (Retiro de central)` | `SAE-ANDES-III` | `-1` |
+  | clave | Punto de Medida | Canal | Flujo |
+  |---|---|---|---|
+  | `SAE-ANDES-III` | `SAE PFV Andes Solar III (Inyección)` | | `1` |
+  | `SAE-ANDES-III` | `SAE PFV Andes Solar III (Retiro de central)` | | `-1` |
 
-  - `topologyName`: el nombre **exacto** con el que la central aparece en la
-    API de operación real.
-  - `clave`: con qué nombre tiene que aparecer en `Medidas_SAE.xlsx` (la
-    clave del balance). Dos filas pueden apuntar a la misma clave: se suman.
-  - `Factor`: **opcional**, `1` por defecto. Es el equivalente de la columna
-    `Flujo` del archivo de homologación — `-1` para los retiros.
+  - `clave`: con qué nombre tiene que aparecer en `Medidas_SAE.xlsx`, igual
+    que en `homol`. Dos filas pueden apuntar a la misma clave: se suman.
+  - `Punto de Medida`: acá va el **`topologyName` exacto** de la API de
+    operación real — es lo que identifica a la central en esa API, que no
+    tiene el concepto de punto de medida.
+  - `Canal`: **no se usa** (esa API no expone canales). Se acepta para que
+    la hoja tenga la misma forma que `homol`.
+  - `Flujo`: `1` / `-1`, igual que en `homol`. Si se deja vacío vale `1`.
 
   La hoja entera es opcional: si no existe, no se agrega ninguna central por
   ese camino y el resto del proceso corre igual.

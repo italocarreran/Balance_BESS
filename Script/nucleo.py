@@ -67,13 +67,6 @@ ARCHIVO_CENTRALES = "Centrales.xlsx"
 HOJA_RESUMEN_BESS = "Resumen BESS"
 HOJA_DICCIONARIO = "Diccionario"
 
-# Hoja nueva: las centrales cuya medida NO sale del archivo de
-# homologacion por punto de medida sino de la API de operacion real,
-# con el nombre de topologia exacto que usa esa API y la clave con la
-# que tienen que aparecer en Medidas_SAE.xlsx. Reemplaza a la lista
-# FILTROS_TOPOLOGY que vivia dentro del script "3_Generacion_Real.py".
-HOJA_MEDIDAS_API = "Medidas API"
-
 # Nombre literal y fijo (a diferencia de SoC/Ofertas/SSCC_Desempeño/
 # Subastas): asi lo exige Cargar_CMg_Desde_Archivo.
 ARCHIVO_CMG = "cmg.xlsx"
@@ -645,28 +638,6 @@ def revisar_estructura(carpeta_base, aamm=None):
                     normalizar(hoja) in hojas_norm,
                 )
 
-            # La hoja "Medidas API" es opcional: un caso donde ninguna
-            # central venga de la API de operacion real es valido.
-            filas.append(
-                _fila(
-                    f"centrales:{HOJA_MEDIDAS_API}",
-                    f"hoja '{HOJA_MEDIDAS_API}'",
-                    2,
-                    (
-                        "ok"
-                        if normalizar(HOJA_MEDIDAS_API) in hojas_norm
-                        else "pendiente"
-                    ),
-                    (
-                        "centrales que se agregan desde la API de "
-                        "operacion real"
-                        if normalizar(HOJA_MEDIDAS_API) in hojas_norm
-                        else "opcional: sin ella no se agrega ninguna "
-                             "central de operacion real"
-                    ),
-                )
-            )
-
     # Archivo de homologacion (punto de medida + canal -> clave), que
     # alimenta la descarga de Medidas_SAE.xlsx.
     archivo_homol = Homologacion.buscar_archivo_homologacion(
@@ -681,6 +652,39 @@ def revisar_estructura(carpeta_base, aamm=None):
                 f"en {CARPETA_AUXILIARES}/",
             )
         )
+
+        hojas_homol = hojas_de(archivo_homol)
+        hojas_homol_norm = (
+            {normalizar(h) for h in hojas_homol} if hojas_homol else set()
+        )
+
+        agregar(
+            f"homologacion:{Homologacion.HOJA_HOMOL}",
+            f"hoja '{Homologacion.HOJA_HOMOL}'", 2,
+            normalizar(Homologacion.HOJA_HOMOL) in hojas_homol_norm,
+            "punto de medida + canal -> clave",
+        )
+
+        # "Gen real" es opcional: un caso donde ninguna central venga
+        # de la API de operacion real es valido.
+        tiene_gen_real = (
+            normalizar(Homologacion.HOJA_GEN_REAL) in hojas_homol_norm
+        )
+        filas.append(
+            _fila(
+                f"homologacion:{Homologacion.HOJA_GEN_REAL}",
+                f"hoja '{Homologacion.HOJA_GEN_REAL}'", 2,
+                "ok" if tiene_gen_real else "pendiente",
+                (
+                    "centrales que se agregan desde la API de "
+                    "operacion real"
+                    if tiene_gen_real
+                    else "opcional: sin ella no se agrega ninguna "
+                         "central de operacion real"
+                ),
+            )
+        )
+
     else:
         filas.append(
             _fila(
@@ -2591,85 +2595,6 @@ def construir_mapa_barra(resumen_bess):
         mapa[normalizar(nombre)] = "" if pd.isna(barra) else str(barra).strip()
 
     return mapa
-
-
-def leer_medidas_api(ruta_centrales):
-    """
-    Lee la hoja "Medidas API" de Centrales.xlsx: las centrales que se
-    AGREGAN a Medidas_SAE.xlsx desde la API de operacion real, porque
-    no estan en el archivo de homologacion por punto de medida.
-
-    Devuelve una lista de dicts con:
-        topologyName -- nombre exacto de la topologia en la API
-        clave        -- con que nombre tiene que aparecer en
-                        Medidas_SAE.xlsx (la clave del balance)
-        factor       -- 1 por defecto; -1 para invertir el signo
-                        (es el equivalente de la columna 'Flujo' del
-                        archivo de homologacion)
-
-    La columna 'factor' es opcional: sin ella todo vale 1, que es
-    exactamente lo que hacia el script original.
-
-    Si la hoja no existe se devuelve lista vacia y el proceso sigue:
-    un caso sin centrales de este tipo es valido.
-    """
-
-    ruta_centrales = Path(ruta_centrales)
-
-    hoja = None
-    for nombre in pd.ExcelFile(ruta_centrales).sheet_names:
-        if normalizar(nombre) == normalizar(HOJA_MEDIDAS_API):
-            hoja = nombre
-            break
-
-    if hoja is None:
-        return []
-
-    df = _leer_hoja_con_encabezado(
-        ruta_centrales, hoja, [("topology",), ("clave",)]
-    )
-
-    columna_topology = columna_clave = columna_factor = None
-
-    for columna in df.columns:
-        clave = normalizar(columna)
-        if columna_topology is None and "topology" in clave:
-            columna_topology = columna
-        if columna_clave is None and "clave" in clave:
-            columna_clave = columna
-        if columna_factor is None and ("factor" in clave or "flujo" in clave):
-            columna_factor = columna
-
-    centrales = []
-
-    for _, fila in df.iterrows():
-
-        topology = fila[columna_topology]
-        clave = fila[columna_clave]
-
-        if pd.isna(topology) or pd.isna(clave):
-            continue
-
-        factor = 1.0
-        if columna_factor is not None and not pd.isna(fila[columna_factor]):
-            try:
-                factor = float(fila[columna_factor])
-            except (TypeError, ValueError):
-                raise ErrorEntrada(
-                    f"En la hoja '{hoja}' de {ARCHIVO_CENTRALES}, la "
-                    f"central '{topology}' tiene un factor no numerico "
-                    f"({fila[columna_factor]!r}). Usa 1 o -1."
-                )
-
-        centrales.append(
-            {
-                "topologyName": str(topology).strip(),
-                "clave": str(clave).strip(),
-                "factor": factor,
-            }
-        )
-
-    return centrales
 
 
 def construir_dic_resumen_factor(resumen_bess):
@@ -6749,8 +6674,8 @@ def barras_desde_resumen_bess(resumen_bess):
 # La logica vive en Script/Medidas/ (un modulo por cada uno de los
 # scripts sueltos que habia antes), incluida la clave de las dos APIs
 # (Script/Medidas/comun.py, USER_KEY). Aca queda lo que es del caso:
-# resolver rutas, sacar de Centrales.xlsx la lista de centrales de la
-# API de operacion real, pegar las dos fuentes y escribir el Excel.
+# resolver rutas, pegar las dos fuentes -las dos hojas del Excel de
+# homologacion- y escribir el Excel.
 #
 # Los intermedios (lotes descargados, marca de reanudacion) van a
 # <CARPETA_BASE>/Medidas/_trabajo/, que la ventana no muestra: no son
@@ -6799,8 +6724,8 @@ def generar_medidas_sae(
       2. descarga las medidas por punto de medida (API de medidas),
          reanudable por lotes;
       3. arma el calendario de cuartos de hora y agrupa por clave;
-      4. agrega las centrales de la hoja "Medidas API" de
-         Centrales.xlsx desde la API de operacion real.
+      4. agrega las centrales de la hoja "Gen real" del MISMO Excel
+         de homologacion, desde la API de operacion real.
 
     El paso 4 es opcional: si la hoja no existe o esta vacia, se
     escribe solo lo que viene del paso 3.
@@ -6823,12 +6748,6 @@ def generar_medidas_sae(
 
     if not rutas["base"].is_dir():
         raise ErrorEntrada(f"No se encontro la carpeta base {rutas['base']}")
-
-    if not rutas["centrales"].is_file():
-        raise ErrorEntrada(
-            f"No se encontro {rutas['centrales']} (de ahi sale la hoja "
-            f"'{HOJA_MEDIDAS_API}')."
-        )
 
     archivo_homol = Homologacion.buscar_archivo_homologacion(
         rutas["auxiliares_dir"]
@@ -6867,13 +6786,13 @@ def generar_medidas_sae(
         _resumir_diagnostico_medidas(diagnostico, registrar)
         avanzar(60)
 
-        centrales_api = leer_medidas_api(rutas["centrales"])
+        centrales_api = Homologacion.leer_gen_real(archivo_homol)
 
         if centrales_api:
 
             registrar(
-                f"Centrales de la hoja '{HOJA_MEDIDAS_API}': "
-                f"{len(centrales_api)}"
+                f"Centrales de la hoja "
+                f"'{Homologacion.HOJA_GEN_REAL}': {len(centrales_api)}"
             )
             for central in centrales_api:
                 registrar(
@@ -6904,9 +6823,9 @@ def generar_medidas_sae(
 
         else:
             registrar(
-                f"La hoja '{HOJA_MEDIDAS_API}' de {ARCHIVO_CENTRALES} no "
-                f"existe o esta vacia: no se agrega ninguna central "
-                f"desde la API de operacion real."
+                f"La hoja '{Homologacion.HOJA_GEN_REAL}' de "
+                f"{archivo_homol.name} no existe o esta vacia: no se "
+                f"agrega ninguna central desde la API de operacion real."
             )
 
     except ErrorMedidas as error:

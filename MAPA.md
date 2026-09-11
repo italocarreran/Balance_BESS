@@ -22,7 +22,7 @@ Script/
         Homologacion.py        <- el Excel de Auxiliares/ (punto+canal -> clave)
         Descarga_PRMTE.py      <- API de medidas, por punto de medida
         Claves_Balance.py      <- calendario de cuartos + agrupacion por clave
-        Generacion_Real.py     <- API de operacion real (hoja "Medidas API")
+        Generacion_Real.py     <- API de operacion real (hoja "Gen real")
 ```
 
 `Script/` es un paquete: la ventana hace `from Script import nucleo` y
@@ -108,10 +108,10 @@ importable como cualquier módulo.
 
   | Módulo | Script original | Qué hace |
   |---|---|---|
-  | `Homologacion.py` | `0_diccionario_prmte_a_claves_balance.py` | lee el Excel de homologación (`Punto de Medida` + `Canal` → `clave` + `Flujo`) |
+  | `Homologacion.py` | `0_diccionario_prmte_a_claves_balance.py` | lee las dos hojas del Excel de homologación: `homol` (`Punto de Medida` + `Canal` → `clave` + `Flujo`) y `Gen real` |
   | `Descarga_PRMTE.py` | `1_generacion_prmte.py` | baja las medidas de cada punto, por lotes, reanudable |
   | `Claves_Balance.py` | `2_generacion_claves_Balance.py` | calendario de cuartos de hora + agrupación por clave |
-  | `Generacion_Real.py` | `3_Generacion_Real.py` | agrega las centrales de la hoja `Medidas API` desde la API de operación real |
+  | `Generacion_Real.py` | `3_Generacion_Real.py` | agrega las centrales de la hoja `Gen real` desde la API de operación real |
 
 - **Qué cambió respecto de los scripts sueltos** (todo a pedido del usuario,
   salvo donde se diga):
@@ -120,10 +120,14 @@ importable como cualquier módulo.
     estar al lado del `.py`. El `homol.parquet` intermedio desapareció: se
     lee una vez y queda en memoria;
   - la lista `FILTROS_TOPOLOGY` que vivía dentro del paso 3 salió del código
-    y ahora es la hoja `Medidas API` de `Centrales.xlsx`. **Ya no es un
-    reemplazo**: esas centrales se sacaron del archivo de homologación, así
-    que no llegan por el otro camino — el paso 3 las **agrega**, con la
-    `clave` que diga esa hoja;
+    y ahora es la hoja **`Gen real`** del mismo Excel de homologación (primero
+    se hizo como hoja de `Centrales.xlsx`; el usuario la movió acá: es
+    homologación, igual que `homol`, y se mantiene con el mismo archivo).
+    **Ya no es un reemplazo**: esas centrales se sacaron de `homol`, así que
+    no llegan por el otro camino — el paso 3 las **agrega**, con la `clave`
+    que diga esa hoja. Mismas cuatro columnas que `homol`, con el
+    `topologyName` de la API en la columna `Punto de Medida` (esa API no
+    tiene puntos de medida) y `Canal` sin uso;
   - el `user_key` de las dos APIs sale de una sola constante
     (`comun.USER_KEY`). Sigue en el código, a pedido explícito del usuario,
     pero deja de estar repetido en dos archivos y con valores distintos;
@@ -318,8 +322,9 @@ importable como cualquier módulo.
     contenga "SOC" y el AAMM ingresado por el usuario (no hay un nombre de
     archivo fijo; debe existir exactamente uno)
   - `<CARPETA_BASE>/Auxiliares/<algo>Homologacion<algo>.xlsx` (hoja `homol`:
-    `Punto de Medida` + `Canal` → `clave` + `Flujo`), solo para generar
-    `Medidas_SAE.xlsx`
+    `Punto de Medida` + `Canal` → `clave` + `Flujo`; hoja `Gen real`,
+    opcional: las centrales que se miden por la API de operación real), solo
+    para generar `Medidas_SAE.xlsx`
   - `<CARPETA_BASE>/Auxiliares/Centrales.xlsx` (hojas `Resumen BESS` y
     `Diccionario`; `Diccionario` columnas E/F/G — índices 4/5/6 — se usan
     específicamente para homologar Ofertas SSCC; `Resumen BESS` columnas
@@ -429,11 +434,10 @@ importable como cualquier módulo.
   - `generar_medidas_sae(carpeta_base, aamm, registrar=print, progreso=None)`
     — genera/actualiza `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` corriendo
     los cuatro pasos seguidos (botón **Actualizar** de esa fila). El paso de
-    la API de operación real es opcional: sin la hoja `Medidas API` se
-    escribe solo lo que viene de la homologación. Helpers:
-    `leer_medidas_api(ruta_centrales)` (lee esa hoja: `topologyName`,
-    `clave`, `Factor` opcional) y `_resumir_diagnostico_medidas()` (lo que
-    antes iba a `reporte_medidas_consolidadas.xlsx`, ahora al log).
+    la API de operación real es opcional: sin la hoja `Gen real` se escribe
+    solo lo que viene de `homol`. Esa hoja la lee
+    `Homologacion.leer_gen_real()`; `_resumir_diagnostico_medidas()` es lo
+    que antes iba a `reporte_medidas_consolidadas.xlsx` y ahora va al log.
   - `_leer_hoja_con_encabezado(ruta, hoja, columnas_buscadas)` — lector
     genérico de hojas cuyo encabezado no está en la primera fila (las hojas
     reales traen un título arriba). `_leer_resumen_bess()` es ahora un caso
