@@ -2263,6 +2263,334 @@ def escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print):
 
 
 # ============================================================
+# CALCULO E COSTOS (etapa 2): L, N, O, R, S, T, U, W, X, Y, AB, AC, AD
+#
+# Replica esa parte de Actualizar_Calculos_Columnas (modulo
+# J_Calculo_Ecostos, ver plan seccion 25.6/25.7). Quedan FUERA de
+# esta etapa (bloqueados): M, AE, AF y todo AG:AZ -- dependen de una
+# hoja "Resumen" del libro original (con una tabla central->factor y
+# un umbral unico en H8) que es DISTINTA de Centrales.xlsx!Resumen
+# BESS y todavia no esta mapeada en la migracion. No se adivina esa
+# tabla: falta que el usuario diga donde vive.
+#
+# ADVERTENCIA sobre L (ver BITACORA): el VBA original arma la clave
+# de match contra Subastas usando columnas por posicion que, en el
+# archivo de trazabilidad, no coinciden con los encabezados reales
+# confirmados contra un caso real. El usuario confirmo que el "tipo"
+# (BAJADA/SUBIDA) esta en Subastas!Sub_Baj. La central equivalente se
+# infirio como Subastas!Configuración (mismo campo que usa la tabla
+# dinamica Prorrata SSCC como identificador de central) -- TODAVIA NO
+# validado contra un caso real. Si al correr esto la cantidad de
+# filas con L=1 sale sospechosamente baja o en cero, es la primera
+# sospechosa a revisar.
+# ============================================================
+
+def _normaliza_valor_vba(valor):
+    """
+    Replica NormalizarValor: texto en mayusculas y recortado. Los
+    numeros se renderizan sin decimales de mas (igual que CStr en
+    VBA: 7 -> "7", no "7.0"), para poder armar claves compuestas
+    comparables entre hojas.
+    """
+
+    if valor is None:
+        return ""
+
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(valor, bool):
+        texto = str(valor)
+    elif isinstance(valor, (int, float)):
+        numero = float(valor)
+        texto = str(int(numero)) if numero.is_integer() else str(numero)
+    else:
+        texto = str(valor)
+
+    return texto.strip().upper()
+
+
+def _construir_set_subastas_tipo(df_subastas):
+    """
+    Conjunto de claves "central¦mes¦dia¦hora" que SI participaron en
+    una subasta de subida o bajada (Subastas!Sub_Baj en {BAJADA,
+    SUBIDA}), para la columna L.
+    """
+
+    tipo = df_subastas["Sub_Baj"].map(_normaliza_valor_vba)
+    filtro = tipo.isin(["BAJADA", "SUBIDA"])
+
+    sub = df_subastas.loc[filtro]
+
+    claves = (
+        sub["Configuración"].map(_normaliza_valor_vba)
+        + "¦" + sub["Mes"].map(_normaliza_valor_vba)
+        + "¦" + sub["Dia"].map(_normaliza_valor_vba)
+        + "¦" + sub["Hora_dia"].map(_normaliza_valor_vba)
+    )
+
+    return set(claves)
+
+
+def calcular_l(df_ecostos, df_subastas):
+    """
+    Replica la columna L: 1 si la central+mes+dia+hora de la fila
+    existe en Subastas como registro BAJADA o SUBIDA, si no 0.
+    """
+
+    claves_subasta = _construir_set_subastas_tipo(df_subastas)
+
+    clave_fila = (
+        df_ecostos["clave"].map(_normaliza_valor_vba)
+        + "¦" + df_ecostos["Mes"].map(_normaliza_valor_vba)
+        + "¦" + df_ecostos["Dia"].map(_normaliza_valor_vba)
+        + "¦" + df_ecostos["Hora"].map(_normaliza_valor_vba)
+    )
+
+    return clave_fila.isin(claves_subasta).astype("int64")
+
+
+def calcular_n_o(df_ecostos):
+    """
+    Replica N y O: por grupo (central=clave, ventana=Copia_Ventana),
+    ordenando por 'Cuarto de Hora' descendente, suma acumulada de I
+    (N) y de -J (O), solo contando filas con L=1, y repartida a TODAS
+    las filas que comparten el mismo 'Cuarto de Hora' dentro del
+    grupo (no solo a las que tienen L=1).
+    """
+
+    def _por_grupo(grupo):
+
+        valido = grupo["L"] == 1
+
+        i_valido = grupo["Energia_Positiva"].where(valido, 0.0)
+        j_valido = grupo["Energia_Negativa"].where(valido, 0.0)
+
+        suma_i_por_f = i_valido.groupby(grupo["Cuarto de Hora"]).sum()
+        suma_j_por_f = j_valido.groupby(grupo["Cuarto de Hora"]).sum()
+
+        acumulado_i = suma_i_por_f.sort_index(ascending=False).cumsum()
+        acumulado_j = suma_j_por_f.sort_index(ascending=False).cumsum()
+
+        n = grupo["Cuarto de Hora"].map(acumulado_i)
+        o = -grupo["Cuarto de Hora"].map(acumulado_j)
+
+        return pd.DataFrame({"N": n, "O": o}, index=grupo.index)
+
+    resultado = (
+        df_ecostos
+        .groupby(["clave", "Copia_Ventana"], sort=False, group_keys=False)
+        .apply(_por_grupo)
+    )
+
+    return resultado["N"], resultado["O"]
+
+
+def calcular_r_ecostos(df_ecostos):
+    """
+    Replica "Calculo E Costos"!R: ranking por grupo (central+
+    ventana), ordenando por CMg descendente y 'Cuarto de Hora'
+    descendente; las filas empatadas en ambos comparten el mismo
+    ranking (la posicion donde empieza el empate), igual que un
+    RANK() de Excel con "competition ranking" (no denso).
+
+    Nombre con sufijo _ecostos a proposito: Medidores ya tiene su
+    propia calcular_r() (Oferta_Completa_Dia, logica no relacionada)
+    -- no renombrarla ni fusionarlas, son dos columnas "R" de hojas
+    distintas con formulas distintas.
+    """
+
+    def _por_grupo(grupo):
+
+        orden = grupo.sort_values(
+            ["CMg", "Cuarto de Hora"],
+            ascending=[False, False],
+            kind="mergesort",
+        )
+
+        posiciones = pd.Series(range(1, len(orden) + 1), index=orden.index)
+
+        posicion_min = posiciones.groupby(
+            [orden["CMg"], orden["Cuarto de Hora"]]
+        ).transform("min")
+
+        return pd.DataFrame(
+            {"R": posicion_min.reindex(grupo.index)}, index=grupo.index
+        )
+
+    resultado = (
+        df_ecostos
+        .groupby(["clave", "Copia_Ventana"], sort=False, group_keys=False)
+        .apply(_por_grupo)
+    )
+
+    return resultado["R"]
+
+
+def calcular_s_t_u(df_ecostos):
+    """
+    Replica S (=I*Q), T (=J*Q) y U (=L*(S+T)). No dependen de
+    agrupar por central/ventana.
+    """
+
+    cmg_num = pd.to_numeric(df_ecostos["CMg"], errors="coerce").fillna(0.0)
+
+    s = df_ecostos["Energia_Positiva"].fillna(0.0) * cmg_num
+    t = df_ecostos["Energia_Negativa"].fillna(0.0) * cmg_num
+    u = df_ecostos["L"].astype(float) * (s + t)
+
+    return s, t, u
+
+
+def calcular_w_x(df_ecostos):
+    """
+    Replica X (=P, copia de Copia_Ventana) y W (contador que se
+    reinicia a 1 cada vez que cambia X respecto de la fila anterior,
+    GLOBAL -- no por grupo). La primera fila es una excepcion fiel al
+    original: W toma el valor de 'Hora' en vez de 1, y esa diferencia
+    se arrastra en el resto de su bloque (W sigue siendo "contador
+    que suma 1", solo que ese primer bloque no arranca en 1).
+    """
+
+    x = df_ecostos["Copia_Ventana"].reset_index(drop=True)
+
+    cambia = x.ne(x.shift())
+    bloque = cambia.cumsum()
+
+    w = (
+        x.groupby(bloque)
+        .cumcount()
+        .add(1)
+        .astype(float)
+    )
+
+    if len(w):
+        primera_hora = pd.to_numeric(
+            df_ecostos["Hora"].iloc[:1], errors="coerce"
+        ).fillna(0.0).iloc[0]
+        offset = primera_hora - 1.0
+        primer_bloque = bloque.iloc[0]
+        w = w.mask(bloque == primer_bloque, w + offset)
+
+    w.index = df_ecostos.index
+    x.index = df_ecostos.index
+
+    return w, x
+
+
+def calcular_y_ab_ac_ad(df_ecostos):
+    """
+    Replica Y, AB (a partir de las filas con L=1 e I!=0, ordenadas
+    por CMg descendente) y AC, AD (analogo con J!=0, ordenadas por
+    CMg ASCENDENTE), por grupo (central+ventana). Cada fila del grupo
+    (en su orden original) recibe los valores de la fila en esa
+    posicion dentro del orden calificado; si el grupo tiene menos
+    filas calificadas que filas totales, las posiciones sobrantes
+    toman los valores de las filas NO calificadas en su orden
+    original (sin ordenar).
+    """
+
+    def _por_grupo(grupo):
+
+        l_uno = grupo["L"] == 1
+        calif_i = l_uno & (grupo["Energia_Positiva"] != 0)
+        calif_j = l_uno & (grupo["Energia_Negativa"] != 0)
+
+        orden_i = list(
+            grupo.loc[calif_i]
+            .sort_values("CMg", ascending=False, kind="mergesort")
+            .index
+        )
+        fuente_i = orden_i + list(grupo.index[~calif_i])
+        cantidad_calif_i = len(orden_i)
+
+        orden_j = list(
+            grupo.loc[calif_j]
+            .sort_values("CMg", ascending=True, kind="mergesort")
+            .index
+        )
+        fuente_j = orden_j + list(grupo.index[~calif_j])
+        cantidad_calif_j = len(orden_j)
+
+        destino = list(grupo.index)
+
+        y, ab, ac, ad = [], [], [], []
+
+        for posicion, idx_origen in enumerate(fuente_i):
+            y.append(grupo.at[idx_origen, "Cuarto de Hora"])
+            ab.append(
+                grupo.at[idx_origen, "CMg"]
+                if posicion < cantidad_calif_i
+                else pd.NA
+            )
+
+        for posicion, idx_origen in enumerate(fuente_j):
+            ac.append(grupo.at[idx_origen, "Cuarto de Hora"])
+            ad.append(
+                grupo.at[idx_origen, "CMg"]
+                if posicion < cantidad_calif_j
+                else pd.NA
+            )
+
+        return pd.DataFrame(
+            {"Y": y, "AB": ab, "AC": ac, "AD": ad}, index=destino
+        )
+
+    resultado = (
+        df_ecostos
+        .groupby(["clave", "Copia_Ventana"], sort=False, group_keys=False)
+        .apply(_por_grupo)
+    )
+
+    return resultado["Y"], resultado["AB"], resultado["AC"], resultado["AD"]
+
+
+def completar_calculo_e_costos_grupos(df_ecostos, df_subastas, registrar=print):
+    """
+    Etapa 2 de "Calculo E Costos": agrega L, N, O, R, S, T, U, W, X,
+    Y, AB, AC, AD a df_ecostos (ya con la etapa base de
+    construir_calculo_e_costos). Ver el comentario de seccion mas
+    arriba para el detalle y las advertencias de cada columna.
+    """
+
+    df = df_ecostos.reset_index(drop=True).copy()
+
+    df["L"] = calcular_l(df, df_subastas)
+
+    n, o = calcular_n_o(df)
+    df["N"] = n.reset_index(drop=True)
+    df["O"] = o.reset_index(drop=True)
+
+    df["R"] = calcular_r_ecostos(df).reset_index(drop=True)
+
+    s, t, u = calcular_s_t_u(df)
+    df["S"] = s
+    df["T"] = t
+    df["U"] = u
+
+    w, x = calcular_w_x(df)
+    df["W"] = w
+    df["X"] = x
+
+    y, ab, ac, ad = calcular_y_ab_ac_ad(df)
+    df["Y"] = y.reset_index(drop=True)
+    df["AB"] = ab.reset_index(drop=True)
+    df["AC"] = ac.reset_index(drop=True)
+    df["AD"] = ad.reset_index(drop=True)
+
+    participa = int(df["L"].sum())
+    registrar(
+        f"  Calculo E Costos: {participa:,} de {len(df):,} fila(s) "
+        f"marcadas como 'participa en subasta' (L=1)."
+    )
+
+    return df
+
+
+# ============================================================
 # COLUMNAS CALCULADAS
 # ============================================================
 
@@ -3090,12 +3418,39 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     registrar(f"Leyendo {ARCHIVO_CMG}...")
     df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
     dic_cmg = construir_dic_cmg(df_cmg)
-    avanzar(65)
+    avanzar(55)
 
     registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
                "traspaso de Medidores)...")
     df_ecostos = construir_calculo_e_costos(
         df_medidores, mapa_barra, dic_cmg, registrar=registrar
+    )
+    avanzar(70)
+
+    registrar(f"Leyendo hoja 'Subastas' de {rutas['salida'].name}...")
+
+    try:
+        df_subastas = pd.read_excel(rutas["salida"], sheet_name="Subastas")
+    except ValueError as error:
+        raise ErrorEntrada(
+            f"{rutas['salida'].name} no tiene la hoja 'Subastas' "
+            f"todavia. Genera Consolidado_entradas.xlsx primero "
+            f"(tildando 'Subastas')."
+        ) from error
+
+    if df_subastas.empty:
+        raise ErrorEntrada(
+            f"La hoja 'Subastas' de {rutas['salida'].name} esta "
+            f"vacia. Genera Consolidado_entradas.xlsx primero "
+            f"(tildando 'Subastas')."
+        )
+
+    registrar(
+        "Completando L, N, O, R, S, T, U, W, X, Y, AB, AC, AD "
+        "(M, AE, AF y AG:AZ quedan pendientes, ver plan seccion 25.6)..."
+    )
+    df_ecostos = completar_calculo_e_costos_grupos(
+        df_ecostos, df_subastas, registrar=registrar
     )
     avanzar(90)
 

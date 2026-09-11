@@ -21,13 +21,30 @@ estado, no un historial.
   traía las hojas `FD`/`Subastas` (ya confirmadas). Mientras tanto,
   `construir_calculo_e_costos()` usa nombres placeholder derivados de los
   comentarios de la macro (ver plan §25.4, `METODOLOGIA.md` §7).
-- Completar el resto de `Actualizar_Calculos_Columnas` (L, M, N, O, R, S,
-  T, U, W, X, Y, AB:AF, AG:AX, AZ) y toda la hoja `Calculo RE545` — la
-  etapa base (H, CMg, traspaso de Medidores) ya está implementada (ver
-  entrada de esta sesión). Incluye construir la "Prorrata SSCC" como tabla
-  dinámica derivada de `Subastas` (confirmado por el usuario que no es un
-  archivo externo: `Filas: Configuración, Hora_mes` / `Columnas: Control` /
-  `Valores: Cuenta de Sub_Baj`).
+- **Bloqueante para terminar `Calculo E Costos`**: ubicar la hoja `Resumen`
+  del libro original (tabla central→factor en B:C desde la fila 8, y un
+  umbral único en `H8`) — es **distinta** de `Centrales.xlsx!Resumen BESS`
+  y todavía no está mapeada en la migración. La usan `M`, `AE`, `AF` y por
+  lo tanto todo `AS`, `AT`, `AG:AX`, `AZ`. También falta el umbral de
+  subida/bajada por central+ventana que usan `AU/AV/AW/AZ` (en el `.xlsm`
+  original vive en `Subastas!U:W`, calculado con fórmulas propias de esa
+  hoja — no se encontró evidencia de que sea un archivo externo, pero
+  tampoco está confirmado). No adivinar: preguntarle al usuario dónde vive
+  cada uno antes de implementar `M`, `AE`, `AF` y todo `AG:AZ`.
+- Validar contra un caso real la homologación de la columna `L` de
+  `Calculo E Costos`: usa `Subastas!Configuración` como campo de central
+  (inferido, no confirmado letra por letra — ver plan §25.6). Si al correr
+  con datos reales la cantidad de filas con `L=1` sale sospechosamente
+  baja o en cero, revisar si debería ser `Subastas!Propietario` en su
+  lugar.
+- Completar `M, AE, AF, AG:AX, AZ` de `Calculo E Costos` (bloqueados, ver
+  arriba) y toda la hoja `Calculo RE545` — la etapa base (H, CMg, traspaso
+  de Medidores) y la etapa 2 (L, N, O, R, S, T, U, W, X, Y, AB, AC, AD) ya
+  están implementadas (ver entradas de esta sesión y la anterior). Incluye
+  construir la "Prorrata SSCC" como tabla dinámica derivada de `Subastas`
+  (confirmado por el usuario que no es un archivo externo: `Filas:
+  Configuración, Hora_mes` / `Columnas: Control` / `Valores: Cuenta de
+  Sub_Baj`) — necesaria para `AG/AH/AJ/AK`.
 - Una vez completo `Calculo E Costos`, resolver `Subastas!N` ("Energía
   SSCC"), que depende de columnas de esa hoja.
 - Confirmar si la carpeta `Subastas/` (creada esta sesión, no existe en
@@ -561,3 +578,83 @@ separado, con scripts sintéticos borrados al cerrar la sesión:
 **No probado:** la ventana real (no hay `tkinter` en este entorno) — falta que el usuario la
 abra y confirme que el diagrama se ve como esperaba y que los botones "Generar" funcionan en la
 práctica.
+
+---
+
+## 2026-09-11 (4) — `Calculo E Costos`, etapa 2: L, N, O, R, S, T, U, W, X, Y, AB, AC, AD
+
+El usuario pidió terminar el cálculo de Ecostos ("necesito que termines con el calculo de
+Ecostos"). Antes de implementar se leyó completa la macro `Actualizar_Calculos_Columnas`
+(módulo `J_Calculo_Ecostos`, ~1500 líneas) y sus funciones auxiliares (`CrearDiccionarioSubastas`,
+`CrearDiccionarioProrrata`, las funciones de ordenamiento por bloques, `CalcularAsignacionEnergia`,
+etc.), y se encontró un problema real: buena parte de las columnas restantes (`M`, `AE`, `AF` y
+todo `AG:AZ`) depende de una hoja `Resumen` del libro original — **distinta** de
+`Centrales.xlsx!Resumen BESS` — con una tabla central→factor y un umbral único (`H8`), y de un
+umbral de subida/bajada por central+ventana. Ninguna de las dos cosas está mapeada en la
+migración. Se le preguntó al usuario 3 veces con distinto nivel de detalle técnico (la primera
+con letras de columna VBA, que no se entendió — "no t entendí" / "no entiendo dime el valoer");
+la pregunta se simplificó a lenguaje llano y tampoco se resolvió del todo, pero el usuario dio
+una pista concreta que sí resolvió una pieza clave (ver abajo). **Las otras dos (hoja `Resumen`
+y umbral de subida/bajada) siguen abiertas** — ver "Pendientes abiertos".
+
+**El problema de `L` y cómo se resolvió:** la fórmula real de `L` compara
+central+mes+día+hora de `Calculo E Costos` contra `Subastas`, filtrando por un "tipo"
+BAJADA/SUBIDA. El código VBA documentaba esa clave por posición (`Subastas!D` = tipo,
+`G,H,I,K` = el resto de la clave), pero esas letras no coinciden con los encabezados reales de
+`Subastas` ya confirmados (`D` es `Fecha`, no un texto BAJADA/SUBIDA) — se le pidió al usuario
+que revisara la macro `Traspasar_Medidores_A_Calculos_Rapido` por si la respuesta estaba ahí (no
+estaba: se confirmó con `grep` que esa macro no menciona nada de Subastas/BAJADA/SUBIDA/Resumen).
+El usuario confirmó directamente: **"Es la columna C de la hoja subastas que ya generamos"** —
+`Subastas!Sub_Baj`, tal como sugería el propio nombre de la columna. Con eso se reconstruyó la
+clave equivalente por NOMBRE de columna real (no por posición): tipo=`Sub_Baj`,
+central=`Configuración` (esta última **inferida**, no confirmada letra por letra: es el mismo
+campo que usa la tabla dinámica Prorrata SSCC como identificador de central, y da una
+alineación semántica limpia con Mes/Dia/Hora_dia; se descartó `Propietario` porque es el campo
+que se usa para filtrar por BESS/SAE, no para identificar una central puntual). Queda como
+pendiente validar esto contra un caso real (ver "Pendientes abiertos").
+
+**Implementado en `nucleo.py`** (todo lo que NO depende de la hoja `Resumen`):
+
+- `_normaliza_valor_vba(valor)`: replica `NormalizarValor` (mayúsculas+recorte; números sin
+  decimales de más, igual que `CStr` en VBA) para armar claves compuestas comparables entre
+  `Calculo E Costos` y `Subastas`.
+- `calcular_l(df_ecostos, df_subastas)`: ver arriba.
+- `calcular_n_o(df_ecostos)`: por grupo (central+ventana), suma acumulada de energía positiva/
+  negativa (solo filas `L=1`) ordenando por `Cuarto de Hora` descendente, repartida a todas las
+  filas que comparten ese `Cuarto de Hora`.
+- `calcular_r_ecostos(df_ecostos)`: ranking por grupo, `CMg` descendente + `Cuarto de Hora`
+  descendente, con empates compartiendo el ranking de inicio del bloque ("competition
+  ranking"). **Nombre con sufijo `_ecostos` a propósito** — ver el error de abajo.
+- `calcular_s_t_u`, `calcular_w_x`, `calcular_y_ab_ac_ad`: ver plan §25.7 para el detalle de
+  cada una (`W` tiene una excepción fiel al original: la primera fila de todo el archivo no
+  reinicia a 1, toma el valor de `Hora`).
+- `completar_calculo_e_costos_grupos(df_ecostos, df_subastas, registrar=print)`: combina todas
+  las anteriores. `generar_pagos_bess()` ahora también lee la hoja `Subastas` de
+  `Consolidado_entradas.xlsx` (además de `Medidores`) y la llama después de
+  `construir_calculo_e_costos()`.
+
+**Error encontrado y corregido durante esta sesión (antes de comitear):** la primera versión de
+`calcular_r_ecostos` se llamaba simplemente `calcular_r()`, pisando en silencio a la función que
+YA existía con ese nombre para Medidores (`Oferta_Completa_Dia`, lógica no relacionada). Python
+no avisa de la redefinición; recién se manifestó como un `TypeError` de argumentos al correr el
+test de punta a punta (`construir_medidores()` llama a `calcular_r()` en tiempo de ejecución, y
+para ese momento el nombre ya apuntaba a la versión nueva de 1 argumento). Se corrigió
+renombrando a `calcular_r_ecostos` y se agregó una trampa en `METODOLOGIA.md` §7: antes de
+agregar una función nueva, `grep` para confirmar que el nombre no existe ya.
+
+También se corrigió, en el mismo pase de pruebas, un bug real en `calcular_w_x`: la primera
+versión calculaba `W` como "posición dentro del bloque" en vez de "contador que suma 1 desde el
+valor de la fila anterior", así que la excepción de la primera fila (`W` = `Hora` en vez de 1)
+no se arrastraba al resto de su bloque. Se corrigió sumando el offset (`Hora - 1`) a todas las
+filas del primer bloque.
+
+**Verificación:** un test sintético con 2 grupos (central+ventana) y valores elegidos a mano
+para poder calcular cada columna manualmente de antemano (incluye empates en `CMg`+`Cuarto de
+Hora` para `R`, una fila con `Energia_Positiva=0` para probar el "no calificaI" de `Y`/`AB`, y
+un cambio de `Copia_Ventana` a mitad de archivo para probar que `W` es realmente global y no por
+grupo) — todas las columnas coincidieron con el cálculo a mano. Un segundo test corrió
+`generar_pagos_bess()` de punta a punta con `Centrales.xlsx`/`cmg.xlsx`/`Consolidado_entradas.xlsx`
+(con hojas `Medidores` y `Subastas`) reales, confirmando que las 13 columnas nuevas aparecen en
+`Pagos_BESS.xlsx` con los tipos y valores esperados. Sin persistir en el repo (convención de
+pruebas). No se probó contra un caso real ni contra la planilla 11 — sigue pendiente, y ahora es
+más urgente por la inferencia de `L` sin confirmar.

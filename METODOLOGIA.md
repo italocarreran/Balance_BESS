@@ -305,6 +305,7 @@ causa raíz deje de existir en el código.
 | El `Centrales.xlsx` real trae, en la hoja `Resumen BESS`, un título fusionado en la primera fila (`"Cuadro N° 1: Resumen BESS"`) **antes** de la fila de encabezados reales. Un primer intento leyó la hoja con `pd.read_excel(header=0)` (posición fija) y `construir_mapa_barra()` fallaba: no encontraba `'Nombre activo'`/`'Barra inyección'` porque esas columnas venían como `Unnamed: N`. | `leer_centrales()` ahora usa `_leer_resumen_bess()`, que detecta la fila de encabezados buscando los textos esperados (mismo criterio que `detectar_fila_nombres()` para el SoC), nunca por posición fija. Si en el futuro aparece otra hoja de `Centrales.xlsx` con un título similar, aplicar el mismo patrón, no asumir `header=0`. |
 | Los nombres de columna de `Calculo E Costos` (`nucleo.construir_calculo_e_costos`) son placeholders (`Mes`, `Dia`, `Hora`, `Hora Mes`, `Minutos`, `Cuarto de Hora`, `clave`, `Barra`, `Energia_Positiva`, `Energia_Negativa`, `SoC`, `Copia_Ventana`, `CMg`) derivados de los comentarios de la macro, no confirmados. El usuario adjuntó dos veces un archivo pensado para traer los encabezados reales de "Ecostos" y ambas veces solo traía las hojas `FD`/`Subastas` (ya confirmadas). | No dar estos nombres por definitivos ni usarlos como referencia para otra hoja. Corregirlos apenas llegue el archivo correcto, sin tocar la lógica de cálculo ya implementada (plan §25.4). |
 | `"OfertasSSCC"` tiene **tres** "s" seguidas al pasarlo a minúsculas (`"Ofertas"` termina en "s" + `"SSCC"` empieza con dos "s" más = `"...tas" + "sscc"` = `"...tasssc c"`). Un primer intento transcribió el literal a mano con solo dos "s" (`"ofertasscc"`) y `buscar_archivo_ofertas()` nunca encontraba ningún archivo real. | No transcribir a mano un literal derivado de un nombre con letras dobles/triples repetidas: calcularlo en tiempo de ejecución (`"OfertasSSCC".lower()`, constante `PATRON_NOMBRE_OFERTAS` en `nucleo.py`) y comparar contra eso. Se detectó con un test sintético antes de llegar a producción; si vuelve a fallar la detección del archivo de Ofertas, este es el primer sospechoso a descartar. |
+| Al agregar `calcular_r()` para la etapa 2 de `Calculo E Costos`, se redefinió sin querer una función que YA existía con ese nombre (`calcular_r()` de Medidores, para `Oferta_Completa_Dia`) — Python no avisa: la segunda definición pisa a la primera en silencio, y como `construir_medidores()` llama a `calcular_r()` en tiempo de ejecución (no al definirse), el error solo aparece al correr esa parte, con un `TypeError` de argumentos que no dice nada sobre la causa real. Se detectó por un test sintético que corrió `generar_pagos_bess()` de punta a punta. | Antes de agregar una función nueva a `nucleo.py`, buscar (`grep -n "^def <nombre>("`) si el nombre ya existe. Si dos hojas distintas tienen una columna con la misma letra pero lógica distinta (como el `R` de Medidores y el `R` de Calculo E Costos), usar un sufijo que distinga la hoja (`calcular_r_ecostos`, no `calcular_r`) en vez de reutilizar el nombre corto. |
 
 ---
 
@@ -357,8 +358,13 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   traspaso base desde Medidores (elegido explícitamente por el usuario
   frente a la alternativa de traducir de una sola vez toda
   `Actualizar_Calculos_Columnas`, ~1500 líneas con dependencias profundas);
-  el resto de columnas y `Calculo RE545` quedan para una etapa posterior
-  (plan §25).
+  después una etapa 2 con todo lo que NO depende de una hoja `Resumen` sin
+  mapear (`L, N, O, R, S, T, U, W, X, Y, AB, AC, AD`, plan §25.6/25.7).
+  `M, AE, AF, AG:AX, AZ` y toda `Calculo RE545` siguen pendientes: dependen
+  de esa hoja `Resumen` del libro original (tabla central→factor + umbral
+  único en `H8`, **distinta** de `Centrales.xlsx!Resumen BESS`) y de un
+  umbral de subida/bajada por central+ventana, ninguno de los dos mapeado
+  todavía en la migración — no se adivinan, hay que preguntar dónde viven.
 - **Cada salida tiene su propio botón "Generar" con casillas por sección,
   en vez de un único botón "Ejecutar" para todo.** Pedido explícito del
   usuario, con un archivo de referencia (`Revisor_Reliquidacion.py`) para

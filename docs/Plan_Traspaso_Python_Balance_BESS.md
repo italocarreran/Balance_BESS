@@ -1703,4 +1703,77 @@ Explícitamente **fuera de alcance** de esta etapa (decisión del usuario, "por 
 
 Salida nueva y separada de `Consolidado_entradas.xlsx`, a pedido explícito del usuario. Nombre
 y alcance provisorios (`ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"`). Por ahora tiene una sola
-hoja, `Calculo E Costos` (`HOJA_CALCULO_ECOSTOS`), con las columnas descritas en 25.4.
+hoja, `Calculo E Costos` (`HOJA_CALCULO_ECOSTOS`), con las columnas descritas en 25.4 y 25.7.
+
+## 25.6. Etapa 2: `L, N, O, R, S, T, U, W, X, Y, AB, AC, AD` — y lo que sigue bloqueado
+
+Segunda etapa de `Actualizar_Calculos_Columnas`, implementada después de que el usuario pidiera
+explícitamente continuar ("necesito que termines con el calculo de Ecostos"). Antes de
+implementar se encontró un problema real: buena parte de las columnas restantes dependen de
+datos que **no existen en ningún archivo ya mapeado** en la migración:
+
+- Una hoja `Resumen` del libro original — **distinta** de `Centrales.xlsx!Resumen BESS` — con
+  una tabla central→factor (columnas B:C desde la fila 8) y un umbral único en `H8`. La usan
+  `M` (umbral) y `AE`/`AF` (factor), y por lo tanto todo lo que depende de `AE`/`AF`: `AS`, `AT`
+  y toda la cadena `AG:AX`/`AZ`.
+- Un umbral de subida/bajada por `Configuración+P` (`Subastas!U:W` en el código VBA), usado
+  solo en `AU`/`AV`/`AW`/`AZ`.
+
+Estas dos cosas **siguen sin resolverse** (ver "Pendientes abiertos" en `BITACORA.md`): no se
+adivinan. Por eso esta etapa cubre únicamente lo que **no** depende de la hoja `Resumen`: `L`,
+`N`, `O`, `R`, `S`, `T`, `U`, `W`, `X`, `Y`, `AB`, `AC`, `AD`. Quedan explícitamente pendientes:
+`M`, `AE`, `AF` y todo `AG:AZ`.
+
+### El problema de la columna `L` y cómo se resolvió
+
+La fórmula real del `.xlsm` para `L` es:
+
+```
+=1*(OR(COUNTIFS(Subastas!$K:$K,G4,Subastas!$G:$G,A4,Subastas!$H:$H,B4,Subastas!$I:$I,C4,
+        Subastas!$D:$D,"BAJADA"),
+       COUNTIFS(Subastas!$K:$K,G4,Subastas!$G:$G,A4,Subastas!$H:$H,B4,Subastas!$I:$I,C4,
+        Subastas!$D:$D,"SUBIDA")))
+```
+
+Es decir: marca 1 si existe una fila en `Subastas` de tipo BAJADA o SUBIDA cuya
+central+mes+día+hora coincide con la fila de `Calculo E Costos`. El código VBA
+(`CrearDiccionarioSubastas`) documenta esa clave por posición de columna (`Subastas!D` = tipo,
+`G,H,I,K` = la clave), pero esas posiciones **no coinciden** con los encabezados reales de
+`Subastas` que el usuario ya había confirmado (sección 24.2): ahí `D` es `Fecha`, no un texto
+BAJADA/SUBIDA.
+
+Se le preguntó al usuario dónde vive ese dato. Respuesta: **"Es la columna C de la hoja
+subastas que ya generamos"** — o sea `Subastas!Sub_Baj` (literalmente "Subida/Bajada"), como ya
+sugería el propio nombre de esa columna. Con esa confirmación, la clave equivalente se
+reconstruyó **por nombre de columna real**, no por posición:
+
+- tipo → `Subastas!Sub_Baj` (confirmado por el usuario)
+- central → `Subastas!Configuración` (**inferido**, no confirmado letra por letra: es el mismo
+  campo que usa la tabla dinámica Prorrata SSCC como identificador de central, y el que produce
+  una alineación semántica limpia con `Mes`/`Dia`/`Hora_dia` de Subastas contra `Mes`/`Dia`/
+  `Hora` de `Calculo E Costos` — `Propietario`, la otra columna candidata, se descartó porque es
+  el campo que se usa para filtrar por BESS/SAE, no para identificar una central puntual)
+- mes/día/hora → `Subastas!Mes`, `Subastas!Dia`, `Subastas!Hora_dia`
+
+**Pendiente de validar contra un caso real**: si al correr esto la cantidad de filas con `L=1`
+sale sospechosamente baja o en cero, la primera sospechosa es esta inferencia (`Configuración`
+en vez de `Propietario`).
+
+## 25.7. Detalle columna por columna de la etapa 2
+
+Implementadas en `nucleo.py` (`completar_calculo_e_costos_grupos()` y sus funciones internas):
+
+| Columna | Lógica |
+|---|---|
+| `L` | Ver 25.6. |
+| `N`, `O` | Por grupo (central=`clave` + ventana=`Copia_Ventana`): ordenando por `Cuarto de Hora` descendente, suma acumulada de `Energia_Positiva` (N) y de `-Energia_Negativa` (O), contando solo filas con `L=1`, repartida a **todas** las filas que comparten el mismo `Cuarto de Hora` del grupo (no solo a las que tienen `L=1`). |
+| `R` | Por grupo: ranking ordenando por `CMg` descendente y `Cuarto de Hora` descendente; las filas empatadas en ambos comparten el mismo ranking (la posición donde empieza el empate — "competition ranking", no denso). |
+| `S`, `T`, `U` | `S = Energia_Positiva × CMg`, `T = Energia_Negativa × CMg`, `U = L × (S + T)`. No dependen de agrupar. |
+| `W`, `X` | `X = Copia_Ventana` (copia directa). `W` es un contador **global** (no por grupo) que se reinicia a 1 cada vez que `X` cambia respecto de la fila anterior; la primera fila de todo el archivo es una excepción fiel al original: `W` toma el valor de `Hora` en vez de 1 (y esa diferencia se arrastra en el resto de su bloque). |
+| `Y`, `AB` | Por grupo: de las filas con `L=1` y `Energia_Positiva≠0`, ordenadas por `CMg` descendente, la fila en la posición `j` (dentro del orden ORIGINAL del grupo) recibe el `Cuarto de Hora` (`Y`) y el `CMg` (`AB`) de la `j`-ésima fila calificada; si el grupo tiene menos filas calificadas que filas totales, las posiciones sobrantes toman el `Cuarto de Hora` de las filas NO calificadas en su orden original (y `AB` queda vacío). |
+| `AC`, `AD` | Igual que `Y`/`AB` pero para `Energia_Negativa≠0`, ordenadas por `CMg` **ascendente**. |
+
+Bloqueadas (ver 25.6): `M`, `AE`, `AF`, `AG:AX`, `AZ`.
+
+`generar_pagos_bess()` ahora exige también la hoja `Subastas` de `Consolidado_entradas.xlsx`
+(además de `Medidores`) para poder calcular `L`.

@@ -105,9 +105,21 @@ de.
   nombres de columna son placeholders derivados de los comentarios de la
   macro — todavía no confirmados contra un archivo real (pendiente: el
   usuario adjuntó dos veces un archivo de encabezados que no traía la hoja
-  `Ecostos`). El resto de `Actualizar_Calculos_Columnas` (L, M, N, O, R, S,
-  T, U, W, X, Y, AB:AF, AG:AX, AZ) y toda la hoja `Calculo RE545` quedan
-  para una etapa posterior.
+  `Ecostos`).
+
+  **Calculo E Costos, etapa 2** (plan §25.6/25.7): agrega `L, N, O, R, S, T,
+  U, W, X, Y, AB, AC, AD`. `L` (¿participó en una subasta?) homologa contra
+  `Subastas!Sub_Baj` (confirmado por el usuario) + `Configuración`+`Mes`+
+  `Dia`+`Hora_dia` (la central-clave es **inferida**, no confirmada letra
+  por letra — ver plan §25.6, puede estar mal si `L` da sospechosamente
+  bajo). `N/O/R/Y/AB/AC/AD` se calculan por grupo (central=`clave` +
+  ventana=`Copia_Ventana`); `S/T/U` no agrupan; `W/X` son **globales** (no
+  por grupo). Bloqueadas: `M`, `AE`, `AF`, `AG:AX`, `AZ` — dependen de una
+  hoja `Resumen` del libro original (tabla central→factor + un umbral
+  único en `H8`) **distinta** de `Centrales.xlsx!Resumen BESS`, que
+  todavía no está mapeada en la migración; tampoco el umbral de subida/
+  bajada que usan `AU/AV/AW/AZ`. Toda la hoja `Calculo RE545` también
+  queda fuera.
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
@@ -152,6 +164,13 @@ de.
     → `dict` nombre de central normalizado → barra de inyección;
     `construir_calculo_e_costos(df_medidores, mapa_barra, dic_cmg, registrar=print)`
     → `df_ecostos`; `escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print)`.
+  - Calculo E Costos (etapa 2): `calcular_l(df_ecostos, df_subastas)`,
+    `calcular_n_o(df_ecostos)`, `calcular_r_ecostos(df_ecostos)` (sufijo
+    `_ecostos` a propósito: Medidores ya tiene su propia `calcular_r()`,
+    lógica no relacionada — no fusionarlas), `calcular_s_t_u(df_ecostos)`,
+    `calcular_w_x(df_ecostos)`, `calcular_y_ab_ac_ad(df_ecostos)`, todas
+    combinadas por `completar_calculo_e_costos_grupos(df_ecostos, df_subastas, registrar=print)`
+    → `df_ecostos` con L/N/O/R/S/T/U/W/X/Y/AB/AC/AD agregadas.
   - `construir_medidores(df_sae, df_soc, anio, mes, ruta_ofertas, diccionario, registrar=print)`
     → `(df_medidores, avisos, df_wxy, df_resumen_ventana)`.
   - `escribir_salida(df, ruta_salida, avisos, incidencias, df_wxy=None, df_resumen_ventana=None, df_cmg=None, df_fd_csf=None, df_fd_cpf=None, df_subastas=None, ruta_existente=None, hojas_regenerar=None, registrar=print)`
@@ -171,11 +190,11 @@ de.
     secciones tildadas (si `"medidores"` no está tildada, no exige
     Medidas_SAE/SoC/Centrales/Ofertas). Reemplaza a la vieja `ejecutar()`.
   - `generar_pagos_bess(carpeta_base, registrar=print, progreso=None)` —
-    genera/actualiza `Pagos_BESS.xlsx`; lee `Medidores` desde
-    `Consolidado_entradas.xlsx` ya generado (no lo recalcula), y
-    Centrales.xlsx/cmg.xlsx frescos. Sin `aamm` como parámetro: la etapa
-    base de Calculo E Costos no lo necesita (todo sale de `Medidores`, que
-    ya trae Mes/Dia/Hora).
+    genera/actualiza `Pagos_BESS.xlsx`; lee `Medidores` Y `Subastas` desde
+    `Consolidado_entradas.xlsx` ya generado (no los recalcula), y
+    Centrales.xlsx/cmg.xlsx frescos. Sin `aamm` como parámetro: nada de la
+    etapa base ni de la etapa 2 de Calculo E Costos lo necesita (todo sale
+    de `Medidores`/`Subastas`, que ya traen Mes/Dia/Hora).
 - **Parámetros fijos:** `INICIO_VENTANA = 10`, `UMBRAL_SOC = 0.06` (ver plan
   de migración §8).
 - **Constantes de columnas:** `LETRA_A_CAMPO` (dict A→U de `Medidores`, su
