@@ -34,6 +34,17 @@ de.
   (`lanzar_generacion()`, helper compartido) y reportan al log/barra de
   progreso/timer de la ventana **principal**, no a widgets propios: no hay
   un botón "Ejecutar" único, cada salida se genera por separado.
+
+  La fila **`cmg.xlsx`** del diagrama (una ENTRADA, no una salida) tiene
+  también su botón **Generar** al lado del nombre, pero **sin ventana
+  intermedia**: no hay nada que elegir (el origen sale del AAMM y las
+  barras de `Centrales.xlsx`), así que corre `nucleo.generar_cmg` directo
+  por el mismo `lanzar_generacion()`. Si el archivo ya existe, pide
+  confirmación antes de reemplazarlo. Es el único botón que vive dentro
+  de una fila del árbol y por eso `pintar_arbol()` guarda las referencias
+  en `botones_arbol` (el árbol se repinta entero en cada `revisar()`, así
+  que el widget puede haber desaparecido cuando termina el hilo — ver el
+  `try/except tk.TclError` de `terminar()`).
 - **Consume:** `nucleo` (`revisar_estructura`, `resolver_rutas`,
   `generar_consolidado`, `generar_pagos_bess`, `SECCIONES_CONSOLIDADO`,
   `ErrorEntrada`); `config.json` (última carpeta base y último AAMM
@@ -184,7 +195,13 @@ de.
   - Un archivo `.xlsx`/`.xlsm`/`.xlsb`/`.xls` dentro de
     `<CARPETA_BASE>/Ofertas/` cuyo nombre contenga "OfertasSSCC" (más
     reciente si hay varios)
-  - `<CARPETA_BASE>/Cmg/cmg.xlsx` (nombre literal fijo, sin AAMM)
+  - `<CARPETA_BASE>/Cmg/cmg.xlsx` (nombre literal fijo, sin AAMM). No se
+    descarga: lo genera el propio programa con `generar_cmg()` a partir del
+    CSV 15-minutal de la unidad de red
+    `T:\CMgReales 15MIN\AAAA\AAMM\Mensual\CMg\Cmg para balance\cmgAAMM_def_15minutal.csv`
+    (`RAIZ_CMG_REALES` + `SUBCARPETAS_CMG_REALES` +
+    `PLANTILLA_CSV_CMG_15MIN`) — la **única** entrada que se busca fuera de
+    la carpeta base del caso
   - Un archivo Excel dentro de `<CARPETA_BASE>/SSCC_Desempeño/` cuyo nombre
     empiece con "SSCC_Desempeño_" (más reciente si hay varios), hojas `CPF
     Horario` y `CSF Horario`
@@ -267,6 +284,20 @@ de.
     secciones tildadas; valida los archivos de entrada únicamente para las
     secciones tildadas (si `"medidores"` no está tildada, no exige
     Medidas_SAE/SoC/Centrales/Ofertas). Reemplaza a la vieja `ejecutar()`.
+  - `generar_cmg(carpeta_base, aamm, ruta_csv=None, registrar=print, progreso=None)`
+    — genera/actualiza `<CARPETA_BASE>/Cmg/cmg.xlsx` desde el CSV
+    15-minutal del período (reemplaza al script suelto
+    `Extrae_CMG_barras.py`, que leía el CSV de al lado del `.py` y traía
+    las barras hardcodeadas). Helpers: `ruta_csv_cmg_15min(aamm, raiz=None)`
+    (arma la ruta de red; no valida existencia, la ventana la muestra
+    igual), `barras_desde_resumen_bess(resumen_bess)` (las barras a filtrar
+    salen de `Resumen BESS!Barra inyección` vía `construir_mapa_barra()` —
+    la MISMA fuente que `Calculo E Costos!Barra`, así que las dos puntas no
+    se pueden desincronizar), `construir_cmg_desde_csv(ruta_csv, barras, registrar=print)`
+    (numera el `Cuarto de Hora` global con los bloques que el CSV realmente
+    trae, no asumiendo 96 por día: los días de cambio de hora traen 92/100)
+    y `_validar_layout_cmg(df, registrar=print)` (avisa si el CSV cambió de
+    formato, porque `leer_cmg()` después lee `cmg.xlsx` POR POSICIÓN).
   - `generar_pagos_bess(carpeta_base, registrar=print, progreso=None)` —
     genera/actualiza `Pagos_BESS.xlsx`; lee `Medidores` Y `Subastas` desde
     `Consolidado_entradas.xlsx` ya generado (no los recalcula), y

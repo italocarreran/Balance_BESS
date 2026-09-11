@@ -50,6 +50,24 @@ HOJA_DICCIONARIO = "Diccionario"
 ARCHIVO_CMG = "cmg.xlsx"
 HOJA_CMG_ORIGEN = "CMg"
 
+# Origen de cmg.xlsx: el CSV 15-minutal oficial, que NO vive en la
+# carpeta del caso sino en la unidad de red, con una ruta armada a
+# partir del periodo:
+#
+#   T:\CMgReales 15MIN\AAAA\AAMM\Mensual\CMg\Cmg para balance\
+#       cmgAAMM_def_15minutal.csv
+#
+# (AAAA = año completo, AAMM = el mismo periodo de 4 digitos de la
+# ventana). Es la unica entrada del programa que se busca fuera de la
+# carpeta base del caso; si la unidad T: cambia de letra, se cambia
+# aca y nada mas.
+RAIZ_CMG_REALES = r"T:\CMgReales 15MIN"
+SUBCARPETAS_CMG_REALES = ("Mensual", "CMg", "Cmg para balance")
+PLANTILLA_CSV_CMG_15MIN = "cmg{aamm}_def_15minutal.csv"
+SEPARADOR_CSV_CMG = ";"
+CODIFICACION_CSV_CMG = "latin1"
+COLUMNA_CSV_CMG_VALOR = "CMg[CLP/KWh]"
+
 HOJA_CPF_HORARIO = "CPF Horario"
 HOJA_CSF_HORARIO = "CSF Horario"
 
@@ -527,9 +545,32 @@ def revisar_estructura(carpeta_base, aamm=None):
         f"{CARPETA_CMG}/",
         rutas["cmg_dir"].is_dir(),
     )
+    # cmg.xlsx no se descarga: se arma desde el CSV 15-minutal de la
+    # unidad de red con el boton "Generar" de esta fila (generar_cmg).
+    # Se muestra si ese CSV esta o no disponible, que es lo que decide
+    # si el boton va a poder hacer algo.
+    rutas["csv_cmg"] = (
+        ruta_csv_cmg_15min(aamm_valido) if aamm_valido else None
+    )
+
+    if rutas["cmg"].is_file():
+        detalle_cmg = "se regenera con el boton Generar ->"
+    elif rutas["csv_cmg"] is None:
+        detalle_cmg = "ingresa el AAMM y usa el boton Generar ->"
+    elif rutas["csv_cmg"].is_file():
+        detalle_cmg = (
+            f"falta, pero el CSV del periodo esta disponible: usa el "
+            f"boton Generar ->"
+        )
+    else:
+        detalle_cmg = (
+            f"falta, y tampoco esta el CSV de origen ({rutas['csv_cmg']})"
+        )
+
     agregar(
         ARCHIVO_CMG,
         rutas["cmg"].is_file(),
+        detalle_cmg,
     )
 
     # SSCC_Desempeño (alimenta la hoja FD): obligatorio, se toma el mas
@@ -6191,3 +6232,324 @@ def generar_pagos_bess(
     registrar(f"Listo: {rutas['salida_pagos']}")
 
     return rutas["salida_pagos"]
+
+
+# ============================================================
+# GENERACION DE cmg.xlsx DESDE EL CSV 15-MINUTAL
+#
+# cmg.xlsx (la entrada de la carpeta Cmg/) no se descarga: se arma a
+# partir del CSV 15-minutal oficial que vive en la unidad de red (ver
+# RAIZ_CMG_REALES). Esto reemplaza al script suelto
+# "Extrae_CMG_barras.py" que se corria a mano al lado del CSV, con dos
+# cambios pedidos por el usuario:
+#   1) el CSV ya no se busca al lado del .py, sino en la ruta de red
+#      armada desde el periodo AAMM de la ventana;
+#   2) las barras a filtrar ya no son una lista hardcodeada: salen de
+#      la columna "Barra inyección" de la hoja "Resumen BESS" de
+#      Centrales.xlsx -- la MISMA fuente que ya usa construir_mapa_barra
+#      para homologar Calculo E Costos!H, asi que las dos puntas no
+#      pueden desincronizarse.
+# ============================================================
+
+def ruta_csv_cmg_15min(aamm, raiz=None):
+    """
+    Arma la ruta del CSV 15-minutal del periodo:
+
+        <raiz>/AAAA/AAMM/Mensual/CMg/Cmg para balance/
+            cmgAAMM_def_15minutal.csv
+
+    raiz: por defecto RAIZ_CMG_REALES (T:\\CMgReales 15MIN). No se
+    valida la existencia aca (la ventana quiere poder mostrar la ruta
+    esperada aunque falte).
+    """
+
+    aamm = validar_aamm(aamm)
+    anio, _ = periodo_desde_aamm(aamm)
+
+    carpeta = Path(raiz or RAIZ_CMG_REALES) / str(anio) / aamm
+
+    for subcarpeta in SUBCARPETAS_CMG_REALES:
+        carpeta = carpeta / subcarpeta
+
+    return carpeta / PLANTILLA_CSV_CMG_15MIN.format(aamm=aamm)
+
+
+def barras_desde_resumen_bess(resumen_bess):
+    """
+    Lista de barras de inyeccion (sin repetir, en el orden en que
+    aparecen) de la hoja "Resumen BESS" de Centrales.xlsx. Reusa
+    construir_mapa_barra() -- misma deteccion de columna por nombre
+    normalizado, mismo .strip() -- para que el filtro de cmg.xlsx y la
+    homologacion de Calculo E Costos!H miren exactamente el mismo dato.
+    """
+
+    barras = []
+    vistas = set()
+
+    for barra in construir_mapa_barra(resumen_bess).values():
+
+        if not barra:
+            continue
+
+        clave = barra.upper()
+
+        if clave in vistas:
+            continue
+
+        vistas.add(clave)
+        barras.append(barra)
+
+    if not barras:
+        raise ErrorEntrada(
+            f"La columna 'Barra inyección' de la hoja "
+            f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} no tiene "
+            f"ninguna barra cargada: sin barras no se puede filtrar el "
+            f"CSV de CMg."
+        )
+
+    return barras
+
+
+def construir_cmg_desde_csv(ruta_csv, barras, registrar=print):
+    """
+    Traduccion de "Extrae_CMG_barras.py" (ver cabecera de esta
+    seccion): lee el CSV 15-minutal, numera el "Cuarto de Hora" global
+    segun los bloques que el archivo realmente trae (no asume 96 por
+    dia: los dias de cambio de hora tienen 92 o 100), filtra por las
+    barras pedidas y agrega el promedio horario de CMg[CLP/KWh] por
+    FECHA + HORA + BARRA.
+
+    Devuelve (df_salida, resumen_dias). El orden de columnas del
+    resultado es el del CSV + "Cuarto de Hora" + el promedio horario,
+    que es justo el layout A:I que leer_cmg() espera despues.
+    """
+
+    ruta_csv = Path(ruta_csv)
+
+    df = pd.read_csv(
+        ruta_csv,
+        sep=SEPARADOR_CSV_CMG,
+        encoding=CODIFICACION_CSV_CMG,
+    )
+
+    registrar(f"  filas leidas del CSV: {len(df):,}")
+
+    faltantes = [
+        columna for columna in
+        ("FECHA", "HORA", "MINUTO", "BARRA", COLUMNA_CSV_CMG_VALOR)
+        if columna not in df.columns
+    ]
+
+    if faltantes:
+        raise ErrorEntrada(
+            f"{ruta_csv.name} no tiene la(s) columna(s) {faltantes}. "
+            f"Columnas encontradas: {list(df.columns)}"
+        )
+
+    df["FECHA_DT"] = pd.to_datetime(df["FECHA"].astype(str), format="%Y%m%d")
+    df["HORA"] = pd.to_numeric(df["HORA"], errors="coerce").astype("Int64")
+    df["MINUTO"] = pd.to_numeric(df["MINUTO"], errors="coerce").astype("Int64")
+
+    # El CSV viene con coma decimal (es-CL).
+    df[COLUMNA_CSV_CMG_VALOR] = pd.to_numeric(
+        df[COLUMNA_CSV_CMG_VALOR]
+        .astype(str)
+        .str.replace(",", ".", regex=False),
+        errors="coerce",
+    )
+
+    # Bloques reales del archivo (fecha + hora + minuto distintos),
+    # numerados dentro de cada dia y despues acumulados: asi el
+    # "Cuarto de Hora" global sale de lo que el CSV trae y no de una
+    # cuenta teorica de 96 bloques diarios.
+    bloques = (
+        df[["FECHA_DT", "HORA", "MINUTO"]]
+        .drop_duplicates()
+        .sort_values(["FECHA_DT", "HORA", "MINUTO"])
+        .reset_index(drop=True)
+    )
+
+    bloques["QH_DIA"] = bloques.groupby("FECHA_DT").cumcount() + 1
+
+    resumen_dias = (
+        bloques.groupby("FECHA_DT", as_index=False)
+        .agg(QH_DEL_DIA=("QH_DIA", "max"))
+    )
+    resumen_dias["OFFSET_DIA"] = (
+        resumen_dias["QH_DEL_DIA"].cumsum().shift(fill_value=0)
+    )
+    resumen_dias["HORAS_DEL_DIA"] = resumen_dias["QH_DEL_DIA"] / 4
+
+    bloques = bloques.merge(resumen_dias, on="FECHA_DT", how="left")
+    bloques["Cuarto de Hora"] = bloques["OFFSET_DIA"] + bloques["QH_DIA"]
+
+    df = df.merge(
+        bloques[["FECHA_DT", "HORA", "MINUTO", "Cuarto de Hora"]],
+        on=["FECHA_DT", "HORA", "MINUTO"],
+        how="left",
+    )
+
+    df["BARRA"] = df["BARRA"].astype(str).str.strip()
+
+    # Se compara en mayusculas (mismo criterio que _buscar_cmg), pero
+    # se conserva el texto tal cual viene del CSV.
+    buscadas = {str(barra).strip().upper() for barra in barras}
+    df_filtrado = df[df["BARRA"].str.upper().isin(buscadas)].copy()
+
+    encontradas = set(df_filtrado["BARRA"].str.upper().unique())
+    sin_datos = [
+        barra for barra in barras
+        if str(barra).strip().upper() not in encontradas
+    ]
+
+    if sin_datos:
+        registrar(
+            f"  AVISO: {len(sin_datos)} barra(s) de {ARCHIVO_CENTRALES} "
+            f"no aparecen en el CSV: {', '.join(sin_datos)}"
+        )
+
+    if df_filtrado.empty:
+        raise ErrorEntrada(
+            f"Ninguna de las {len(barras)} barras de "
+            f"'{HOJA_RESUMEN_BESS}' ({ARCHIVO_CENTRALES}) aparece en "
+            f"{ruta_csv.name}. Revisa que las barras esten escritas "
+            f"igual que en el CSV (ej. 'TOCOPILLA_____110')."
+        )
+
+    df_filtrado["CMg_CLP_KWh_Promedio_Horario"] = (
+        df_filtrado
+        .groupby(["FECHA", "HORA", "BARRA"])[COLUMNA_CSV_CMG_VALOR]
+        .transform("mean")
+        .round(6)
+    )
+
+    df_filtrado = (
+        df_filtrado
+        .drop(columns=["FECHA_DT"])
+        .sort_values(["Cuarto de Hora", "BARRA"])
+        .reset_index(drop=True)
+    )
+
+    return df_filtrado, resumen_dias
+
+
+def _validar_layout_cmg(df, registrar=print):
+    """
+    cmg.xlsx lo vuelve a leer leer_cmg() POR POSICION (D = Barra,
+    F = valor de Q, H = Cuarto de Hora, I = CMg promedio), asi que un
+    cambio de columnas en el CSV de origen romperia silenciosamente la
+    etapa siguiente. Se avisa aca, donde todavia se entiende por que.
+    """
+
+    if df.shape[1] < 9:
+        raise ErrorEntrada(
+            f"El resultado quedo con {df.shape[1]} columnas y "
+            f"{ARCHIVO_CMG} necesita al menos 9 (A:I): el CSV de "
+            f"origen debe haber cambiado de formato."
+        )
+
+    esperado = {3: "BARRA", 7: "Cuarto de Hora"}
+
+    for indice, nombre in esperado.items():
+        real = str(df.columns[indice])
+        if normalizar(real) != normalizar(nombre):
+            registrar(
+                f"  AVISO: se esperaba '{nombre}' en la columna "
+                f"{chr(ord('A') + indice)} y quedo '{real}'. "
+                f"La lectura posterior de {ARCHIVO_CMG} es por "
+                f"posicion: revisa el formato del CSV."
+            )
+
+
+def generar_cmg(
+    carpeta_base, aamm, ruta_csv=None, registrar=print, progreso=None
+):
+    """
+    Genera/actualiza <CARPETA_BASE>/Cmg/cmg.xlsx a partir del CSV
+    15-minutal del periodo. La usa el boton "Generar" de la fila
+    cmg.xlsx de la ventana.
+
+    ruta_csv: opcional, para forzar otro CSV. Por defecto se arma con
+    ruta_csv_cmg_15min(aamm) (la ruta de red).
+    """
+
+    def avanzar(valor):
+        if progreso:
+            progreso(valor)
+
+    aamm = validar_aamm(aamm)
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["base"].is_dir():
+        raise ErrorEntrada(
+            f"No se encontro la carpeta base {rutas['base']}"
+        )
+
+    if not rutas["centrales"].is_file():
+        raise ErrorEntrada(
+            f"No se encontro {rutas['centrales']} (de ahi salen las "
+            f"barras a filtrar)."
+        )
+
+    ruta_csv = Path(ruta_csv) if ruta_csv else ruta_csv_cmg_15min(aamm)
+
+    if not ruta_csv.is_file():
+        raise ErrorEntrada(
+            f"No se encontro el CSV de CMg del periodo {aamm}:\n"
+            f"{ruta_csv}\n\n"
+            f"Revisa que la unidad de red este conectada y que el "
+            f"archivo del periodo ya este publicado."
+        )
+
+    avanzar(10)
+
+    registrar(f"Leyendo {ARCHIVO_CENTRALES} (hoja '{HOJA_RESUMEN_BESS}')...")
+    resumen, _ = leer_centrales(rutas["centrales"])
+    barras = barras_desde_resumen_bess(resumen)
+    registrar(f"  barras a filtrar: {len(barras)}")
+    for barra in barras:
+        registrar(f"    {barra}")
+
+    avanzar(25)
+
+    registrar(f"Leyendo {ruta_csv}...")
+    df_salida, resumen_dias = construir_cmg_desde_csv(
+        ruta_csv, barras, registrar=registrar
+    )
+    avanzar(70)
+
+    _validar_layout_cmg(df_salida, registrar=registrar)
+
+    rutas["cmg_dir"].mkdir(parents=True, exist_ok=True)
+
+    registrar(f"Escribiendo {rutas['cmg']}...")
+    df_salida.to_excel(
+        rutas["cmg"], sheet_name=HOJA_CMG_ORIGEN, index=False
+    )
+
+    avanzar(95)
+
+    registrar(f"  registros exportados: {len(df_salida):,}")
+    registrar(
+        f"  maximo Cuarto de Hora: "
+        f"{int(df_salida['Cuarto de Hora'].max())}"
+    )
+    registrar(f"  dias en el archivo: {len(resumen_dias)}")
+
+    # Los dias de cambio de hora no traen 24 h: se listan para que
+    # salten a la vista antes de usar el archivo.
+    anomalos = resumen_dias[resumen_dias["HORAS_DEL_DIA"] != 24]
+
+    if not anomalos.empty:
+        registrar("  dias que NO tienen 24 horas (cambio de hora):")
+        for _, fila in anomalos.iterrows():
+            registrar(
+                f"    {fila['FECHA_DT']:%Y-%m-%d}: "
+                f"{fila['HORAS_DEL_DIA']:g} h "
+                f"({int(fila['QH_DEL_DIA'])} cuartos)"
+            )
+
+    avanzar(100)
+    registrar(f"Listo: {rutas['cmg']}")
+
+    return rutas["cmg"]

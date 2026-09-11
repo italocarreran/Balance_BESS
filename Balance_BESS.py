@@ -8,7 +8,9 @@ selector de carpeta y del periodo (AAMM) se muestra un diagrama de la
 estructura esperada, con el estado de cada entrada (OK/FALTA/
 PENDIENTE). Consolidado_entradas.xlsx y Pagos_BESS.xlsx tienen cada
 uno su boton "Generar", que abre una ventana aparte para elegir que
-partes recalcular.
+partes recalcular. cmg.xlsx tiene tambien su boton "Generar", al lado
+del nombre en el diagrama, que lo arma directo (sin ventana: no hay
+nada que elegir) desde el CSV 15-minutal de la unidad de red.
 
     <CARPETA_BASE>/
         Medidas/
@@ -19,7 +21,7 @@ partes recalcular.
         Ofertas/
             <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Cmg/
-            cmg.xlsx
+            cmg.xlsx                   <- se genera (boton "Generar")
         SSCC_Desempeño/
             SSCC_Desempeño_<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Subastas/
@@ -218,6 +220,11 @@ def main():
     estado_listo = {"consolidado": False}
     ventanas_generar = {}
 
+    # Botones dibujados DENTRO del arbol, por etiqueta de fila (hoy:
+    # el "Generar" de cmg.xlsx). El arbol se repinta entero en cada
+    # revisar(), asi que las referencias se renuevan en pintar_arbol().
+    botones_arbol = {}
+
     # --------------------------------------------------------
     # BOTONES FIJOS ABAJO (primero, para que no los tape nada)
     # --------------------------------------------------------
@@ -379,10 +386,12 @@ def main():
 
         if boton is not None:
             texto_boton, comando = boton
-            tk.Button(
+            widget = tk.Button(
                 fila, text=texto_boton, font=("Segoe UI", 8, "bold"),
                 bg="#fdf0d5", command=comando,
-            ).pack(side="right", padx=6)
+            )
+            widget.pack(side="right", padx=6)
+            botones_arbol[texto] = widget
 
         return fila
 
@@ -390,6 +399,8 @@ def main():
 
         for hijo in filas_arbol.winfo_children():
             hijo.destroy()
+
+        botones_arbol.clear()
 
         if not filas:
             tk.Label(
@@ -406,6 +417,9 @@ def main():
         for (etiqueta, estado, detalle), profundidad, prefijo in zip(
             filas, profundidades, prefijos
         ):
+            # cmg.xlsx es la unica entrada que el programa puede
+            # generar solo (desde el CSV 15-minutal de la unidad de
+            # red), asi que lleva su propio boton al lado del nombre.
             _fila_arbol(
                 filas_arbol,
                 prefijo,
@@ -413,6 +427,11 @@ def main():
                 estado=estado,
                 detalle=detalle,
                 negrita=(profundidad == 0),
+                boton=(
+                    ("Generar", generar_cmg_ahora)
+                    if etiqueta == nucleo.ARCHIVO_CMG
+                    else None
+                ),
             )
 
         # Las dos salidas van al final del mismo diagrama, como filas
@@ -594,7 +613,17 @@ def main():
 
         def terminar(res):
             timer["corriendo"] = False
-            boton_actualizar.config(state="normal")
+
+            # El boton de cmg.xlsx vive DENTRO del arbol, que se
+            # repinta entero en cada revisar(): si el usuario toco
+            # "Examinar" o el periodo mientras corria, ese widget ya
+            # no existe. No es un error, solo no hay nada que
+            # reactivar.
+            try:
+                boton_actualizar.config(state="normal")
+            except tk.TclError:
+                pass
+
             revisar()
 
             if res["ok"]:
@@ -612,6 +641,56 @@ def main():
                 )
 
         threading.Thread(target=trabajo, daemon=True).start()
+
+    # --------------------------------------------------------
+    # BOTON "GENERAR" DE cmg.xlsx
+    #
+    # A diferencia de las dos salidas, cmg.xlsx no abre una ventana
+    # con casillas: no hay nada que elegir. El origen (el CSV
+    # 15-minutal de la unidad de red) sale del periodo AAMM y las
+    # barras a filtrar salen de Centrales.xlsx, asi que el boton
+    # corre directo.
+    # --------------------------------------------------------
+
+    def generar_cmg_ahora():
+
+        ruta = var_base.get()
+
+        if not ruta or not Path(ruta).is_dir():
+            messagebox.showwarning(
+                "Falta la carpeta base",
+                "Elegi primero la carpeta base del caso.",
+            )
+            return
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
+            return
+
+        rutas = nucleo.resolver_rutas(ruta)
+
+        if rutas["cmg"].is_file() and not messagebox.askyesno(
+            f"Reemplazar {nucleo.ARCHIVO_CMG}",
+            f"Ya existe:\n{rutas['cmg']}\n\n"
+            f"Se va a reemplazar con lo que traiga el CSV del "
+            f"periodo {aamm}. ¿Seguir?",
+        ):
+            return
+
+        # No se loguea nada aca: lanzar_generacion() limpia el
+        # registro antes de arrancar. generar_cmg() ya deja la ruta
+        # del CSV en el log (y, si falta, en el mensaje de error).
+        lanzar_generacion(
+            nucleo.generar_cmg,
+            dict(carpeta_base=ruta, aamm=aamm),
+            None,
+            botones_arbol[nucleo.ARCHIVO_CMG],
+            nucleo.ARCHIVO_CMG,
+        )
 
     # --------------------------------------------------------
     # VENTANA "GENERAR" — Consolidado_entradas.xlsx
