@@ -1921,3 +1921,69 @@ conteniendo un valor bajo el título "SUBIDA"/"BAJADA" calculado con una fórmul
 a su vez depende de `Subastas!N` ("Energía SSCC"), que a su vez depende de `Calculo E Costos!P`
 — una dependencia circular con nuestro propio cálculo que todavía no se terminó de decantar. No
 se implementa `AW`/`AX`/`AZ` hasta resolver esto.
+
+## 25.11. `AW`, `AX`, `AZ` y `Subastas!N` — desbloqueados con el documento de trazabilidad
+
+El usuario entregó el documento de trazabilidad completo del `.xlsm`, que ahora vive en el
+repositorio (`docs/Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md`) para no volver a quedar sin
+él. Traía las tres piezas que faltaban, y de paso deshizo el "bloqueante" que se había anotado
+en 25.10: **la dependencia circular no existía**.
+
+### `Subastas!N` ("Energía SSCC") — el nombre engaña
+
+Fórmula real (sección 5.3 del documento, letras del libro original):
+
+```
+=IFERROR(XLOOKUP(1,('Calculo E Costos'!$D$2:$D$50000=J3)*('Calculo E Costos'!$G$2:$G$50000=K3),
+        'Calculo E Costos'!$P$2:$P$50000,""),"")
+```
+
+No es una energía: es el **`Ciclo de Carga del mes`** (`Calculo E Costos!P` = `Copia_Ventana`)
+de la primera fila de `Calculo E Costos` que coincide en `Hora mes` (`D`) y `Configuracion`
+(`G`). Como `P` viene de `Medidores` (etapa base), no depende de ninguna columna calculada: la
+"circularidad" era aparente. `calcular_subastas_energia_sscc()` lo replica homologando por
+nombre de columna (`Hora_mes` + `Configuración` de nuestra hoja `Subastas`), con el mismo
+corrimiento de una columna ya confirmado para `L`.
+
+Se calcula donde se usa (`Pagos_BESS.xlsx`), no en la hoja `Subastas` de
+`Consolidado_entradas.xlsx`: ese archivo se genera antes, con su propio botón. La columna
+`Energía SSCC` de esa hoja sigue quedando vacía — es una decisión de presentación, ya no un
+cálculo desconocido.
+
+### La tabla de umbrales — `Subastas!U:W` del libro original
+
+```
+U3 = S3&"&"&T3                              (clave central & ciclo)
+V3 = COUNTIFS($N:$N,$T3,$D:$D,V$2,K:K,S3)   (V$2 = "SUBIDA")
+W3 = COUNTIFS($N:$N,$T3,$D:$D,W$2,K:K,S3)   (W$2 = "BAJADA")
+```
+
+Tampoco es un archivo externo ni una hoja aparte: **se deriva de `Subastas` + `Subastas!N`**,
+igual que la Prorrata SSCC. Cada umbral es la cantidad de filas de `Subastas` con ese ciclo
+(`N`), esa central (`K` del original = nuestra `Configuración`) y ese tipo (`D` del original =
+nuestra `Sub_Baj`). `construir_dic_umbrales_subastas()` lo arma con un conteo por
+central+ciclo+tipo.
+
+Diferencia deliberada con el original: la tabla del `.xlsm` es una lista fija de central × ciclo
+escrita a mano (`S`/`T`), y acá las combinaciones salen de los datos. Es equivalente: una
+combinación que la lista tiene pero los datos no daría 0/0, y con umbral 0 ninguna fila pasa el
+filtro `W <= umbral*4` (`W` arranca en 1), o sea `AW = 0` de las dos formas.
+
+### `AW`, `AX`, `AZ` — bloque "AU, AV, AW, AX Y AZ" de `Actualizar_Calculos_Columnas`
+
+Por grupo (central `G` + ventana `P`), con la clave `G & "&" & P` contra el diccionario de
+umbrales:
+
+| Columna | Lógica |
+|---|---|
+| `AW` (`Descuento FD`) | `promedioABW` = promedio de `AB` entre las filas del grupo con `W <= umbralBajada*4`; `promedioADW` = promedio de `AD` con `W <= umbralSubida*4` (**van cruzados**: `AB` con el umbral de BAJADA y `AD` con el de SUBIDA — así está en el VBA). `AW = (AE-AS)*promedioABW - (AF-AT)*promedioADW`, solo si hay umbrales válidos, las dos cantidades promediadas son > 0 y `AE`, `AF`, `AS`, `AT` son números válidos. Si no, `0`. |
+| `AX` (`Total`) | `AU + AV - AW`, fila a fila, sin condiciones. |
+| `AZ` (`Monto a compensar`) | Por grupo: `MAX(0, (SUMA(AX) - SUMA(U)) / cantidad de filas del grupo)`; el mismo valor en todas las filas del grupo. `U` no numérica cuenta como 0. |
+
+`AY` no se calcula: la macro salta de `AX` a `AZ` y el documento no muestra ninguna región de
+fórmulas para `AY4:AY26787` (sección 5.4). Queda fuera, igual que toda la hoja `Calculo RE545`.
+
+**Nombre duplicado:** `AX` se llama `Total` en el archivo real, igual que `U`. Es el mismo caso
+que `CPF(-)`/`CSF(-)`/... repetidos entre `AG:AL` y `AM:AR`: se distinguen por el encabezado de
+grupo de las filas 1-2, que este esquema de una sola fila no replica. Para llegar sin
+ambigüedad a una de esas columnas hay que ir por posición, no por nombre.

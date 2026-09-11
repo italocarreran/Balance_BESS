@@ -127,12 +127,22 @@ de.
   (`NOMBRES_CALCULO_E_COSTOS`, plan §25.9) — ya no son placeholders; `AG:AL`
   y `AM:AR` comparten a propósito los mismos 6 nombres cortos (así es en
   el archivo real, se distinguen por un encabezado de grupo que no se
-  replica en este esquema de una sola fila). Bloqueadas: `AW`, `AX`, `AZ`
-  — dependen de un umbral de subida/bajada por central+ciclo cuya
-  posición real en `Subastas` involucra una dependencia circular
-  (`COUNTIFS` contra `Subastas!N`, que a su vez depende de `Calculo E
-  Costos`) todavía sin resolver. Toda la hoja `Calculo RE545` también
-  queda fuera.
+  replica en este esquema de una sola fila; `Total` también se repite
+  entre `U` y `AX`, así que a esas columnas hay que llegar por posición,
+  no por nombre).
+
+  **Calculo E Costos, etapa 4** (plan §25.11): cierra la hoja con `AW`
+  (`Descuento FD`), `AX` (`Total` = `AU+AV-AW`) y `AZ` (`Monto a
+  compensar`, por grupo, nunca negativo). El umbral de subida/bajada que
+  las bloqueaba **no era un archivo externo**: se deriva de `Subastas` +
+  `Subastas!N` contando filas por central+ciclo+tipo
+  (`construir_dic_umbrales_subastas()`), igual que la Prorrata SSCC. Y
+  `Subastas!N` ("Energía SSCC") **no es una energía**: es el `Ciclo de
+  Carga del mes` de `Calculo E Costos` homologado por `Hora_mes` +
+  `Configuración` (`calcular_subastas_energia_sscc()`), que viene de
+  `Medidores` — por eso la "dependencia circular" que se había anotado no
+  existía. Fuera de alcance: la columna `AY` (que la macro original
+  tampoco escribe) y toda la hoja `Calculo RE545`.
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre

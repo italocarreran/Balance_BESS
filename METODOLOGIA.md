@@ -269,10 +269,10 @@ consolidado(...)`/`nucleo.generar_pagos_bess(...)` contra él.
   inyección` (`construir_mapa_barra()`), no por posición: `Centrales.xlsx`
   no reproduce el layout `Resumen!B:G` del libro original. El resto de
   `Actualizar_Calculos_Columnas` (L, M, N, O, R, S, T, U, W, X, Y, AB:AF,
-  AG:AX, AZ) y `Calculo RE545` completo quedan pendientes — decisión
-  explícita del usuario de avanzar por etapas. Nombres de columna:
-  placeholders derivados de los comentarios de la macro, todavía sin
-  confirmar contra un archivo real (ver trampa en §7).
+  AG:AX, AZ) se completó después, por etapas (plan §25.6 a §25.11);
+  `Calculo RE545` completo sigue pendiente. Los nombres de columna, que
+  en esa primera etapa eran placeholders derivados de los comentarios de
+  la macro, ya están confirmados contra un archivo real (plan §25.9).
 
 ---
 
@@ -373,12 +373,15 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   el VBA original, que las deja hardcodeadas), y que el archivo de
   Subastas usado para nuestra hoja está corrido una columna respecto del
   original, lo que explicó por qué las letras que documentaba el VBA para
-  `L` no coincidían con los encabezados reales. `AW, AX, AZ` y toda
-  `Calculo RE545` siguen pendientes: dependen de un umbral de subida/
-  bajada por central+ciclo cuya posición real en `Subastas` involucra una
-  dependencia circular (`COUNTIFS` contra una columna que a su vez
-  depende de `Calculo E Costos`) todavía sin resolver (plan §25.10) — no
-  se adivina, hay que decantarlo primero.
+  `L` no coincidían con los encabezados reales. Una etapa 4 (plan
+  §25.11) cerró la hoja con `AW`/`AX`/`AZ`, después de que el usuario
+  entregara el documento de trazabilidad completo (hoy en
+  `docs/Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md`): el umbral de
+  subida/bajada que las bloqueaba se deriva de `Subastas` +
+  `Subastas!N`, y la "dependencia circular" que se había anotado no
+  existía (`Subastas!N` depende de `Calculo E Costos!P`, que viene de
+  `Medidores`, no de una columna calculada). Sigue pendiente toda la
+  hoja `Calculo RE545`.
 - **Cada salida tiene su propio botón "Generar" con casillas por sección,
   en vez de un único botón "Ejecutar" para todo.** Pedido explícito del
   usuario, con un archivo de referencia (`Revisor_Reliquidacion.py`) para

@@ -16,14 +16,6 @@ estado, no un historial.
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
-- **Bloqueante para terminar `Calculo E Costos` (`AW`, `AX`, `AZ`)**:
-  confirmar la posición real de la tabla de umbrales de subida/bajada por
-  central+ciclo en `Subastas`. Aplicando el mismo corrimiento de columna
-  que el usuario confirmó para `L` (ver entrada de esta sesión), la tabla
-  parecería estar en `Subastas!S:W`, pero involucra una fórmula `COUNTIFS`
-  que depende de `Subastas!N` ("Energía SSCC"), que a su vez depende de
-  `Calculo E Costos!P` — una dependencia circular con nuestro propio
-  cálculo que todavía no se terminó de decantar. Ver plan §25.10.
 - Validar contra un caso real la homologación de la columna `L` (y de
   `AG:AL`/`AM:AR`, que dependen del mismo campo `Configuración`) de
   `Calculo E Costos`. Ya no es una inferencia a ciegas — el archivo de
@@ -38,12 +30,21 @@ estado, no un historial.
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
   inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
   `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
-- Completar `AW, AX, AZ` de `Calculo E Costos` (bloqueados, ver arriba) y
-  toda la hoja `Calculo RE545` — la etapa base, la etapa 2 y la etapa 3
-  (`AG:AV`) ya están implementadas (ver entradas de esta sesión y las
-  anteriores).
-- Una vez completo `Calculo E Costos`, resolver `Subastas!N` ("Energía
-  SSCC"), que depende de columnas de esa hoja.
+- Implementar toda la hoja `Calculo RE545`. `Calculo E Costos` ya está
+  completa (etapas base, 2, 3 y 4 — ver entradas de esta sesión).
+- Decidir si la columna `Energía SSCC` de la hoja `Subastas` de
+  `Consolidado_entradas.xlsx` tiene que quedar escrita ahí. El cálculo ya
+  no es un pendiente (`calcular_subastas_energia_sscc()`), pero se hace
+  del lado de `Pagos_BESS.xlsx`, que se genera después y en otro archivo;
+  escribirla en la hoja `Subastas` implicaría que el botón "Generar
+  Pagos_BESS" modifique el archivo de la otra ventana. Es una decisión de
+  presentación, no de cálculo.
+- Revisar `Subastas!M` ("Ciclo"). Aplicando el mismo corrimiento de una
+  columna que el usuario confirmó (y que se usó para `L`, `AW` y
+  `Subastas!N`), la fórmula original `=K&H&I` sería
+  `Configuración & Dia & Hora_dia`, no `Propietario & Hora_dia &
+  Hora_mes` como está hoy. Hoy no afecta ningún cálculo (ninguna otra
+  columna consume `Ciclo`), por eso no se tocó sin preguntar.
 - Confirmar si la carpeta `Subastas/` (creada esta sesión, no existe en
   la planilla original) es el nombre/ubicación que se quiere mantener, o
   si se prefiere buscar el archivo directamente en `<CARPETA_BASE>` como
@@ -785,3 +786,81 @@ en columna D) — corrió sin errores; la única discrepancia fue que `pd.read_e
 columnas duplicadas al releer (`"CPF(-)"` → `"CPF(-).1"`), un comportamiento conocido de pandas
 al leer, no un problema de lo que se escribió (confirmado escribiendo y releyendo un `DataFrame`
 con columnas duplicadas de prueba). No se probó contra un caso real ni contra la planilla 11.
+
+---
+
+## 2026-09-11 (7) — `Calculo E Costos`, etapa 4: `AW`, `AX`, `AZ` (+ `Subastas!N`) — hoja completa
+
+El usuario pidió terminar lo que quedaba de Ecostos ("Termina lo pendiente de E Costos porfa. Lo
+que sigue pendiente (AW, AX, AZ)"). Al empezar la sesión el repositorio **no tenía** el documento
+de trazabilidad del `.xlsm`: las sesiones anteriores lo habían leído como adjunto, pero lo único
+que quedó escrito fue *qué* faltaba, no el código VBA ni las fórmulas de las tres columnas. Sin
+eso había que adivinar la lógica, que es justo lo que prohíben `REGLAS.md` y el plan §18, así que
+se pidió el documento antes de tocar código. El usuario lo entregó y pidió dejarlo en el repo:
+ahora vive en **`docs/Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md`** (331 KB, incluye el VBA
+completo y todas las fórmulas del libro), y `README.md` lo agrega a la tabla de navegación. Es la
+causa raíz de este bloqueo: no vuelve a pasar.
+
+**El "bloqueante" resultó no existir.** Lo que estaba anotado como una dependencia circular
+(`AW` → umbral → `COUNTIFS` sobre `Subastas!N` → `Calculo E Costos`) se deshizo al leer la
+fórmula real de `Subastas!N` (sección 5.3 del documento):
+
+```
+=IFERROR(XLOOKUP(1,('Calculo E Costos'!$D$2:$D$50000=J3)*('Calculo E Costos'!$G$2:$G$50000=K3),
+        'Calculo E Costos'!$P$2:$P$50000,""),"")
+```
+
+`Calculo E Costos!P` es `Ciclo de Carga del mes` (= `Copia_Ventana`), que viene de `Medidores` y
+está disponible desde la etapa base: **no depende de ninguna columna calculada**. Y de paso: la
+columna `Energía SSCC` no es una energía, es un número de ciclo. El nombre engañaba.
+
+**Implementado en `nucleo.py`** (sección nueva "etapa 4", después de `calcular_au_av`):
+
+- `calcular_subastas_energia_sscc(df_subastas, df_ecostos)`: replica el XLOOKUP de arriba
+  homologando por NOMBRE de columna (`Hora_mes` + `Configuración` de nuestra hoja `Subastas`
+  contra `Hora Mes` + `clave` de Ecostos), con el mismo corrimiento de una columna ya confirmado
+  para `L`. Primera coincidencia gana (XLOOKUP sin modo de búsqueda); sin coincidencia, `""`.
+- `construir_dic_umbrales_subastas(df_subastas, energia_sscc)`: replica la tabla `Subastas!U:W`
+  del libro original (`U = S&"&"&T`, `V`/`W` = `COUNTIFS` por SUBIDA/BAJADA). **No era un archivo
+  externo ni una hoja aparte**: se deriva de `Subastas` + `Subastas!N` contando filas por
+  central+ciclo+tipo, exactamente como la Prorrata SSCC. Diferencia deliberada con el original:
+  las combinaciones salen de los datos en vez de una lista fija escrita a mano — es equivalente,
+  porque una combinación sin datos daría umbral 0 y con umbral 0 ninguna fila pasa el filtro
+  `W <= umbral*4` (`W` arranca en 1), o sea `AW = 0` de las dos formas.
+- `_clave_central_ciclo()`: la clave `central&ciclo`, que en el original se arma distinto de cada
+  lado (concatenación de Excel en `Subastas!U`, `TextoSeguro(G)&"&"&TextoSeguro(P)` en el VBA) y
+  tiene que dar lo mismo. Usa `_valor_clave()` para que un `3` y un `3.0` den los dos `"3"`.
+- `calcular_aw_ax(df_ecostos, dic_umbrales)`: replica `AW` y `AX` del bloque "AU, AV, AW, AX Y AZ".
+  **Ojo con un detalle que parece un error de tipeo y no lo es:** los promedios van cruzados —
+  `AB` se promedia con el umbral de **BAJADA** y `AD` con el de **SUBIDA**. Así está en el VBA
+  original, se replicó tal cual.
+- `calcular_az(df_ecostos)`: `MAX(0, (SUMA(AX) - SUMA(U)) / cantidad de filas)` por grupo
+  central+ventana, mismo valor en todas las filas del grupo.
+- `NOMBRES_CALCULO_E_COSTOS` suma `AW` → `Descuento FD`, `AX` → `Total`, `AZ` → `Monto a
+  compensar`. **`Total` queda duplicado a propósito** (es también el nombre real de `U`), igual
+  que los `CPF(-)`/`CSF(-)`/... repetidos entre `AG:AL` y `AM:AR`: en el archivo real se
+  distinguen por el encabezado de grupo de las filas 1-2, que este esquema de una sola fila de
+  encabezado no replica. Para llegar sin ambigüedad a una de esas columnas hay que ir por
+  posición, no por nombre (los tests de esta sesión lo hacen así).
+
+`AY` **no** se calcula: la macro salta de `AX` a `AZ` y el documento no muestra ninguna región de
+fórmulas para `AY4:AY26787` (sección 5.4). Se documentó explícitamente para que no parezca un
+olvido.
+
+**Verificación** (tests sintéticos, sin persistir en el repo, según la convención):
+
+- `Subastas!N`: cruce por Hora_mes+central, incluido el caso "no hay fila que cruce → `''`" y el
+  caso "gana la primera coincidencia".
+- Umbrales: los conteos SUBIDA/BAJADA salieron exactamente los esperados a mano, incluido un tipo
+  distinto de SUBIDA/BAJADA (no cuenta), una fila sin ciclo (no entra en ninguna clave) y la
+  normalización `5.0` → `"5"` en la clave.
+- `AW`: un grupo armado a propósito con `W = [1, 4, 5, 9]` y umbrales (subida 2, bajada 1), donde
+  los filtros `W<=4` y `W<=8` dejan subconjuntos distintos — promedios 15 y 4 calculados a mano,
+  y las 4 filas coincidieron. Casos borde: grupo sin umbrales → 0; umbral 0/0 → 0; `AE` en blanco
+  → 0 **solo en esa fila**; `cantidadADW = 0` → 0 en **todo** el grupo.
+- `AX = AU + AV - AW` fila a fila, y `AZ` constante por grupo, nunca negativo (probado con una
+  suma de `U` enorme) y dividido por la cantidad de filas del grupo.
+- Corrida completa de `completar_calculo_e_costos_grupos()` con datos sintéticos: devuelve las 48
+  columnas de `NOMBRES_CALCULO_E_COSTOS` en orden, las tres nuevas numéricas en todas las filas.
+
+No se probó contra un caso real ni contra la planilla 11 — sigue siendo el pendiente principal.
