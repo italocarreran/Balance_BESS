@@ -16,6 +16,15 @@ estado, no un historial.
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
+- **Revisar con el usuario los valores reales de `Subastas!Sub_Baj`**: la
+  primera corrida contra un caso real mostró que NINGUNA fila normaliza a
+  `BAJADA`/`SUBIDA` exactamente (ver entrada de esta sesión — el crash que
+  eso disparó ya está arreglado, pero el hallazgo de fondo sigue abierto).
+  Puede ser que el período de ese caso no tuviera subastas, o que el texto
+  real use otras palabras/formato. Mientras no se confirme, `Calculo E
+  Costos!L` (y todo lo que depende del mismo filtro: `M`, `N`, `O`, y las
+  reservas por subasta de `Calculo RE545`) da 0 en todas las filas para
+  ese caso.
 - Validar contra un caso real que `Subastas!Control` tenga exactamente los
   valores `CPF`/`CSF` (usado para separar la tabla dinámica Prorrata SSCC
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
@@ -1107,3 +1116,53 @@ Mes/Dia/Hora_dia); esta sesión solo pasa esa elección de "inferida, pendiente 
 **Sigue pendiente** (no es lo mismo que la homologación en sí): validar fila por fila contra un
 caso real que la cantidad de filas con `L=1` sea razonable — eso confirma que el CRUCE funciona
 bien con datos reales, más allá de que ya esté confirmado qué columna usar.
+
+---
+
+## 2026-09-11 (14) — Fix: crash con datos reales cuando `Subastas` no tiene filas BAJADA/SUBIDA
+
+**Primera corrida contra datos reales** (el usuario corrió `generar_pagos_bess()` desde la
+ventana, con `SSCC_Desempeño_Julio_2026_V2.xlsx` real: 6.696 filas CSF/CPF leídas bien). Se
+cayó en `completar_calculo_e_costos_grupos()` → `calcular_l()` → `_construir_set_subastas_tipo()`
+con:
+
+```
+ufunc 'add' did not contain a loop with signature matching types
+(dtype('int64'), dtype('<U1')) -> None
+```
+
+**Causa raíz:** el filtro por `Subastas!Sub_Baj` en `{BAJADA, SUBIDA}` no encontró **ninguna
+fila** en el archivo real del usuario — la tabla filtrada (`sub`) quedó con 0 filas. Con 0 filas,
+`pandas.Series.map()` es un no-op que no llega a ejecutar la función: devuelve una Series vacía
+con el **mismo dtype que tenía antes** de mapear, en vez del dtype que devolvería la función.
+Como `Subastas!Mes` se lee de Excel como `int64` (es una columna numérica), el resultado de
+`sub["Mes"].map(_normaliza_valor_vba)` quedó en `int64` en vez de texto, y al concatenarlo con
+`"¦"` (separador de clave) para armar la clave compuesta, `numpy` no encuentra una operación
+`int64 + texto` y lanza el error. **No se reprodujo con los tests sintéticos de sesiones
+anteriores** porque ninguno armó a propósito el caso "cero filas después de filtrar" — siempre
+había al menos una fila BAJADA o SUBIDA en los datos de prueba.
+
+**Fix en `nucleo.py`:** nueva función `_columna_clave_vba(serie)` = `serie.map(_normaliza_valor_
+vba).astype(str)` — el `.astype(str)` fuerza el dtype a texto **siempre**, esté vacía la Series o
+no, corrigiendo el caso que `.map()` no cubre. Reemplaza el patrón `columna.map(_normaliza_valor_
+vba)` en los 4 lugares donde participa de una concatenación con "+": `_construir_set_subastas_
+tipo()` (el que crasheaba), `calcular_l()`, `calcular_prorratas()` y `calcular_subastas_energia_
+sscc()`. Los otros dos usos de `.map(_normaliza_valor_vba)` en el archivo (`calcular_reservas_
+re545()`) no se tocaron: ahí el resultado se usa como clave de tupla en un diccionario, no se
+concatena con "+", así que no está expuesto a este bug.
+
+**Verificación:** se reprodujo el error exacto con un `DataFrame` armado a propósito (columnas
+`object`/`int64` "clásicas", no el dtype `str` nuevo de pandas 3.x que usa este sandbox por
+defecto — hubo que forzar los dtypes explícitamente para reproducirlo, porque con el dtype nuevo
+la concatenación no fallaba) y una fila cuyo `Sub_Baj` no es ni `BAJADA` ni `SUBIDA` (0 filas tras
+filtrar). Confirmado que antes del fix reproduce el `ufunc 'add'` exacto y que después corre sin
+error, devolviendo `L=0` en todas las filas (comportamiento correcto: si de verdad no hay ninguna
+subasta que cruce, nadie participa). Regresión completa de las 14 sesiones anteriores: pasa.
+
+**Hallazgo de fondo, no un bug de código, queda como pendiente:** que el filtro haya dado 0 filas
+significa que en el caso real usado, **ninguna fila de `Subastas!Sub_Baj` normaliza exactamente a
+`BAJADA` o `SUBIDA`**. Puede ser el período correcto (sin subastas ese mes) o puede ser que el
+texto real use otra palabra/formato — hay que confirmarlo con el usuario (ver "Pendientes
+abiertos"). Mientras tanto, con ese caso, `L`, `M`, `N`, `O` y las reservas por subasta de
+`Calculo RE545` dan 0/vacío en todas las filas — no es un error, es el resultado correcto de la
+fórmula real con ese filtro.

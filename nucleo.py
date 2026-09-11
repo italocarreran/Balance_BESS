@@ -3781,6 +3781,30 @@ def _normaliza_valor_vba(valor):
     return texto.strip().upper()
 
 
+def _columna_clave_vba(serie):
+    """
+    serie.map(_normaliza_valor_vba), pero forzando el resultado a
+    dtype string SIEMPRE, incluso cuando serie esta vacia (0 filas).
+
+    Trampa real (encontrada con datos reales, no en los sinteticos):
+    pandas.Series.map() sobre una Series vacia es un no-op que NO
+    llama a la funcion -- devuelve una Series vacia con el MISMO
+    dtype que tenia antes de mapear. Si esa columna original era
+    numerica (ej. "Mes"/"Hora Mes" leida como int64 desde Excel) y
+    el resultado se concatena con "+" contra una Series de texto (u
+    otro separador), la suma falla: numpy no sabe sumar int64 con
+    texto, aunque las dos esten vacias.
+
+    Pasa cuando el filtro previo (ej. Subastas!Sub_Baj en {BAJADA,
+    SUBIDA}) no encuentra ninguna fila -- un caso real y valido (no
+    hay ninguna subasta en el periodo), no un error de datos. Forzar
+    .astype(str) despues del .map() corrige el dtype en los dos
+    casos (vacio o no), sin cambiar ningun valor.
+    """
+
+    return serie.map(_normaliza_valor_vba).astype(str)
+
+
 def _construir_set_subastas_tipo(df_subastas):
     """
     Conjunto de claves "central¦mes¦dia¦hora" que SI participaron en
@@ -3794,10 +3818,10 @@ def _construir_set_subastas_tipo(df_subastas):
     sub = df_subastas.loc[filtro]
 
     claves = (
-        sub["Configuración"].map(_normaliza_valor_vba)
-        + "¦" + sub["Mes"].map(_normaliza_valor_vba)
-        + "¦" + sub["Dia"].map(_normaliza_valor_vba)
-        + "¦" + sub["Hora_dia"].map(_normaliza_valor_vba)
+        _columna_clave_vba(sub["Configuración"])
+        + "¦" + _columna_clave_vba(sub["Mes"])
+        + "¦" + _columna_clave_vba(sub["Dia"])
+        + "¦" + _columna_clave_vba(sub["Hora_dia"])
     )
 
     return set(claves)
@@ -3812,10 +3836,10 @@ def calcular_l(df_ecostos, df_subastas):
     claves_subasta = _construir_set_subastas_tipo(df_subastas)
 
     clave_fila = (
-        df_ecostos["clave"].map(_normaliza_valor_vba)
-        + "¦" + df_ecostos["Mes"].map(_normaliza_valor_vba)
-        + "¦" + df_ecostos["Dia"].map(_normaliza_valor_vba)
-        + "¦" + df_ecostos["Hora"].map(_normaliza_valor_vba)
+        _columna_clave_vba(df_ecostos["clave"])
+        + "¦" + _columna_clave_vba(df_ecostos["Mes"])
+        + "¦" + _columna_clave_vba(df_ecostos["Dia"])
+        + "¦" + _columna_clave_vba(df_ecostos["Hora"])
     )
 
     return clave_fila.isin(claves_subasta).astype("int64")
@@ -4199,8 +4223,8 @@ def calcular_prorratas(df_ecostos, dic_prorrata):
     """
 
     clave = (
-        df_ecostos["clave"].map(_normaliza_valor_vba)
-        + "¦" + df_ecostos["Hora Mes"].map(_normaliza_valor_vba)
+        _columna_clave_vba(df_ecostos["clave"])
+        + "¦" + _columna_clave_vba(df_ecostos["Hora Mes"])
     )
 
     valores = clave.map(lambda k: dic_prorrata.get(k, (0.0, 0.0)))
@@ -4514,8 +4538,8 @@ def calcular_subastas_energia_sscc(df_subastas, df_ecostos):
             indice[clave] = ventana
 
     claves = (
-        df_subastas["Hora_mes"].map(_normaliza_valor_vba)
-        + "¦" + df_subastas["Configuración"].map(_normaliza_valor_vba)
+        _columna_clave_vba(df_subastas["Hora_mes"])
+        + "¦" + _columna_clave_vba(df_subastas["Configuración"])
     )
 
     return claves.map(lambda clave: indice.get(clave, ""))
