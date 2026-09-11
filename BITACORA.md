@@ -30,12 +30,13 @@ estado, no un historial.
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
   inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
   `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
-- Terminar `Calculo RE545`: falta `AW:BG` (resumen por central+ventana,
-  que es una tabla de OTRO largo, mismo patrón que `FD`) y `BI:CE`
-  (Componentes 1 y 2, con fórmulas matriciales `LARGE(IF(...))` e
-  `INDEX/MATCH`, y el `Monto a compensar` final). Ya están la etapa base
-  (`A:V`) y las reservas por subasta (`AC:AU`) — ver plan §26.
-  `Calculo E Costos` está completa.
+- Terminar `Calculo RE545`: falta `BI:CE` (Componentes 1 y 2, con
+  fórmulas matriciales `LARGE(IF(...))` e `INDEX/MATCH`, y el `Monto a
+  compensar` final) y, con eso, `BD`/`BE` del resumen (dependen de
+  `BN`/`BU`; son columnas de control, no alimentan nada). Ya están la
+  etapa base (`A:V`), las reservas por subasta (`AC:AU`) y el resumen
+  por central+ventana (`AW:BG`) — ver plan §26. `Calculo E Costos` está
+  completa.
 - Confirmar contra un caso real cuál de las columnas de `Subastas` suma
   cada bloque de reservas de `Calculo RE545` (`AC:AH`, `AI:AN`, `AO:AT`).
   Se siguió la fórmula (posición `O`/`P`/`Q`), pero los nombres reales de
@@ -967,3 +968,42 @@ corridos entre sí, esto es lo primero que hay que revisar (plan §26.3).
 una fila de RE545 cuya hora del mes no cruza con nada (→ los 18 en 0 y `AU` en 0) y `AU`
 calculado a mano (`(8x4x1 + 7x4x0.25)/4*1000 = 9.750`). Regresión completa de E Costos (etapas
 2-4) y de la etapa base de RE545: pasan.
+
+---
+
+## 2026-09-11 (10) — `Calculo RE545`, etapa 3: `AW:BG` (resumen por central + ventana)
+
+Tercera etapa de RE545 en la misma sesión.
+
+**Hallazgo estructural:** `AW:BG` **no son más columnas del bloque principal**: son una tabla
+aparte de 288 filas (9 centrales × 32 ventanas) contra las 26.787 del bloque principal,
+compartiendo la hoja. Tercer caso del mismo patrón en este proyecto (ya había pasado con los
+bloques CSF/CPF de `FD` y con las dos tablas de `Ofertas SSCC`). Se escribe al lado del bloque
+principal con una columna en blanco de separación (`escribir_pagos_bess()` ahora acepta
+`df_resumen_re545` y usa `startcol`).
+
+**De dónde sale `AY` ("Oferta Completa"), que no es fórmula ni la escribe ninguna macro:** es la
+columna `Completa` de `construir_resumen_ventana_oferta()` — la misma tabla central+ventana que ya
+alimenta `Medidores!T` (`T = 1 - Completa`). Coinciden el nombre, la clave, el dominio (0/1) y el
+sentido, y el archivo real lo confirma: la central cuya última ventana queda incompleta tiene
+`AY = 0` justo ahí. No hubo que inventar nada ni pedir un archivo nuevo: `generar_pagos_bess()`
+reconstruye ese resumen desde la hoja `Medidores` ya generada.
+
+**Otro dato que se resolvió de paso:** `Medidores!$S$1` (que usa `BV`) es la **hora de inicio de
+ventana**, el mismo dato que la constante `INICIO_VENTANA` — se deduce de la fórmula de
+`Medidores!L`, que incrementa la ventana justo cuando la hora es igual a `S1`.
+
+**Cambios en `nucleo.py`:** `NOMBRES_RESUMEN_RE545`, `calcular_bv_re545()`,
+`construir_resumen_ventanas_re545()`. Además `completar_calculo_re545()` ya **no** renombra (el
+renombre pasó a `renombrar_calculo_re545()`, que se llama al final): la tabla resumen necesita el
+DataFrame con los nombres internos.
+
+**Verificación:** tests sintéticos con grupos armados a propósito — `AZ`/`BA` tomando la PRIMERA
+fila del grupo y no la última (el `AGGREGATE(15,6,...,1)` del original), `BB` como suma de `AU`,
+`BF` sumando solo las filas de la hora anterior al inicio de ventana, `BC` calculado a mano
+(`MIN(MAX(MIN(120,50),20),40) = 40`), el caso "oferta incompleta → `BC = 0`" y el caso "ventana 31
+→ `BC = 0`". Más un test de escritura real del `.xlsx` confirmando que las dos tablas quedan lado
+a lado con una columna en blanco entre medio. Regresión de E Costos y de las etapas 1-2 de RE545:
+pasan.
+
+**Pendiente:** `BI:CE` (Componentes 1 y 2) y, con eso, `BD`/`BE` del resumen.

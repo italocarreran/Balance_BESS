@@ -2073,12 +2073,34 @@ describió para el archivo de Subastas. Se siguió la **fórmula** (posición), 
 la fórmula es la fuente primaria; si al validar contra un caso real los tres bloques salen
 corridos entre sí, esto es lo primero que hay que mirar.
 
-## 26.4. Lo que sigue pendiente de `Calculo RE545`
+## 26.4. Etapa 3 implementada: `AW:BG` (resumen por central + ventana)
 
-- **`AW:BG`** — resumen por central + ventana (`EiniT`, `EalmT`, `Edisp_T`, checks, margen y flag
-  de última hora). Es una tabla de **otro largo** (288 filas en el original, no 26.787): mismo
-  patrón "dos tablas de distinto largo compartiendo hoja" que ya apareció en `FD` y en
-  `Ofertas SSCC`.
+**Otra tabla, no más columnas de la misma**: 288 filas en el original (9 centrales × 32 ventanas)
+contra las 26.787 del bloque principal, compartiendo la hoja de la fila 4 para abajo. Es el mismo
+patrón "dos tablas de distinto largo en una hoja" que ya apareció en `FD` (bloques CSF/CPF) y en
+`Ofertas SSCC`. Se escribe al lado del bloque principal, con una columna en blanco de separación.
+
+`AW` (central), `AX` (`Ventana`) y `AY` (`Oferta Completa`) **no son fórmulas ni las escribe
+ninguna macro**: en el `.xlsm` son constantes. `AW`/`AX` son el cruce central × ventana, y `AY` no
+hay que inventarlo: es la columna `Completa` de `construir_resumen_ventana_oferta()`, la misma que
+ya alimenta `Medidores!T` (`T = 1 - Completa`). Coinciden el nombre, la clave (central+ventana),
+el dominio (0/1) y el sentido — y el archivo real lo confirma: la central cuya última ventana
+queda incompleta tiene `AY = 0` justo ahí.
+
+| Columna | Nombre real | Lógica |
+|---|---|---|
+| `AZ` | `EiniT` | `U` de la **primera** fila del bloque principal con `G = AW` y `T = AX` (`INDEX` + `AGGREGATE(15,6,...,1)`). |
+| `BA` | `EalmT` | Ídem con `V`. |
+| `BB` | `Total Reservas* FD *FMA` | `SUMIFS(AU:AU, T:T,AX, G:G,AW)`. |
+| `BC` | `Edisp_T` | `MIN(MAX(MIN(AZ+BA, Pmax*1000), BA), BB) * AY * (AX<>31)`. La ventana 31 y la oferta incompleta lo anulan. |
+| `BF` | `Margen ultima hora` | `SUMIFS(BV:BV, BR:BR,AX, G:G,AW)`, con `BV` = `IF(AND(C = Medidores!$S$1 - 1, AU<>0), AU, 0)`. **`Medidores!S1` es la hora de inicio de ventana** — el mismo dato que la constante `INICIO_VENTANA` (la fórmula de `Medidores!L` incrementa la ventana justo cuando la hora es igual a `S1`), así que la condición es "la última hora de la ventana que termina". |
+| `BG` | `flag ultima hora` | `AND(AZ+BA - BF(misma central, ventana-1) > Pmax*1000, BF_de_la_fila_anterior<>0)*1`. La segunda condición usa la fila **física** anterior de la tabla; en el original la primera fila apunta a la fila de encabezados (texto), que en Excel también cumple `<>0`. Se replicó así. |
+
+`BD` (`check 1`) y `BE` (`check 2`) quedan para la etapa siguiente: dependen de `BN` y `BU`, del
+bloque principal. Son columnas de **control**, no entran en ningún cálculo posterior.
+
+## 26.5. Lo que sigue pendiente de `Calculo RE545`
+
 - **`BI:CE`** — Componente 1 (`BI:BO`) y Componente 2 (`BQ:CE`), incluidas las fórmulas
   matriciales `LARGE(IF(...))` de `BM` y `INDEX/MATCH` de `BS`, y el `Monto a compensar` final
   (`CE`). Varias de estas dependen de `AW:BG`, así que van después.
