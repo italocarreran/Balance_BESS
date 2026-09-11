@@ -2422,6 +2422,25 @@ NOMBRES_CALCULO_RE545 = {
     "T": "Ventana de valorizacion",
     "U": "EiniT",
     "V": "EalmT",
+    "AC": "CPF(-)",
+    "AD": "CSF(-)",
+    "AE": "CTF(-)",
+    "AF": "CPF(+)",
+    "AG": "CSF(+)",
+    "AH": "CTF(+)",
+    "AI": "CPF(-)",
+    "AJ": "CSF(-)",
+    "AK": "CTF(-)",
+    "AL": "CPF(+)",
+    "AM": "CSF(+)",
+    "AN": "CTF(+)",
+    "AO": "CPF(-)",
+    "AP": "CSF(-)",
+    "AQ": "CTF(-)",
+    "AR": "CPF(+)",
+    "AS": "CSF(+)",
+    "AT": "CTF(+)",
+    "AU": "SUMA Reservas*FMA*FD",
 }
 
 
@@ -2649,13 +2668,157 @@ def calcular_u_v_re545(df_re545, dic_factor, dic_eficiencia):
     return u, v
 
 
+# ------------------------------------------------------------
+# CALCULO RE545 (etapa 2): AC:AU -- reservas por subasta
+#
+# Tres bloques de 6 columnas con los MISMOS 6 encabezados
+# (CPF(-), CSF(-), CTF(-), CPF(+), CSF(+), CTF(+)), que se
+# distinguen por el titulo de grupo de la fila 2: "Subastas"
+# (AC:AH), "FD" (AI:AN) y "FMA" (AO:AT). Los tres son el mismo
+# SUMIFS contra Subastas, cambiando la columna que se suma:
+#
+#   AC4 = SUMIFS(Subastas!$O:$O, Subastas!$K:$K, $G4,
+#                Subastas!$J:$J, $D4, Subastas!$B:$B, AC$3)
+#   AI4 = idem sobre Subastas!$P:$P
+#   AO4 = idem sobre Subastas!$Q:$Q
+#
+# Criterios (homologados por NOMBRE contra nuestra hoja Subastas,
+# igual que en calcular_l y en los umbrales de E Costos):
+#   central       -> Configuración
+#   hora del mes  -> Hora_mes
+#   tipo          -> Control (la columna con los CPF/CSF, la misma
+#                    que ya usa construir_prorrata_sscc)
+#
+# PENDIENTE DE CONFIRMAR (ver BITACORA): las tres columnas que se
+# suman se toman por POSICION (O, P, Q de nuestra hoja Subastas,
+# que es como las escribe la macro de carga), no por nombre. Los
+# nombres reales que trajo el archivo de encabezados llaman "FD" a
+# O y "FMA" a P, corridos una columna respecto de los titulos de
+# grupo de RE545 (que dicen Subastas/FD/FMA para O/P/Q). Es el
+# mismo corrimiento de una columna que el usuario ya describio para
+# el archivo de Subastas. Se eligio seguir la formula (posicion),
+# no el nombre, porque la formula es la fuente primaria.
+# ------------------------------------------------------------
+
+# Los 6 encabezados que la formula usa como criterio (AC$3 y sus
+# equivalentes). Van en este orden en los tres bloques.
+TIPOS_RESERVA_RE545 = (
+    "CPF(-)", "CSF(-)", "CTF(-)", "CPF(+)", "CSF(+)", "CTF(+)",
+)
+
+# AC:AH, AI:AN, AO:AT -- las tres claves internas de cada bloque.
+_BLOQUES_RESERVA_RE545 = (
+    ("AC", "AD", "AE", "AF", "AG", "AH"),
+    ("AI", "AJ", "AK", "AL", "AM", "AN"),
+    ("AO", "AP", "AQ", "AR", "AS", "AT"),
+)
+
+
+def construir_dic_reservas_subastas(df_subastas):
+    """
+    Arma los tres diccionarios (central, hora del mes, tipo) -> suma,
+    uno por cada columna de Subastas que suman los tres bloques de
+    RE545 (O, P y Q por posicion; ver el comentario de seccion).
+
+    Un SUMIFS sin coincidencias da 0, asi que el valor por defecto de
+    los tres diccionarios es 0, no blanco.
+    """
+
+    columnas = list(df_subastas.columns)
+
+    if len(columnas) < 16:
+        raise ErrorEntrada(
+            f"La hoja Subastas tiene {len(columnas)} columna(s); hacen "
+            f"falta al menos 16 (B:Q) para las reservas de Calculo "
+            f"RE545."
+        )
+
+    # B=0 ... N=12, O=13, P=14, Q=15.
+    columnas_suma = (columnas[13], columnas[14], columnas[15])
+
+    claves = [
+        (
+            _normaliza_valor_vba(central),
+            _normaliza_valor_vba(hora_mes),
+            _normaliza_valor_vba(tipo),
+        )
+        for central, hora_mes, tipo in zip(
+            df_subastas["Configuración"],
+            df_subastas["Hora_mes"],
+            df_subastas["Control"],
+        )
+    ]
+
+    diccionarios = []
+
+    for columna in columnas_suma:
+
+        valores = pd.to_numeric(df_subastas[columna], errors="coerce")
+
+        acumulado = {}
+
+        for clave, valor in zip(claves, valores):
+            if pd.isna(valor):
+                continue
+            acumulado[clave] = acumulado.get(clave, 0.0) + float(valor)
+
+        diccionarios.append(acumulado)
+
+    return tuple(diccionarios)
+
+
+def calcular_reservas_re545(df_re545, dics_reservas):
+    """
+    Replica AC:AT (los tres bloques de 6 columnas) y AU:
+
+        AU = SUMPRODUCT(AC:AH, AI:AN, AO:AT) / 4 * 1000
+
+    o sea, la suma de los 6 productos "reserva x FD x FMA", dividida
+    por 4 y por mil.
+    """
+
+    df = df_re545
+
+    centrales = df["clave"].map(_normaliza_valor_vba)
+    horas_mes = df["Hora Mes"].map(_normaliza_valor_vba)
+
+    columnas = {}
+
+    for bloque, dic in zip(_BLOQUES_RESERVA_RE545, dics_reservas):
+
+        for interno, tipo in zip(bloque, TIPOS_RESERVA_RE545):
+
+            tipo_normalizado = _normaliza_valor_vba(tipo)
+
+            columnas[interno] = pd.Series(
+                [
+                    dic.get((central, hora_mes, tipo_normalizado), 0.0)
+                    for central, hora_mes in zip(centrales, horas_mes)
+                ],
+                index=df.index,
+            )
+
+    au = pd.Series(0.0, index=df.index)
+
+    for posicion in range(6):
+        au = au + (
+            columnas[_BLOQUES_RESERVA_RE545[0][posicion]]
+            * columnas[_BLOQUES_RESERVA_RE545[1][posicion]]
+            * columnas[_BLOQUES_RESERVA_RE545[2][posicion]]
+        )
+
+    columnas["AU"] = au / 4.0 * 1000.0
+
+    return columnas
+
+
 def completar_calculo_re545(
     df_re545, df_subastas, umbral_soc_minimo, dic_factor, dic_eficiencia,
     registrar=print,
 ):
     """
     Agrega a la etapa base de RE545 las columnas calculadas L, M, N,
-    O, S, U y V, y renombra todo a los nombres reales
+    O, S, U, V y AC:AU, y renombra todo a los nombres reales
     (NOMBRES_CALCULO_RE545).
 
     L y M son literalmente las mismas formulas que en Calculo E Costos
@@ -2667,9 +2830,12 @@ def completar_calculo_re545(
     solo filas con L=1, la energia de los bloques horarios >= al de la
     fila. El resto (S, U, V) es propio de esta hoja.
 
-    Todavia FUERA de esta etapa (ver plan seccion 26): AC:AU
-    (Subastas/FD/FMA), AW:BG (el resumen por central+ventana, que es
-    una tabla de otro largo) y BI:CE (Componentes 1 y 2).
+    Agrega tambien AC:AU (los tres bloques de reservas por subasta y
+    el SUMPRODUCT que los combina, ver la seccion de mas arriba).
+
+    Todavia FUERA de esta etapa (ver plan seccion 26.3): AW:BG (el
+    resumen por central+ventana, que es una tabla de otro largo) y
+    BI:CE (Componentes 1 y 2).
     """
 
     df = df_re545.reset_index(drop=True).copy()
@@ -2686,6 +2852,11 @@ def completar_calculo_re545(
     u, v = calcular_u_v_re545(df, dic_factor, dic_eficiencia)
     df["U"] = u
     df["V"] = v
+
+    dics_reservas = construir_dic_reservas_subastas(df_subastas)
+
+    for interno, serie in calcular_reservas_re545(df, dics_reservas).items():
+        df[interno] = serie
 
     df = df[list(NOMBRES_CALCULO_RE545)]
 

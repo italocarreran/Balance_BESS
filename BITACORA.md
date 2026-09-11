@@ -30,12 +30,18 @@ estado, no un historial.
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
   inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
   `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
-- Terminar `Calculo RE545`: falta `AC:AU` (reservas por subasta:
-  Subastas/FD/FMA + `SUMPRODUCT`), `AW:BG` (resumen por central+ventana,
+- Terminar `Calculo RE545`: falta `AW:BG` (resumen por central+ventana,
   que es una tabla de OTRO largo, mismo patrón que `FD`) y `BI:CE`
   (Componentes 1 y 2, con fórmulas matriciales `LARGE(IF(...))` e
-  `INDEX/MATCH`, y el `Monto a compensar` final). La etapa base (`A:V`)
-  ya está implementada — ver plan §26. `Calculo E Costos` está completa.
+  `INDEX/MATCH`, y el `Monto a compensar` final). Ya están la etapa base
+  (`A:V`) y las reservas por subasta (`AC:AU`) — ver plan §26.
+  `Calculo E Costos` está completa.
+- Confirmar contra un caso real cuál de las columnas de `Subastas` suma
+  cada bloque de reservas de `Calculo RE545` (`AC:AH`, `AI:AN`, `AO:AT`).
+  Se siguió la fórmula (posición `O`/`P`/`Q`), pero los nombres reales de
+  esas columnas (`FD`, `FMA`, sin nombre) están corridos una columna
+  respecto de los títulos de grupo de RE545 (Subastas/FD/FMA). Ver plan
+  §26.3.
 - Decidir si la columna `Energía SSCC` de la hoja `Subastas` de
   `Consolidado_entradas.xlsx` tiene que quedar escrita ahí. El cálculo ya
   no es un pendiente (`calcular_subastas_energia_sscc()`), pero se hace
@@ -931,3 +937,33 @@ también los tests de la etapa 4 de E Costos como regresión (el cambio de `cons
 podía romperlos): pasan.
 
 **Lo que sigue** (detalle por bloque en el plan §26.3): `AC:AU`, `AW:BG` y `BI:CE`.
+
+---
+
+## 2026-09-11 (9) — `Calculo RE545`, etapa 2: `AC:AU` (reservas por subasta)
+
+Segunda etapa de RE545, en la misma sesión (el usuario pidió avanzar sin consultarlo).
+
+`AC:AU` son tres bloques de 6 columnas con los **mismos 6 encabezados** (`CPF(-)`, `CSF(-)`,
+`CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)`), que se distinguen por el título de grupo de la fila 2:
+"Subastas" (`AC:AH`), "FD" (`AI:AN`) y "FMA" (`AO:AT`). Los tres son el mismo `SUMIFS` contra
+`Subastas` cambiando solo la columna sumada, y `AU` = `SUMPRODUCT` de los tres bloques `/4*1000`.
+
+- `construir_dic_reservas_subastas(df_subastas)`: arma los tres diccionarios
+  `(central, hora del mes, tipo) -> suma`. Criterios por NOMBRE (`Configuración`, `Hora_mes`,
+  `Control`), columnas sumadas por POSICIÓN (`O`, `P`, `Q`).
+- `calcular_reservas_re545(df_re545, dics)`: devuelve las 18 columnas + `AU`.
+- `NOMBRES_CALCULO_RE545` suma los 18 nombres repetidos + `SUMA Reservas*FMA*FD`.
+
+**Decisión documentada (pendiente de validar, no bloquea):** los nombres reales de `Subastas`
+llaman `FD` a `O` y `FMA` a `P` — corridos una columna respecto de los títulos de grupo de RE545,
+que dicen Subastas/FD/FMA para `O`/`P`/`Q`. Es el mismo corrimiento de una columna que el usuario
+ya había descrito para el archivo de Subastas. Se siguió **la fórmula** (posición), no el nombre,
+porque la fórmula es la fuente primaria. Si al validar con datos reales los tres bloques salen
+corridos entre sí, esto es lo primero que hay que revisar (plan §26.3).
+
+**Verificación:** tests sintéticos con dos filas de `Subastas` que comparten central+hora+tipo
+(para probar que el `SUMIFS` suma y no pisa), un tipo que no existe en los datos (→ 0, no blanco),
+una fila de RE545 cuya hora del mes no cruza con nada (→ los 18 en 0 y `AU` en 0) y `AU`
+calculado a mano (`(8x4x1 + 7x4x0.25)/4*1000 = 9.750`). Regresión completa de E Costos (etapas
+2-4) y de la etapa base de RE545: pasan.

@@ -2045,12 +2045,36 @@ una hoja en la otra sin mirar la fórmula real primero.
 `W:AB` están vacías en el original. Igual que en E Costos, las columnas vacías no se escriben: la
 hoja de salida conserva el orden y el contenido, no la letra de Excel.
 
-## 26.3. Lo que sigue pendiente de `Calculo RE545`
+## 26.3. Etapa 2 implementada: `AC:AU` (reservas por subasta)
 
-- **`AC:AU`** — reservas por subasta: `AC:AH` (`CPF(-)`...`CTF(+)`, `SUMIFS` sobre `Subastas!O`),
-  `AI:AN` (lo mismo sobre `Subastas!P`, grupo "FD"), `AO:AT` (sobre `Subastas!Q`, grupo "FMA") y
-  `AU` = `SUMPRODUCT(AC:AH, AI:AN, AO:AT)/4*1000`. Los tres bloques usan como criterio el
-  encabezado de la propia columna (`'Calculo RE545'!AC$3`) contra `Subastas!B` (`Control`).
+Tres bloques de 6 columnas con los **mismos 6 encabezados** (`CPF(-)`, `CSF(-)`, `CTF(-)`,
+`CPF(+)`, `CSF(+)`, `CTF(+)`), que se distinguen por el título de grupo de la fila 2: "Subastas"
+(`AC:AH`), "FD" (`AI:AN`) y "FMA" (`AO:AT`). Los tres son el mismo `SUMIFS` contra `Subastas`,
+cambiando solo la columna que se suma:
+
+```
+AC4 = SUMIFS(Subastas!$O:$O, Subastas!$K:$K,$G4, Subastas!$J:$J,$D4, Subastas!$B:$B,AC$3)
+AI4 = idem sobre Subastas!$P:$P
+AO4 = idem sobre Subastas!$Q:$Q
+AU4 = SUMPRODUCT($AC4:$AH4, $AI4:$AN4, $AO4:$AT4) / 4 * 1000
+```
+
+Criterios homologados **por nombre** contra nuestra hoja `Subastas` (igual que `calcular_l()` y
+los umbrales de E Costos): central → `Configuración`, hora del mes → `Hora_mes`, tipo → `Control`
+(la columna con los valores `CPF`/`CSF`, la misma que ya usa `construir_prorrata_sscc()`). Un
+`SUMIFS` sin coincidencias da **0**, no blanco.
+
+**Pendiente de confirmar (no bloquea):** las tres columnas que se *suman* se toman por
+**posición** (`O`, `P`, `Q` de nuestra hoja `Subastas`, que es como las escribe la macro de
+carga), no por nombre. Los nombres reales que trajo el archivo de encabezados llaman `FD` a `O` y
+`FMA` a `P`, o sea corridos una columna respecto de los títulos de grupo de RE545 (que dicen
+Subastas/FD/FMA para `O`/`P`/`Q`) — el mismo corrimiento de una columna que el usuario ya
+describió para el archivo de Subastas. Se siguió la **fórmula** (posición), no el nombre, porque
+la fórmula es la fuente primaria; si al validar contra un caso real los tres bloques salen
+corridos entre sí, esto es lo primero que hay que mirar.
+
+## 26.4. Lo que sigue pendiente de `Calculo RE545`
+
 - **`AW:BG`** — resumen por central + ventana (`EiniT`, `EalmT`, `Edisp_T`, checks, margen y flag
   de última hora). Es una tabla de **otro largo** (288 filas en el original, no 26.787): mismo
   patrón "dos tablas de distinto largo compartiendo hoja" que ya apareció en `FD` y en
