@@ -62,6 +62,7 @@ ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
 # provisorio, puede cambiar.
 ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"
 HOJA_CALCULO_ECOSTOS = "Calculo E Costos"
+HOJA_CALCULO_RE545 = "Calculo RE545"
 
 # El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
 # lo ingresa el usuario en la ventana. El archivo de SoC solo debe
@@ -2081,11 +2082,18 @@ def _normaliza_cuarto(valor):
 def construir_dic_cmg(df_cmg):
     """
     Replica el paso 1) de Asignar_CMg_a_Calculos_Turbo: arma un
-    diccionario clave -> valor a asignar en Q, a partir de la hoja
-    CMg (columnas por posicion, sin renombrar - ver leer_cmg):
+    diccionario clave -> (valor para Q, valor para R), a partir de la
+    hoja CMg (columnas por posicion, sin renombrar - ver leer_cmg):
         D (indice 3) = Barra
         F (indice 5) = valor a asignar en Q
         H (indice 7) = Cuarto de Hora
+        I (indice 8) = valor a asignar en R ("CMg Promedio")
+
+    Los dos valores son los dos elementos del Array() que guarda el
+    diccionario del VBA: dictCMg(clave)(0) va a Q en las dos hojas y
+    dictCMg(clave)(1) va a R, pero SOLO en "Calculo RE545"
+    (CompletarDestinoTurbo se llama con escribirR:=False para
+    "Calculo E Costos" y escribirR:=True para "Calculo RE545").
 
     Si una clave se repite, gana la primera fila (igual que
     "If Not dictCMg.Exists(clave) Then Add" en VBA).
@@ -2094,6 +2102,7 @@ def construir_dic_cmg(df_cmg):
     columna_d = df_cmg.columns[3]
     columna_f = df_cmg.columns[5]
     columna_h = df_cmg.columns[7]
+    columna_i = df_cmg.columns[8]
 
     diccionario = {}
 
@@ -2110,7 +2119,7 @@ def construir_dic_cmg(df_cmg):
         clave = barra.upper() + "|" + cuarto_hora
 
         if clave not in diccionario:
-            diccionario[clave] = fila[columna_f]
+            diccionario[clave] = (fila[columna_f], fila[columna_i])
 
     return diccionario
 
@@ -2225,6 +2234,23 @@ def construir_dic_resumen_factor(resumen_bess):
     return dic_factor, umbral_soc_minimo
 
 
+def _buscar_cmg(dic_cmg, barra, cuarto_hora):
+    """
+    Replica la busqueda de CompletarDestinoTurbo: clave
+    UCase(Barra)+"|"+NormalizaCuarto(Cuarto de Hora). Devuelve
+    siempre un par (valor para Q, valor para R); sin match, los dos
+    en blanco (el VBA escribe vbNullString en las dos).
+    """
+
+    barra = "" if not barra else str(barra).strip()
+    cuarto = _normaliza_cuarto(cuarto_hora)
+
+    if barra == "" or cuarto == "":
+        return (pd.NA, pd.NA)
+
+    return dic_cmg.get(barra.upper() + "|" + cuarto, (pd.NA, pd.NA))
+
+
 def construir_calculo_e_costos(
     df_medidores, mapa_barra, dic_cmg, registrar=print
 ):
@@ -2278,15 +2304,8 @@ def construir_calculo_e_costos(
     df["SoC"] = df_medidores["SoC"]
     df["Copia_Ventana"] = df_medidores["Copia_Ventana"]
 
-    def _buscar_cmg(barra, cuarto_hora):
-        barra = "" if not barra else str(barra).strip()
-        cuarto = _normaliza_cuarto(cuarto_hora)
-        if barra == "" or cuarto == "":
-            return pd.NA
-        return dic_cmg.get(barra.upper() + "|" + cuarto, pd.NA)
-
     df["CMg"] = [
-        _buscar_cmg(barra, cuarto_hora)
+        _buscar_cmg(dic_cmg, barra, cuarto_hora)[0]
         for barra, cuarto_hora in zip(df["Barra"], df["Cuarto de Hora"])
     ]
 
@@ -2312,27 +2331,1390 @@ def construir_calculo_e_costos(
     return df
 
 
-def escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print):
+_HOJAS_PAGOS = (HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545)
+
+
+def escribir_pagos_bess(
+    ruta_salida,
+    df_ecostos=None,
+    df_re545=None,
+    df_resumen_re545=None,
+    ruta_existente=None,
+    hojas_regenerar=None,
+    registrar=print,
+):
     """
-    Escribe Pagos_BESS.xlsx: por ahora solo la hoja "Calculo E
-    Costos" en su etapa base (ver comentario de construir_calculo_e_
-    costos). El usuario pidio explicitamente que esto viva en un
-    archivo separado de Consolidado_entradas.xlsx ("pagos_bess o algo
-    asi por ahora") -- nombre y alcance son provisorios.
+    Escribe Pagos_BESS.xlsx: la hoja "Calculo E Costos" (si se pasa
+    df_ecostos) y la hoja "Calculo RE545" (si se pasa df_re545, con
+    la tabla resumen df_resumen_re545 al lado si tambien se pasa). El
+    usuario pidio explicitamente que esto viva en un archivo separado
+    de Consolidado_entradas.xlsx ("pagos_bess o algo asi por ahora")
+    -- el nombre es provisorio.
+
+    hojas_regenerar: None (por defecto) escribe cada hoja para la que
+    se paso su DataFrame, sin mas (asi funcionaba antes de que
+    generar_pagos_bess() tuviera casillas por seccion). Si es un set
+    con alguno de los nombres de _HOJAS_PAGOS ("Calculo E Costos",
+    "Calculo RE545"), la(s) que NO esten en el set se copian tal cual
+    desde ruta_existente en vez de escribirse desde el DataFrame --
+    mismo criterio que escribir_salida()/hojas_regenerar para
+    Consolidado_entradas.xlsx (una hoja destildada en la ventana
+    "Generar" se preserva, no se recalcula). Si una hoja a preservar
+    no existe en ruta_existente, queda vacia y se registra un aviso.
     """
 
     ruta_salida = Path(ruta_salida)
 
-    with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
-        df_ecostos.to_excel(
-            writer,
-            sheet_name=HOJA_CALCULO_ECOSTOS,
-            index=False,
+    regenerar = (
+        set(_HOJAS_PAGOS) if hojas_regenerar is None else set(hojas_regenerar)
+    )
+
+    wb_existente = None
+    if hojas_regenerar is not None and ruta_existente is not None:
+        ruta_existente = Path(ruta_existente)
+        if ruta_existente.is_file():
+            wb_existente = openpyxl.load_workbook(
+                ruta_existente, data_only=True
+            )
+
+    avisos_preservacion = []
+
+    def _preservar_o_avisar(writer, nombre_hoja):
+        if _copiar_hoja_existente(wb_existente, nombre_hoja, writer.book):
+            return
+        pd.DataFrame().to_excel(writer, sheet_name=nombre_hoja, index=False)
+        mensaje = (
+            f"No se regenero la hoja '{nombre_hoja}' (seccion no "
+            f"tildada) y no se encontro una version anterior para "
+            f"preservarla; quedo vacia."
         )
+        avisos_preservacion.append(mensaje)
+
+    with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
+
+        if HOJA_CALCULO_ECOSTOS in regenerar:
+            if df_ecostos is not None:
+                df_ecostos.to_excel(
+                    writer,
+                    sheet_name=HOJA_CALCULO_ECOSTOS,
+                    index=False,
+                )
+        else:
+            _preservar_o_avisar(writer, HOJA_CALCULO_ECOSTOS)
+
+        if HOJA_CALCULO_RE545 in regenerar:
+            if df_re545 is not None:
+                df_re545.to_excel(
+                    writer,
+                    sheet_name=HOJA_CALCULO_RE545,
+                    index=False,
+                )
+
+                if df_resumen_re545 is not None:
+                    # Tabla de otro largo, al lado del bloque
+                    # principal con una columna en blanco de
+                    # separacion (mismo criterio que CSF/CPF de FD).
+                    df_resumen_re545.to_excel(
+                        writer,
+                        sheet_name=HOJA_CALCULO_RE545,
+                        index=False,
+                        startcol=len(df_re545.columns) + 1,
+                    )
+        else:
+            _preservar_o_avisar(writer, HOJA_CALCULO_RE545)
+
+    for mensaje in avisos_preservacion:
+        registrar(f"  [AVISO] {mensaje}")
 
     registrar(f"Archivo generado: {ruta_salida}")
 
     return ruta_salida
+
+
+# ============================================================
+# CALCULO RE545 (etapa base): A:V
+#
+# La otra hoja de calculo del libro, hermana de "Calculo E Costos".
+# Las dos se alimentan de la MISMA macro de traspaso
+# (Traspasar_Medidores_A_Calculos_Rapido), que reparte cada fila de
+# Medidores a una o a la otra segun Medidores!L (Ventana_No_Completa):
+#   Ventana_No_Completa = 1  -> la energia va a "Calculo E Costos"
+#   cualquier otro valor, o vacio -> va a "Calculo RE545"
+# Las columnas A:G, K y P se escriben IGUALES en las dos hojas (no se
+# reparten): lo unico que cambia es I/J, que quedan en 0 en la hoja
+# que no corresponde.
+#
+# Diferencias propias de RE545 respecto de E Costos:
+#   - T ("Ventana de valorizacion") = Medidores!L. En E Costos no
+#     existe: la macro solo escribe T en RE545.
+#   - R ("CMg Promedio") = CMg!I, via el mismo diccionario de
+#     Asignar_CMg_a_Calculos_Turbo, que para esta hoja se llama con
+#     escribirR:=True.
+#   - Las columnas calculadas son OTRAS y, cuando comparten letra con
+#     E Costos, casi nunca significan lo mismo (R, S, T, U, V son el
+#     ejemplo claro). Los nombres reales estan en NOMBRES_CALCULO_RE545,
+#     confirmados contra el archivo "Calculo_RE545_reducido_para_IA.xlsx"
+#     que entrego el usuario (fila 3 del original = nombres, filas 1-2
+#     = titulos de grupo).
+#
+# Igual que en E Costos, las columnas vacias del original (W:AB, AV,
+# BH, BP, BS...) no se escriben: la hoja de salida no reproduce la
+# letra de Excel, solo el orden y el contenido.
+#
+# Ver plan seccion 26.
+# ============================================================
+
+# Nombres reales de columna de "Calculo RE545" (fila 3 del archivo
+# real). Mismo criterio que NOMBRES_CALCULO_E_COSTOS: se calcula todo
+# con las letras/nombres internos y se renombra recien al final.
+NOMBRES_CALCULO_RE545 = {
+    "Mes": "Mes",
+    "Dia": "Dia",
+    "Hora": "Hora",
+    "Hora Mes": "Hora mes",
+    "Minutos": "Minuto",
+    "Cuarto de Hora": "Bloque horario",
+    "clave": "Configuracion",
+    "Barra": "Barra",
+    "Energia_Positiva": "Descarga kWh",
+    "Energia_Negativa": "Carga kWh",
+    "SoC": "SoC %",
+    "L": "Adj SSCC",
+    "M": "SoC sobre el minimo",
+    "N": "Energía SSCC (-) por remunerar",
+    "O": "Energía SSCC (+) por remunerar",
+    "Copia_Ventana": "Ciclo de Carga del mes",
+    "CMg": "CMg",
+    "R": "CMg Promedio",
+    "S": "ranking cmg",
+    "T": "Ventana de valorizacion",
+    "U": "EiniT",
+    "V": "EalmT",
+    "AC": "CPF(-)",
+    "AD": "CSF(-)",
+    "AE": "CTF(-)",
+    "AF": "CPF(+)",
+    "AG": "CSF(+)",
+    "AH": "CTF(+)",
+    "AI": "CPF(-)",
+    "AJ": "CSF(-)",
+    "AK": "CTF(-)",
+    "AL": "CPF(+)",
+    "AM": "CSF(+)",
+    "AN": "CTF(+)",
+    "AO": "CPF(-)",
+    "AP": "CSF(-)",
+    "AQ": "CTF(-)",
+    "AR": "CPF(+)",
+    "AS": "CSF(+)",
+    "AT": "CTF(+)",
+    "AU": "SUMA Reservas*FMA*FD",
+    "BI": "Orden",
+    "BJ": "Periodo",
+    "BK": "Curva Cmg Decendente promedio horario",
+    "BL": "",
+    "BM": "Curva Cmg Decendente",
+    "BN": "Edisp_Asig",
+    "BO": "Total  C1_545",
+    "BQ": "Energia Total",
+    "BR": "Ventana de Valorizacion",
+    "BS": "inyeccion en el periodo del Cmg Descendente",
+    "BT": "Energía ya Asignada",
+    "BU": "Asignacion Edisponible",
+    "BV": "SSCC ultima hora",
+    "BW": "inyeccion orden cronologico",
+    "BX": "Energia Ultima hora",
+    "BY": "Energía ya Asignada ultima hora",
+    "BZ": "Energia Asignada Ultima hora",
+    "CA": "Asignacion Edisponible+SSCC ultima hora",
+    "CC": "Total C2_545",
+    "CE": "Monto a compensar",
+}
+
+
+def construir_dic_resumen_capacidad(resumen_bess):
+    """
+    Arma nombre_central -> "Capacidad (MWh)", de la hoja
+    "Resumen BESS" de Centrales.xlsx.
+
+    Es el VLOOKUP(G, Resumen!$B$8:$J$26, 4, 0) que aparece en U y BC
+    de RE545 (y en BC de Calculo E Costos). OJO: la 4ta columna del
+    rango B:J NO es "Pmax (MW)" sino "Capacidad (MWh)" -- el orden
+    real de la tabla es Nombre activo, Pmax (MW), Horas para descarga
+    forzada, Capacidad (MWh), Energia minima, Barra inyeccion, %
+    Energia sobre minima, Ciclos max diarios, Eficiencia (confirmado
+    en el plan seccion 25.8, y consistente con que H use el indice 6
+    para la barra de inyeccion).
+
+    El "factor" de AE/AF de Calculo E Costos es otra cosa (Resumen!
+    B:C, o sea el indice 2 = "Pmax (MW)"): eso lo da
+    construir_dic_resumen_factor(), y es el mismo indice 2 que usa BN
+    de RE545. No confundirlas.
+    """
+
+    return _mapa_resumen_bess_por_nombre(
+        resumen_bess, "capacidad", "Capacidad (MWh)",
+    )
+
+
+def _mapa_resumen_bess_por_nombre(resumen_bess, texto_buscado, etiqueta):
+    """
+    Helper comun: central -> valor de la columna de "Resumen BESS"
+    cuyo nombre normalizado contiene texto_buscado.
+    """
+
+    columna_nombre = None
+    columna_valor = None
+
+    for columna in resumen_bess.columns:
+        clave = normalizar(columna)
+        if columna_nombre is None and "nombre" in clave and "activ" in clave:
+            columna_nombre = columna
+        if columna_valor is None and texto_buscado in clave:
+            columna_valor = columna
+
+    if columna_nombre is None or columna_valor is None:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} debe "
+            f"tener columnas de nombre de central ('Nombre activo') y "
+            f"'{etiqueta}' (hace falta para Calculo RE545). Columnas "
+            f"encontradas: {list(resumen_bess.columns)}"
+        )
+
+    mapa = {}
+
+    for _, fila in resumen_bess.iterrows():
+
+        nombre = fila[columna_nombre]
+        if pd.isna(nombre):
+            continue
+
+        valor = fila[columna_valor]
+        mapa[normalizar(nombre)] = pd.NA if pd.isna(valor) else float(valor)
+
+    return mapa
+
+
+def construir_dic_resumen_eficiencia(resumen_bess):
+    """
+    Arma nombre_central -> "Eficiencia", de la misma hoja
+    "Resumen BESS" de Centrales.xlsx.
+
+    Es el VLOOKUP(G, Resumen!$B$8:$J$26, 9, 0) de la columna V de
+    RE545: la 9na columna del rango B:J es la ultima de las 9 de esa
+    tabla, "Eficiencia".
+    """
+
+    return _mapa_resumen_bess_por_nombre(
+        resumen_bess, "eficiencia", "Eficiencia",
+    )
+
+
+def construir_calculo_re545(
+    df_medidores, mapa_barra, dic_cmg, registrar=print
+):
+    """
+    Etapa base de "Calculo RE545": traspaso desde Medidores (A:G, I/J,
+    K, P, T) + H (Barra) + Q/R (CMg y CMg Promedio).
+
+    Es la hoja espejo de construir_calculo_e_costos(): misma macro de
+    traspaso, misma A:G, misma K/P, y la energia repartida al reves
+    (aca entra la de las filas con Ventana_No_Completa <> 1, incluido
+    el caso "vacio o no numerico", que el VBA manda explicitamente a
+    RE545).
+    """
+
+    n = len(df_medidores)
+    df_medidores = df_medidores.reset_index(drop=True)
+
+    df = pd.DataFrame(index=range(n))
+
+    df["Mes"] = df_medidores["Mes"]
+    df["Dia"] = df_medidores["Dia"]
+    df["Hora"] = df_medidores["Hora"]
+    df["Hora Mes"] = df_medidores["Hora Mes"]
+    df["Minutos"] = df_medidores["Minutos"]
+    df["Cuarto de Hora"] = df_medidores["Cuarto de Hora"]
+    df["clave"] = df_medidores["clave"]
+
+    df["Barra"] = df["clave"].map(
+        lambda valor: mapa_barra.get(normalizar(valor), "")
+    )
+
+    energia = pd.to_numeric(
+        df_medidores["Gen_Unidad"], errors="coerce"
+    ).fillna(0.0)
+
+    # El VBA manda a RE545 todo lo que NO tiene T = 1 numerico:
+    # distinto de 1, vacio, no numerico o error.
+    va_a_ecostos = pd.to_numeric(
+        df_medidores["Ventana_No_Completa"], errors="coerce"
+    ).eq(1)
+    va_a_re545 = ~va_a_ecostos
+
+    df["Energia_Positiva"] = energia.where(energia > 0, 0.0).where(
+        va_a_re545, 0.0
+    )
+    df["Energia_Negativa"] = energia.where(energia < 0, 0.0).where(
+        va_a_re545, 0.0
+    )
+
+    df["SoC"] = df_medidores["SoC"]
+    df["Copia_Ventana"] = df_medidores["Copia_Ventana"]
+
+    # Medidores L -> RE545 T (solo esta hoja lo recibe).
+    df["T"] = df_medidores["Ventana"]
+
+    pares = [
+        _buscar_cmg(dic_cmg, barra, cuarto_hora)
+        for barra, cuarto_hora in zip(df["Barra"], df["Cuarto de Hora"])
+    ]
+    df["CMg"] = [par[0] for par in pares]
+    df["R"] = [par[1] for par in pares]
+
+    filas_con_energia = int(va_a_re545.sum())
+
+    registrar(
+        f"  Calculo RE545: {n:,} fila(s) traspasadas desde Medidores "
+        f"({filas_con_energia:,} con energia; el resto la tiene "
+        f"'Calculo E Costos')."
+    )
+
+    return df
+
+
+def calcular_s_re545(df_re545):
+    """
+    Replica S ("ranking cmg") de RE545:
+
+        =(COUNTIFS($T:$T,T4,$R:$R,">"&R4,G:G,G4)
+        + COUNTIFS($T:$T,T4,$R:$R,R4,$C:$C,">"&C4,G:G,G4))/4 + 1
+
+    O sea, dentro del grupo central (G) + ventana de valorizacion (T):
+    cuantas filas tienen CMg Promedio (R) mayor, mas cuantas lo tienen
+    igual pero con Hora (C) mayor; todo eso dividido por 4 y +1.
+
+    Ojo: NO es la misma columna que el "ranking cmg" de Calculo E
+    Costos (esa es la R de esa hoja, agrupa por P y ordena por CMg, no
+    por CMg Promedio).
+    """
+
+    df = df_re545.reset_index(drop=True)
+
+    grupos = {}
+
+    for posicion, (central, ventana) in enumerate(
+        zip(df["clave"], df["T"])
+    ):
+        clave = (
+            _normaliza_valor_vba(central),
+            _normaliza_valor_vba(ventana),
+        )
+        grupos.setdefault(clave, []).append(posicion)
+
+    r = pd.to_numeric(df["R"], errors="coerce")
+    c = pd.to_numeric(df["Hora"], errors="coerce")
+
+    resultado = [pd.NA] * len(df)
+
+    for posiciones in grupos.values():
+
+        for posicion in posiciones:
+
+            r_fila = r.iloc[posicion]
+            c_fila = c.iloc[posicion]
+
+            if pd.isna(r_fila):
+                # COUNTIFS contra un blanco no cuenta nada: queda el +1.
+                resultado[posicion] = 1.0
+                continue
+
+            mayores = 0
+            empates = 0
+
+            for otra in posiciones:
+
+                r_otra = r.iloc[otra]
+
+                if pd.isna(r_otra):
+                    continue
+
+                if r_otra > r_fila:
+                    mayores += 1
+                elif r_otra == r_fila:
+                    c_otra = c.iloc[otra]
+                    if pd.notna(c_otra) and pd.notna(c_fila) and c_otra > c_fila:
+                        empates += 1
+
+            resultado[posicion] = (mayores + empates) / 4.0 + 1.0
+
+    return pd.Series(resultado, index=df_re545.index)
+
+
+def calcular_u_v_re545(df_re545, dic_capacidad, dic_eficiencia):
+    """
+    Replica U ("EiniT") y V ("EalmT") de RE545:
+
+        U = K * VLOOKUP(G, Resumen!B:J, 4, 0) * 1000
+            (SoC % x "Capacidad (MWh)" x 1000 -- la 4ta columna del
+             rango B:J es la Capacidad, no la Pmax; ver
+             construir_dic_resumen_capacidad)
+
+        V = -SUMIFS(J:J, T:T, T4, G:G, G4)
+            * VLOOKUP(G, Resumen!B:J, 9, 0)
+            (la carga total del grupo central+ventana, cambiada de
+             signo, por la "Eficiencia" de esa central)
+
+    Una central que no esta en "Resumen BESS" deja las dos en blanco
+    (equivale al #N/A del VLOOKUP original).
+    """
+
+    df = df_re545
+
+    capacidad = df["clave"].map(
+        lambda valor: dic_capacidad.get(normalizar(valor), pd.NA)
+    )
+    eficiencia = df["clave"].map(
+        lambda valor: dic_eficiencia.get(normalizar(valor), pd.NA)
+    )
+
+    soc = pd.to_numeric(df["SoC"], errors="coerce")
+    capacidad_num = pd.to_numeric(capacidad, errors="coerce")
+    eficiencia_num = pd.to_numeric(eficiencia, errors="coerce")
+
+    u = soc * capacidad_num * 1000.0
+
+    carga = pd.to_numeric(df["Energia_Negativa"], errors="coerce").fillna(0.0)
+    suma_carga = carga.groupby([df["clave"], df["T"]]).transform("sum")
+
+    v = -suma_carga * eficiencia_num
+
+    return u, v
+
+
+# ------------------------------------------------------------
+# CALCULO RE545 (etapa 2): AC:AU -- reservas por subasta
+#
+# Tres bloques de 6 columnas con los MISMOS 6 encabezados
+# (CPF(-), CSF(-), CTF(-), CPF(+), CSF(+), CTF(+)), que se
+# distinguen por el titulo de grupo de la fila 2: "Subastas"
+# (AC:AH), "FD" (AI:AN) y "FMA" (AO:AT). Los tres son el mismo
+# SUMIFS contra Subastas, cambiando la columna que se suma:
+#
+#   AC4 = SUMIFS(Subastas!$O:$O, Subastas!$K:$K, $G4,
+#                Subastas!$J:$J, $D4, Subastas!$B:$B, AC$3)
+#   AI4 = idem sobre Subastas!$P:$P
+#   AO4 = idem sobre Subastas!$Q:$Q
+#
+# Criterios (homologados por NOMBRE contra nuestra hoja Subastas,
+# igual que en calcular_l y en los umbrales de E Costos):
+#   central       -> Configuración
+#   hora del mes  -> Hora_mes
+#   tipo          -> Control (la columna con los CPF/CSF, la misma
+#                    que ya usa construir_prorrata_sscc)
+#
+# PENDIENTE DE CONFIRMAR (ver BITACORA): las tres columnas que se
+# suman se toman por POSICION (O, P, Q de nuestra hoja Subastas,
+# que es como las escribe la macro de carga), no por nombre. Los
+# nombres reales que trajo el archivo de encabezados llaman "FD" a
+# O y "FMA" a P, corridos una columna respecto de los titulos de
+# grupo de RE545 (que dicen Subastas/FD/FMA para O/P/Q). Es el
+# mismo corrimiento de una columna que el usuario ya describio para
+# el archivo de Subastas. Se eligio seguir la formula (posicion),
+# no el nombre, porque la formula es la fuente primaria.
+# ------------------------------------------------------------
+
+# Los 6 encabezados que la formula usa como criterio (AC$3 y sus
+# equivalentes). Van en este orden en los tres bloques.
+TIPOS_RESERVA_RE545 = (
+    "CPF(-)", "CSF(-)", "CTF(-)", "CPF(+)", "CSF(+)", "CTF(+)",
+)
+
+# AC:AH, AI:AN, AO:AT -- las tres claves internas de cada bloque.
+_BLOQUES_RESERVA_RE545 = (
+    ("AC", "AD", "AE", "AF", "AG", "AH"),
+    ("AI", "AJ", "AK", "AL", "AM", "AN"),
+    ("AO", "AP", "AQ", "AR", "AS", "AT"),
+)
+
+
+def construir_dic_reservas_subastas(df_subastas):
+    """
+    Arma los tres diccionarios (central, hora del mes, tipo) -> suma,
+    uno por cada columna de Subastas que suman los tres bloques de
+    RE545 (O, P y Q por posicion; ver el comentario de seccion).
+
+    Un SUMIFS sin coincidencias da 0, asi que el valor por defecto de
+    los tres diccionarios es 0, no blanco.
+    """
+
+    columnas = list(df_subastas.columns)
+
+    if len(columnas) < 16:
+        raise ErrorEntrada(
+            f"La hoja Subastas tiene {len(columnas)} columna(s); hacen "
+            f"falta al menos 16 (B:Q) para las reservas de Calculo "
+            f"RE545."
+        )
+
+    # B=0 ... N=12, O=13, P=14, Q=15.
+    columnas_suma = (columnas[13], columnas[14], columnas[15])
+
+    claves = [
+        (
+            _normaliza_valor_vba(central),
+            _normaliza_valor_vba(hora_mes),
+            _normaliza_valor_vba(tipo),
+        )
+        for central, hora_mes, tipo in zip(
+            df_subastas["Configuración"],
+            df_subastas["Hora_mes"],
+            df_subastas["Control"],
+        )
+    ]
+
+    diccionarios = []
+
+    for columna in columnas_suma:
+
+        valores = pd.to_numeric(df_subastas[columna], errors="coerce")
+
+        acumulado = {}
+
+        for clave, valor in zip(claves, valores):
+            if pd.isna(valor):
+                continue
+            acumulado[clave] = acumulado.get(clave, 0.0) + float(valor)
+
+        diccionarios.append(acumulado)
+
+    return tuple(diccionarios)
+
+
+def calcular_reservas_re545(df_re545, dics_reservas):
+    """
+    Replica AC:AT (los tres bloques de 6 columnas) y AU:
+
+        AU = SUMPRODUCT(AC:AH, AI:AN, AO:AT) / 4 * 1000
+
+    o sea, la suma de los 6 productos "reserva x FD x FMA", dividida
+    por 4 y por mil.
+    """
+
+    df = df_re545
+
+    centrales = df["clave"].map(_normaliza_valor_vba)
+    horas_mes = df["Hora Mes"].map(_normaliza_valor_vba)
+
+    columnas = {}
+
+    for bloque, dic in zip(_BLOQUES_RESERVA_RE545, dics_reservas):
+
+        for interno, tipo in zip(bloque, TIPOS_RESERVA_RE545):
+
+            tipo_normalizado = _normaliza_valor_vba(tipo)
+
+            columnas[interno] = pd.Series(
+                [
+                    dic.get((central, hora_mes, tipo_normalizado), 0.0)
+                    for central, hora_mes in zip(centrales, horas_mes)
+                ],
+                index=df.index,
+            )
+
+    au = pd.Series(0.0, index=df.index)
+
+    for posicion in range(6):
+        au = au + (
+            columnas[_BLOQUES_RESERVA_RE545[0][posicion]]
+            * columnas[_BLOQUES_RESERVA_RE545[1][posicion]]
+            * columnas[_BLOQUES_RESERVA_RE545[2][posicion]]
+        )
+
+    columnas["AU"] = au / 4.0 * 1000.0
+
+    return columnas
+
+
+# ------------------------------------------------------------
+# CALCULO RE545 (etapa 3): AW:BG -- resumen por central + ventana
+#
+# OTRA TABLA, no mas columnas de la misma: en el original tiene 288
+# filas (9 centrales x 32 ventanas) contra las 26.787 del bloque
+# principal, compartiendo hoja de la fila 4 para abajo. Es el mismo
+# patron de "dos tablas de distinto largo en una hoja" que ya
+# aparecio en FD (bloques CSF/CPF) y en Ofertas SSCC.
+#
+# AW (central), AX (Ventana) y AY (Oferta Completa) NO son formulas
+# ni las escribe ninguna macro: en el .xlsm son constantes. AW/AX son
+# el cruce central x ventana, y AY es la marca de "oferta completa"
+# de esa ventana -- que en esta migracion NO hay que inventar: es la
+# columna "Completa" de construir_resumen_ventana_oferta(), la misma
+# que ya alimenta Medidores!T (T = 1 - Completa). Coincide el nombre,
+# la clave (central+ventana), el dominio (0/1) y el sentido: RE545 se
+# queda con las filas de ventana NO completa y la marca en AY.
+#
+# Formulas replicadas:
+#   AZ = primer U del grupo (G=AW, T=AX)   [INDEX/AGGREGATE(15,6,...,1)]
+#   BA = primer V del mismo grupo
+#   BB = SUMIFS(AU:AU, T:T,AX, G:G,AW)
+#   BC = MIN(MAX(MIN(AZ+BA, Capacidad*1000), BA), BB) * AY * (AX<>31)
+#   BF = SUMIFS(BV:BV, BR:BR,AX, G:G,AW)   (BV, ver calcular_bv_re545)
+#   BG = AND(AZ+BA - BF(ventana anterior) > Capacidad*1000, BF_previa<>0)*1
+#
+# BD ("check 1") y BE ("check 2") quedan para la etapa siguiente:
+# dependen de BN y BU, que son columnas del bloque principal todavia
+# sin implementar. Son columnas de CONTROL, no entran en ningun
+# calculo posterior.
+# ------------------------------------------------------------
+
+NOMBRES_RESUMEN_RE545 = {
+    "AW": "",
+    "AX": "Ventana",
+    "AY": "Oferta Completa",
+    "AZ": "EiniT",
+    "BA": "EalmT",
+    "BB": "Total Reservas* FD *FMA",
+    "BC": "Edisp_T",
+    "BD": "check 1",
+    "BE": "check 2",
+    "BF": "Margen ultima hora",
+    "BG": "flag ultima hora",
+}
+
+
+def calcular_bv_re545(df_re545, inicio_ventana=INICIO_VENTANA):
+    """
+    Replica BV ("SSCC ultima hora"):
+
+        =IF(AND(C4 = Medidores!$S$1 - 1, AU4 <> 0), AU4, 0)
+
+    Medidores!S1 es la hora en que arranca la ventana (el mismo dato
+    que la constante INICIO_VENTANA: la formula de Medidores!L
+    incrementa la ventana justo cuando la hora es igual a S1), asi
+    que la condicion es "la hora anterior al inicio de la ventana",
+    o sea la ultima hora de la ventana que termina.
+
+    Se devuelve como Serie suelta, sin guardarla todavia en el
+    DataFrame: BV vive en el bloque BQ:CE, que es de una etapa
+    posterior, y meterla antes desordenaria las columnas de salida.
+    """
+
+    au = pd.to_numeric(df_re545["AU"], errors="coerce").fillna(0.0)
+    hora = pd.to_numeric(df_re545["Hora"], errors="coerce")
+
+    return au.where((hora == inicio_ventana - 1) & (au != 0), 0.0)
+
+
+def construir_resumen_ventanas_re545(
+    df_re545, resumen_ventana_oferta, dic_capacidad, registrar=print
+):
+    """
+    Arma la tabla AW:BG (una fila por central + ventana de
+    valorizacion). Ver el comentario de seccion para el detalle de
+    cada columna.
+
+    resumen_ventana_oferta: el DataFrame de
+    construir_resumen_ventana_oferta() (columnas Central, Ventana T,
+    Oferta, Completa) -- de ahi salen AW, AX y AY.
+    dic_capacidad: central -> "Capacidad (MWh)"
+    (construir_dic_resumen_capacidad) -- es el VLOOKUP con indice 4
+    de BC, que NO es la Pmax.
+    """
+
+    base = (
+        resumen_ventana_oferta[["Central", "Ventana T", "Completa"]]
+        .copy()
+        .sort_values(["Central", "Ventana T"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+
+    df = df_re545.reset_index(drop=True)
+
+    u = pd.to_numeric(df["U"], errors="coerce")
+    v = pd.to_numeric(df["V"], errors="coerce")
+    au = pd.to_numeric(df["AU"], errors="coerce").fillna(0.0)
+    bv = calcular_bv_re545(df)
+
+    primer_u = {}
+    primer_v = {}
+    suma_au = {}
+    suma_bv = {}
+
+    for posicion, (central, ventana) in enumerate(zip(df["clave"], df["T"])):
+
+        clave = (
+            _normaliza_valor_vba(central),
+            _normaliza_valor_vba(ventana),
+        )
+
+        # INDEX + AGGREGATE(15,6,...,1): gana la PRIMERA fila del grupo.
+        if clave not in primer_u:
+            primer_u[clave] = u.iloc[posicion]
+            primer_v[clave] = v.iloc[posicion]
+
+        suma_au[clave] = suma_au.get(clave, 0.0) + float(au.iloc[posicion])
+        suma_bv[clave] = suma_bv.get(clave, 0.0) + float(bv.iloc[posicion])
+
+    filas = []
+
+    for _, fila in base.iterrows():
+
+        central = fila["Central"]
+        ventana = fila["Ventana T"]
+
+        clave = (
+            _normaliza_valor_vba(central),
+            _normaliza_valor_vba(ventana),
+        )
+
+        az = primer_u.get(clave, pd.NA)
+        ba = primer_v.get(clave, pd.NA)
+        bb = suma_au.get(clave, 0.0)
+        bf = suma_bv.get(clave, 0.0)
+
+        completa = fila["Completa"]
+        completa = 0.0 if pd.isna(completa) else float(completa)
+
+        factor = dic_capacidad.get(normalizar(central), pd.NA)
+
+        filas.append(
+            {
+                "AW": central,
+                "AX": ventana,
+                "AY": completa,
+                "AZ": az,
+                "BA": ba,
+                "BB": bb,
+                "BF": bf,
+                "_factor": factor,
+            }
+        )
+
+    tabla = pd.DataFrame(
+        filas,
+        columns=["AW", "AX", "AY", "AZ", "BA", "BB", "BF", "_factor"],
+    )
+
+    if tabla.empty:
+        tabla = tabla.assign(BC=[], BD=[], BE=[], BG=[])
+        return tabla[list(NOMBRES_RESUMEN_RE545)].rename(
+            columns=NOMBRES_RESUMEN_RE545
+        )
+
+    az_num = pd.to_numeric(tabla["AZ"], errors="coerce")
+    ba_num = pd.to_numeric(tabla["BA"], errors="coerce")
+    factor_num = pd.to_numeric(tabla["_factor"], errors="coerce")
+    ventana_num = pd.to_numeric(tabla["AX"], errors="coerce")
+
+    capacidad = factor_num * 1000.0
+
+    # BC = MIN(MAX(MIN(AZ+BA, Pmax*1000), BA), BB) * AY * (AX<>31)
+    tabla["BC"] = (
+        pd.concat(
+            [
+                pd.concat(
+                    [
+                        pd.concat([az_num + ba_num, capacidad], axis=1).min(axis=1),
+                        ba_num,
+                    ],
+                    axis=1,
+                ).max(axis=1),
+                pd.to_numeric(tabla["BB"], errors="coerce"),
+            ],
+            axis=1,
+        ).min(axis=1)
+        * tabla["AY"]
+        * ventana_num.ne(31).astype(float)
+    )
+
+    # BG: la resta usa el BF de la MISMA central en la ventana anterior,
+    # y ademas exige que el BF de la FILA ANTERIOR de esta tabla sea
+    # distinto de 0. En el original la primera fila apunta a la fila de
+    # encabezados (texto), que en Excel tambien cumple "<> 0".
+    bf_por_clave = {
+        (_normaliza_valor_vba(c), _normaliza_valor_vba(x)): float(b)
+        for c, x, b in zip(tabla["AW"], tabla["AX"], tabla["BF"])
+    }
+
+    bg = []
+
+    for posicion in range(len(tabla)):
+
+        central = tabla["AW"].iloc[posicion]
+        ventana = ventana_num.iloc[posicion]
+
+        bf_anterior_ventana = bf_por_clave.get(
+            (
+                _normaliza_valor_vba(central),
+                _normaliza_valor_vba(
+                    ventana - 1 if pd.notna(ventana) else ventana
+                ),
+            ),
+            0.0,
+        )
+
+        if posicion == 0:
+            bf_fila_previa_no_cero = True
+        else:
+            bf_fila_previa_no_cero = float(tabla["BF"].iloc[posicion - 1]) != 0.0
+
+        suma = az_num.iloc[posicion] + ba_num.iloc[posicion]
+        limite = capacidad.iloc[posicion]
+
+        if pd.isna(suma) or pd.isna(limite):
+            bg.append(0)
+            continue
+
+        bg.append(
+            int(
+                (suma - bf_anterior_ventana > limite)
+                and bf_fila_previa_no_cero
+            )
+        )
+
+    tabla["BG"] = bg
+
+    # Dependen de BN/BU, del bloque principal (etapa siguiente).
+    tabla["BD"] = pd.NA
+    tabla["BE"] = pd.NA
+
+    registrar(
+        f"  Calculo RE545: {len(tabla):,} fila(s) en el resumen por "
+        f"central+ventana (AW:BG); BD/BE quedan pendientes."
+    )
+
+    tabla = tabla[list(NOMBRES_RESUMEN_RE545)]
+
+    return tabla.rename(columns=NOMBRES_RESUMEN_RE545)
+
+
+# ------------------------------------------------------------
+# CALCULO RE545 (etapa 4): BI:CE -- Componente 1 y Componente 2
+#
+# Ultimo bloque del bloque principal. Formulas (fila 4 del original):
+#
+#   BI "Orden"    = 1 en las 4 primeras filas; despues
+#                   IF(T(i)=T(i-4), BI(i-4)+1, 1)  <- salto de 4 filas
+#   BJ "Periodo"  = 0,15,30,45 en las 4 primeras; despues BJ(i-4)
+#   BK            = SUMIFS(R, G=G, S=BI, T=T, E=BJ)
+#   BL            = SUMIFS(Q, S=BI, E=BJ, G=G, T=T)
+#   BM "Curva Cmg Decendente"
+#                 = LARGE(IF(BK_todas = BK(i), BL_todas), BJ(i)/15 + 1)
+#   BN "Edisp_Asig"
+#                 = MAX(0, MIN(MAX(0, Pmax*1000/4 - BS),
+#                              BC(central,ventana) - suma de los BN
+#                              ANTERIORES del mismo (T,G)))
+#   BO "Total C1_545" = BN * BM
+#   BQ "Energia Total" = BS + BN
+#   BR "Ventana de Valorizacion" = T
+#   BS "inyeccion en el periodo del Cmg Descendente"
+#                 = I de la primera fila con BR=BR(i), S=BI(i),
+#                   G=G(i), E=BJ(i)
+#   BT "Energía ya Asignada" = suma de los BU POSTERIORES del mismo
+#                   (BR, G)   <- mira hacia adelante
+#   BU "Asignacion Edisponible"
+#                 = IF(BS=0, 0, MAX(0, MIN(BQ, BC(central,ventana)
+#                       - BT - suma de BV del grupo)))
+#   BV "SSCC ultima hora" (ver calcular_bv_re545, ya usada por BF)
+#   BW "inyeccion orden cronologico" = I + J
+#   BX "Energia Ultima hora" = BF del resumen (central, ventana)
+#   BY "Energía ya Asignada ultima hora"
+#                 = IF(BW<0, BX, suma de los BZ ANTERIORES del grupo)
+#   BZ "Energia Asignada Ultima hora"
+#                 = IF(BW<0, 0, 8) * BG del resumen (central, ventana)
+#   CA            = BU + BZ
+#   CC "Total C2_545" = CA * BM
+#   CE "Monto a compensar"
+#                 = MAX(suma(BO del grupo) - suma(CC del grupo), 0)
+#                   * AU / suma(AU del grupo)
+#
+# Dos recursiones que hay que resolver en orden, no vectorizables de
+# una: BN necesita los BN anteriores de su grupo (se recorre de
+# arriba hacia abajo) y BU necesita los BU POSTERIORES del suyo (se
+# recorre de abajo hacia arriba). BY necesita los BZ anteriores, pero
+# BZ no depende de BY, asi que ahi alcanza con calcular BZ primero.
+#
+# OJO con el VLOOKUP de BN: usa el indice 2 del rango B:J, o sea
+# "Pmax (MW)" (dic_factor) -- distinto del indice 4 ("Capacidad
+# (MWh)", dic_capacidad) que usan U y BC.
+# ------------------------------------------------------------
+
+def _clave_grupo_re545(central, ventana):
+    return (_normaliza_valor_vba(central), _normaliza_valor_vba(ventana))
+
+
+def calcular_bi_bj_re545(df_re545):
+    """
+    Replica BI ("Orden") y BJ ("Periodo"), las dos con el mismo salto
+    de 4 filas del original (4 bloques de 15 minutos por hora):
+    BI arranca en 1 y suma 1 cada vez que la fila de 4 mas arriba
+    tiene la misma ventana; BJ repite el periodo de esa misma fila.
+
+    Las 4 primeras filas son constantes en el .xlsm (BI = 1 y BJ = 0,
+    15, 30, 45). Aca se toman de la propia columna "Minutos" para no
+    hardcodear una grilla de 15 minutos que el resto del codigo no
+    asume en ningun lado.
+    """
+
+    df = df_re545.reset_index(drop=True)
+    n = len(df)
+
+    ventana = list(df["T"])
+    minutos = list(df["Minutos"])
+
+    bi = [1.0] * n
+    bj = [None] * n
+
+    for i in range(n):
+
+        if i < 4:
+            bi[i] = 1.0
+            bj[i] = minutos[i]
+            continue
+
+        bj[i] = bj[i - 4]
+
+        if _normaliza_valor_vba(ventana[i]) == _normaliza_valor_vba(
+            ventana[i - 4]
+        ):
+            bi[i] = bi[i - 4] + 1.0
+        else:
+            bi[i] = 1.0
+
+    return (
+        pd.Series(bi, index=df_re545.index),
+        pd.Series(bj, index=df_re545.index),
+    )
+
+
+def calcular_bk_bl_bm_bs_re545(df_re545):
+    """
+    Replica BK, BL, BM y BS, que comparten la misma clave
+    (central + Orden + ventana + Periodo):
+
+      BK = suma de R (CMg Promedio) de las filas con esa clave
+      BL = suma de Q (CMg) de las filas con esa clave
+      BM = el k-esimo valor mas grande de BL entre TODAS las filas
+           (de toda la hoja, no del grupo) cuyo BK es igual al de la
+           fila, con k = Periodo/15 + 1
+      BS = el I (Descarga kWh) de la PRIMERA fila con esa clave
+    """
+
+    df = df_re545.reset_index(drop=True)
+
+    r = pd.to_numeric(df["R"], errors="coerce").fillna(0.0)
+    q = pd.to_numeric(df["CMg"], errors="coerce").fillna(0.0)
+    i_energia = pd.to_numeric(df["Energia_Positiva"], errors="coerce")
+
+    claves = [
+        (
+            _normaliza_valor_vba(central),
+            _normaliza_valor_vba(orden),
+            _normaliza_valor_vba(ventana),
+            _normaliza_valor_vba(periodo),
+        )
+        for central, orden, ventana, periodo in zip(
+            df["clave"], df["BI"], df["T"], df["BJ"]
+        )
+    ]
+
+    suma_r = {}
+    suma_q = {}
+    primer_i = {}
+
+    for posicion, clave in enumerate(claves):
+        suma_r[clave] = suma_r.get(clave, 0.0) + float(r.iloc[posicion])
+        suma_q[clave] = suma_q.get(clave, 0.0) + float(q.iloc[posicion])
+        if clave not in primer_i:
+            primer_i[clave] = i_energia.iloc[posicion]
+
+    bk = [suma_r[clave] for clave in claves]
+    bl = [suma_q[clave] for clave in claves]
+    bs = [primer_i[clave] for clave in claves]
+
+    # BM: LARGE(IF(BK = BK(i), BL), Periodo/15 + 1). El IF recorre
+    # TODA la columna, no el grupo: se indexa por valor de BK.
+    por_bk = {}
+
+    for valor_bk, valor_bl in zip(bk, bl):
+        por_bk.setdefault(round(float(valor_bk), 9), []).append(float(valor_bl))
+
+    for lista in por_bk.values():
+        lista.sort(reverse=True)
+
+    bm = []
+
+    for posicion, valor_bk in enumerate(bk):
+
+        periodo = pd.to_numeric(
+            pd.Series([df["BJ"].iloc[posicion]]), errors="coerce"
+        ).iloc[0]
+
+        if pd.isna(periodo):
+            bm.append(pd.NA)
+            continue
+
+        k = int(periodo / 15) + 1
+        lista = por_bk.get(round(float(valor_bk), 9), [])
+
+        # LARGE con k fuera de rango da #NUM! -> el IFERROR lo deja "".
+        bm.append(lista[k - 1] if 1 <= k <= len(lista) else pd.NA)
+
+    indice = df_re545.index
+
+    return (
+        pd.Series(bk, index=indice),
+        pd.Series(bl, index=indice),
+        pd.Series(bm, index=indice),
+        pd.Series(bs, index=indice),
+    )
+
+
+def _mapa_resumen_por_grupo(df_resumen_re545, columna):
+    """
+    (central, ventana) -> valor de una columna de la tabla resumen
+    AW:BG, que ya viene con los nombres reales. Se toma por posicion
+    porque AW no tiene encabezado en el archivo real.
+    """
+
+    centrales = df_resumen_re545.iloc[:, 0]
+    ventanas = df_resumen_re545.iloc[:, 1]
+    valores = pd.to_numeric(df_resumen_re545[columna], errors="coerce")
+
+    mapa = {}
+
+    for central, ventana, valor in zip(centrales, ventanas, valores):
+        mapa[_clave_grupo_re545(central, ventana)] = (
+            0.0 if pd.isna(valor) else float(valor)
+        )
+
+    return mapa
+
+
+def calcular_componentes_re545(
+    df_re545, df_resumen_re545, dic_factor
+):
+    """
+    Replica BI:CE (menos BV, que ya calcula calcular_bv_re545) y
+    devuelve un diccionario columna interna -> Serie. Ver el
+    comentario de seccion para la formula de cada una.
+
+    dic_factor: central -> "Pmax (MW)" (indice 2 del VLOOKUP de BN).
+    df_resumen_re545: la tabla AW:BG ya construida (de ahi salen BC,
+    BF y BG por central+ventana).
+    """
+
+    df = df_re545.reset_index(drop=True).copy()
+    n = len(df)
+
+    bi, bj = calcular_bi_bj_re545(df)
+    df["BI"] = bi
+    df["BJ"] = bj
+
+    bk, bl, bm, bs = calcular_bk_bl_bm_bs_re545(df)
+    df["BK"], df["BL"], df["BM"], df["BS"] = bk, bl, bm, bs
+
+    br = df["T"]
+    claves = [
+        _clave_grupo_re545(central, ventana)
+        for central, ventana in zip(df["clave"], br)
+    ]
+
+    dic_bc = _mapa_resumen_por_grupo(df_resumen_re545, "Edisp_T")
+    dic_bf = _mapa_resumen_por_grupo(df_resumen_re545, "Margen ultima hora")
+    dic_bg = _mapa_resumen_por_grupo(df_resumen_re545, "flag ultima hora")
+
+    bv = calcular_bv_re545(df)
+
+    suma_bv = {}
+    for clave, valor in zip(claves, bv):
+        suma_bv[clave] = suma_bv.get(clave, 0.0) + float(valor)
+
+    pmax = [
+        dic_factor.get(normalizar(central), pd.NA) for central in df["clave"]
+    ]
+
+    bs_num = pd.to_numeric(df["BS"], errors="coerce")
+
+    # --- BN: recursion hacia ABAJO (suma de los BN anteriores) ---
+    bn = [0.0] * n
+    acumulado_bn = {}
+
+    for posicion in range(n):
+
+        clave = claves[posicion]
+        capacidad_pmax = pmax[posicion]
+        valor_bs = bs_num.iloc[posicion]
+
+        if pd.isna(capacidad_pmax) or pd.isna(valor_bs):
+            bn[posicion] = pd.NA
+            continue
+
+        disponible = max(
+            0.0, float(capacidad_pmax) * 1000.0 / 4.0 - float(valor_bs)
+        )
+        techo = dic_bc.get(clave, 0.0) - acumulado_bn.get(clave, 0.0)
+
+        valor = max(0.0, min(disponible, techo))
+
+        bn[posicion] = valor
+        acumulado_bn[clave] = acumulado_bn.get(clave, 0.0) + valor
+
+    bn = pd.Series(bn, index=df.index)
+
+    bm_num = pd.to_numeric(df["BM"], errors="coerce")
+    bn_num = pd.to_numeric(bn, errors="coerce")
+
+    bo = bn_num * bm_num
+    bq = bs_num.fillna(0.0) + bn_num.fillna(0.0)
+
+    # --- BU: recursion hacia ARRIBA (BT mira las filas siguientes) ---
+    bt = [0.0] * n
+    bu = [0.0] * n
+    acumulado_bu = {}
+
+    for posicion in range(n - 1, -1, -1):
+
+        clave = claves[posicion]
+
+        # BT = suma de los BU de las filas POSTERIORES del grupo.
+        bt[posicion] = acumulado_bu.get(clave, 0.0)
+
+        valor_bs = bs_num.iloc[posicion]
+
+        if pd.isna(valor_bs) or float(valor_bs) == 0.0:
+            bu[posicion] = 0.0
+        else:
+            techo = (
+                dic_bc.get(clave, 0.0)
+                - bt[posicion]
+                - suma_bv.get(clave, 0.0)
+            )
+            bu[posicion] = max(0.0, min(float(bq.iloc[posicion]), techo))
+
+        acumulado_bu[clave] = acumulado_bu.get(clave, 0.0) + bu[posicion]
+
+    bt = pd.Series(bt, index=df.index)
+    bu = pd.Series(bu, index=df.index)
+
+    bw = (
+        pd.to_numeric(df["Energia_Positiva"], errors="coerce").fillna(0.0)
+        + pd.to_numeric(df["Energia_Negativa"], errors="coerce").fillna(0.0)
+    )
+
+    bx = pd.Series([dic_bf.get(clave, 0.0) for clave in claves], index=df.index)
+
+    bz = pd.Series(
+        [
+            (0.0 if bw.iloc[posicion] < 0 else 8.0)
+            * dic_bg.get(claves[posicion], 0.0)
+            for posicion in range(n)
+        ],
+        index=df.index,
+    )
+
+    # --- BY: suma de los BZ ANTERIORES del grupo (BZ ya esta) ---
+    by = [0.0] * n
+    acumulado_bz = {}
+
+    for posicion in range(n):
+
+        clave = claves[posicion]
+
+        if bw.iloc[posicion] < 0:
+            by[posicion] = float(bx.iloc[posicion])
+        else:
+            by[posicion] = acumulado_bz.get(clave, 0.0)
+
+        acumulado_bz[clave] = acumulado_bz.get(clave, 0.0) + float(
+            bz.iloc[posicion]
+        )
+
+    by = pd.Series(by, index=df.index)
+
+    ca = bu + bz
+    cc = ca * bm_num
+
+    # --- CE: por grupo ---
+    au = pd.to_numeric(df["AU"], errors="coerce").fillna(0.0)
+
+    suma_bo = {}
+    suma_cc = {}
+    suma_au = {}
+
+    for posicion, clave in enumerate(claves):
+        valor_bo = bo.iloc[posicion]
+        valor_cc = cc.iloc[posicion]
+        suma_bo[clave] = suma_bo.get(clave, 0.0) + (
+            0.0 if pd.isna(valor_bo) else float(valor_bo)
+        )
+        suma_cc[clave] = suma_cc.get(clave, 0.0) + (
+            0.0 if pd.isna(valor_cc) else float(valor_cc)
+        )
+        suma_au[clave] = suma_au.get(clave, 0.0) + float(au.iloc[posicion])
+
+    ce = []
+
+    for posicion, clave in enumerate(claves):
+
+        total_au = suma_au.get(clave, 0.0)
+
+        if total_au == 0.0:
+            # division por cero -> el IFERROR original devuelve 0
+            ce.append(0.0)
+            continue
+
+        ce.append(
+            max(suma_bo.get(clave, 0.0) - suma_cc.get(clave, 0.0), 0.0)
+            * float(au.iloc[posicion])
+            / total_au
+        )
+
+    indice = df_re545.index
+
+    def _serie(valores):
+        return pd.Series(list(valores), index=indice)
+
+    return {
+        "BI": _serie(df["BI"]),
+        "BJ": _serie(df["BJ"]),
+        "BK": _serie(df["BK"]),
+        "BL": _serie(df["BL"]),
+        "BM": _serie(df["BM"]),
+        "BN": _serie(bn),
+        "BO": _serie(bo),
+        "BQ": _serie(bq),
+        "BR": _serie(br),
+        "BS": _serie(df["BS"]),
+        "BT": _serie(bt),
+        "BU": _serie(bu),
+        "BV": _serie(bv),
+        "BW": _serie(bw),
+        "BX": _serie(bx),
+        "BY": _serie(by),
+        "BZ": _serie(bz),
+        "CA": _serie(ca),
+        "CC": _serie(cc),
+        "CE": _serie(ce),
+    }
+
+
+def completar_checks_resumen_re545(df_resumen_re545, df_re545):
+    """
+    Completa BD ("check 1") y BE ("check 2") de la tabla resumen, que
+    dependen de BN y BU del bloque principal:
+
+        BD = SUMIFS(BN, BR=AX, G=AW) - BC
+        BE = SUMIFS(BU, BR=AX, G=AW) - BC + BF
+
+    Son columnas de control: no alimentan ningun calculo posterior.
+    """
+
+    tabla = df_resumen_re545.copy()
+
+    suma_bn = {}
+    suma_bu = {}
+
+    bn = pd.to_numeric(df_re545["BN"], errors="coerce").fillna(0.0)
+    bu = pd.to_numeric(df_re545["BU"], errors="coerce").fillna(0.0)
+
+    for posicion, (central, ventana) in enumerate(
+        zip(df_re545["clave"], df_re545["BR"])
+    ):
+        clave = _clave_grupo_re545(central, ventana)
+        suma_bn[clave] = suma_bn.get(clave, 0.0) + float(bn.iloc[posicion])
+        suma_bu[clave] = suma_bu.get(clave, 0.0) + float(bu.iloc[posicion])
+
+    claves = [
+        _clave_grupo_re545(central, ventana)
+        for central, ventana in zip(tabla.iloc[:, 0], tabla.iloc[:, 1])
+    ]
+
+    bc = pd.to_numeric(tabla["Edisp_T"], errors="coerce").fillna(0.0)
+    bf = pd.to_numeric(tabla["Margen ultima hora"], errors="coerce").fillna(0.0)
+
+    tabla["check 1"] = [
+        suma_bn.get(clave, 0.0) - float(bc.iloc[posicion])
+        for posicion, clave in enumerate(claves)
+    ]
+    tabla["check 2"] = [
+        suma_bu.get(clave, 0.0) - float(bc.iloc[posicion])
+        + float(bf.iloc[posicion])
+        for posicion, clave in enumerate(claves)
+    ]
+
+    return tabla
+
+
+def completar_calculo_re545(
+    df_re545, df_subastas, umbral_soc_minimo, dic_capacidad,
+    dic_eficiencia, registrar=print,
+):
+    """
+    Agrega a la etapa base de RE545 las columnas calculadas L, M, N,
+    O, S, U, V y AC:AU, en el orden final de la hoja pero todavia
+    con los nombres internos (el renombre a los nombres reales lo
+    hace renombrar_calculo_re545, despues de la tabla resumen).
+
+    L y M son literalmente las mismas formulas que en Calculo E Costos
+    (mismo COUNTIFS contra Subastas, mismo 1*(SoC > umbral)), asi que
+    se reusan calcular_l() y calcular_m(). N y O tambien: la formula
+    de RE545 (SUMIFS del grupo menos SUMIFS de los bloques anteriores)
+    es la version en formula de lo mismo que calcula calcular_n_o()
+    para E Costos -- suma, dentro del grupo central+ciclo y contando
+    solo filas con L=1, la energia de los bloques horarios >= al de la
+    fila. El resto (S, U, V) es propio de esta hoja.
+
+    Agrega tambien AC:AU (los tres bloques de reservas por subasta y
+    el SUMPRODUCT que los combina, ver la seccion de mas arriba).
+
+    Todavia FUERA de esta etapa (ver plan seccion 26.3): AW:BG (el
+    resumen por central+ventana, que es una tabla de otro largo) y
+    BI:CE (Componentes 1 y 2).
+    """
+
+    df = df_re545.reset_index(drop=True).copy()
+
+    df["L"] = calcular_l(df, df_subastas)
+    df["M"] = calcular_m(df, umbral_soc_minimo)
+
+    n, o = calcular_n_o(df)
+    df["N"] = n.reset_index(drop=True)
+    df["O"] = o.reset_index(drop=True)
+
+    df["S"] = calcular_s_re545(df)
+
+    u, v = calcular_u_v_re545(df, dic_capacidad, dic_eficiencia)
+    df["U"] = u
+    df["V"] = v
+
+    dics_reservas = construir_dic_reservas_subastas(df_subastas)
+
+    for interno, serie in calcular_reservas_re545(df, dics_reservas).items():
+        df[interno] = serie
+
+    participa = int(df["L"].sum())
+    registrar(
+        f"  Calculo RE545: {participa:,} de {len(df):,} fila(s) "
+        f"marcadas como 'participa en subasta' (L=1)."
+    )
+
+    return df
+
+
+def renombrar_calculo_re545(df_re545):
+    """
+    Deja las columnas en el orden final de la hoja y las pasa de los
+    nombres internos (letras) a los nombres reales. Se hace al final
+    de todo y aparte, porque la tabla resumen AW:BG y las columnas
+    BI:CE necesitan el DataFrame con los nombres internos.
+    """
+
+    return (
+        df_re545[list(NOMBRES_CALCULO_RE545)]
+        .rename(columns=NOMBRES_CALCULO_RE545)
+    )
 
 
 # ============================================================
@@ -4087,6 +5469,26 @@ SECCIONES_CONSOLIDADO = (
 )
 
 
+SECCIONES_PAGOS = (
+    (
+        "ecostos",
+        "Calculo E Costos",
+        f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
+        f"{ARCHIVO_CENTRALES}, {ARCHIVO_CMG} y el archivo "
+        f"{CARPETA_SSCC_DESEMPENO}/ (para el FD homologado de AM:AR).",
+        (HOJA_CALCULO_ECOSTOS,),
+    ),
+    (
+        "re545",
+        "Calculo RE545",
+        f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
+        f"{ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- no necesita el "
+        f"archivo {CARPETA_SSCC_DESEMPENO}/.",
+        (HOJA_CALCULO_RE545,),
+    ),
+)
+
+
 def generar_consolidado(
     carpeta_base, aamm, secciones_activas, registrar=print, progreso=None
 ):
@@ -4265,26 +5667,49 @@ def generar_consolidado(
     return rutas["salida"]
 
 
-def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
+def generar_pagos_bess(
+    carpeta_base, secciones_activas, registrar=print, progreso=None
+):
     """
-    Genera/actualiza Pagos_BESS.xlsx: la hoja "Calculo E Costos"
-    completa (etapa base + etapas 2, 3 y 4, plan seccion 25). Queda
-    afuera la columna AY (que la macro original tampoco escribe) y
-    toda la hoja "Calculo RE545".
+    Genera/actualiza Pagos_BESS.xlsx, recalculando solo las hojas de
+    las secciones tildadas (ids de SECCIONES_PAGOS: "ecostos",
+    "re545") y preservando el resto tal cual estaba en el archivo
+    existente (ver escribir_pagos_bess/hojas_regenerar) -- mismo
+    criterio que generar_consolidado()/SECCIONES_CONSOLIDADO. La usa
+    la ventana "Generar" de esa fila.
 
     No recalcula Medidores ni Subastas: los lee tal cual estan en
     Consolidado_entradas.xlsx, que debe generarse primero con su
-    propia ventana "Generar". Centrales.xlsx, cmg.xlsx y el archivo
-    SSCC_Desempeño_* si se leen/recalculan frescos (igual que ya
-    hacia con CMg).
-
-    Sin checkboxes todavia -- una sola hoja de salida, se ajustan
-    detalles en una etapa posterior (pedido explicito del usuario).
+    propia ventana "Generar". Centrales.xlsx y cmg.xlsx si se leen/
+    recalculan frescos. El archivo SSCC_Desempeño_* solo se exige si
+    "ecostos" esta tildada -- "re545" no usa FD.
     """
 
     def avanzar(valor):
         if progreso:
             progreso(valor)
+
+    secciones_activas = set(secciones_activas)
+    ids_validos = {seccion[0] for seccion in SECCIONES_PAGOS}
+    desconocidas = secciones_activas - ids_validos
+
+    if desconocidas:
+        raise ErrorEntrada(
+            f"Seccion(es) desconocida(s): {sorted(desconocidas)}"
+        )
+
+    if not secciones_activas:
+        raise ErrorEntrada(
+            "No se tildo ninguna seccion para generar/actualizar."
+        )
+
+    quiere_ecostos = "ecostos" in secciones_activas
+    quiere_re545 = "re545" in secciones_activas
+
+    hojas_regenerar = set()
+    for id_seccion, _, _, hojas in SECCIONES_PAGOS:
+        if id_seccion in secciones_activas:
+            hojas_regenerar.update(hojas)
 
     rutas = resolver_rutas(carpeta_base)
 
@@ -4314,7 +5739,7 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
         )
 
     registrar(f"  filas: {len(df_medidores):,}")
-    avanzar(20)
+    avanzar(10)
 
     if not rutas["centrales"].is_file():
         raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
@@ -4323,7 +5748,14 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     resumen, diccionario = leer_centrales(rutas["centrales"])
     mapa_barra = construir_mapa_barra(resumen)
     dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
-    avanzar(40)
+
+    # Eficiencia y Capacidad solo las usa RE545 (V y U/BC/BN).
+    dic_eficiencia = dic_capacidad = None
+    if quiere_re545:
+        dic_eficiencia = construir_dic_resumen_eficiencia(resumen)
+        dic_capacidad = construir_dic_resumen_capacidad(resumen)
+
+    avanzar(20)
 
     if not rutas["cmg"].is_file():
         raise ErrorEntrada(f"No se encontro {rutas['cmg']}")
@@ -4331,14 +5763,7 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     registrar(f"Leyendo {ARCHIVO_CMG}...")
     df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
     dic_cmg = construir_dic_cmg(df_cmg)
-    avanzar(55)
-
-    registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
-               "traspaso de Medidores)...")
-    df_ecostos = construir_calculo_e_costos(
-        df_medidores, mapa_barra, dic_cmg, registrar=registrar
-    )
-    avanzar(70)
+    avanzar(30)
 
     registrar(f"Leyendo hoja 'Subastas' de {rutas['salida'].name}...")
 
@@ -4358,35 +5783,101 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
             f"(tildando 'Subastas')."
         )
 
-    avanzar(75)
+    avanzar(40)
 
-    archivo_sscc = buscar_archivo_sscc_desempeno(rutas["sscc_desempeno_dir"])
-    if not archivo_sscc:
-        raise ErrorEntrada(
-            f"No se encontro ningun archivo SSCC_Desempeño_* en "
-            f"{rutas['sscc_desempeno_dir']} (hace falta para AM:AR de "
-            f"Calculo E Costos)."
+    df_ecostos = None
+    df_re545 = None
+    df_resumen_re545 = None
+
+    if quiere_ecostos:
+
+        registrar(
+            "Construyendo Calculo E Costos (etapa base: H + CMg + "
+            "traspaso de Medidores)..."
+        )
+        df_ecostos = construir_calculo_e_costos(
+            df_medidores, mapa_barra, dic_cmg, registrar=registrar
+        )
+        avanzar(50)
+
+        archivo_sscc = buscar_archivo_sscc_desempeno(
+            rutas["sscc_desempeno_dir"]
+        )
+        if not archivo_sscc:
+            raise ErrorEntrada(
+                f"No se encontro ningun archivo SSCC_Desempeño_* en "
+                f"{rutas['sscc_desempeno_dir']} (hace falta para AM:AR "
+                f"de Calculo E Costos)."
+            )
+
+        registrar(f"Leyendo {archivo_sscc.name}...")
+        df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
+        avanzar(60)
+
+        registrar(
+            "Completando L, M, N, O, R, S, T, U, W, X, Y, AB, AC, AD, AE, "
+            "AF, AG, AH, AI, AJ, AK, AL, AM, AN, AO, AP, AQ, AR, AS, AT, "
+            "AU, AV, AW, AX, AZ..."
+        )
+        df_ecostos = completar_calculo_e_costos_grupos(
+            df_ecostos, df_subastas, dic_factor, umbral_soc_minimo,
+            diccionario, df_fd_csf, df_fd_cpf,
+            registrar=registrar,
         )
 
-    registrar(f"Leyendo {archivo_sscc.name}...")
-    df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
-    avanzar(85)
+    avanzar(70)
 
-    registrar(
-        "Completando L, M, N, O, R, S, T, U, W, X, Y, AB, AC, AD, AE, AF, "
-        "AG, AH, AI, AJ, AK, AL, AM, AN, AO, AP, AQ, AR, AS, AT, AU, AV, "
-        "AW, AX, AZ..."
-    )
-    df_ecostos = completar_calculo_e_costos_grupos(
-        df_ecostos, df_subastas, dic_factor, umbral_soc_minimo,
-        diccionario, df_fd_csf, df_fd_cpf,
-        registrar=registrar,
-    )
+    if quiere_re545:
+
+        registrar(
+            "Construyendo Calculo RE545 (etapa base: traspaso de "
+            "Medidores + L, M, N, O, S, U, V)..."
+        )
+        df_re545 = construir_calculo_re545(
+            df_medidores, mapa_barra, dic_cmg, registrar=registrar
+        )
+        df_re545_base = completar_calculo_re545(
+            df_re545, df_subastas, umbral_soc_minimo, dic_capacidad,
+            dic_eficiencia, registrar=registrar,
+        )
+
+        # AY ("Oferta Completa") del resumen por central+ventana sale
+        # de la misma tabla que ya alimenta Medidores!T, reconstruida
+        # aca a partir de la hoja Medidores ya generada.
+        resumen_ventana_oferta = construir_resumen_ventana_oferta(
+            df_medidores["clave"],
+            df_medidores["Ventana"],
+            df_medidores["Oferta_Completa_Dia"],
+            registrar=registrar,
+        )
+        df_resumen_re545 = construir_resumen_ventanas_re545(
+            df_re545_base, resumen_ventana_oferta, dic_capacidad,
+            registrar=registrar,
+        )
+
+        registrar("  Calculo RE545: Componente 1 y Componente 2 (BI:CE)...")
+        for interno, serie in calcular_componentes_re545(
+            df_re545_base, df_resumen_re545, dic_factor
+        ).items():
+            df_re545_base[interno] = serie
+
+        df_resumen_re545 = completar_checks_resumen_re545(
+            df_resumen_re545, df_re545_base
+        )
+
+        df_re545 = renombrar_calculo_re545(df_re545_base)
+
     avanzar(90)
 
     registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
     escribir_pagos_bess(
-        rutas["salida_pagos"], df_ecostos, registrar=registrar
+        rutas["salida_pagos"],
+        df_ecostos,
+        df_re545,
+        df_resumen_re545,
+        ruta_existente=rutas["salida_pagos"],
+        hojas_regenerar=hojas_regenerar,
+        registrar=registrar,
     )
 
     avanzar(100)

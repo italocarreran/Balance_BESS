@@ -710,33 +710,65 @@ def main():
         top = tk.Toplevel(root)
         ventanas_generar["pagos"] = top
         top.title(f"Generar {nucleo.ARCHIVO_SALIDA_PAGOS}")
-        top.geometry("560x260")
+        top.geometry("620x380")
 
         tk.Label(
             top,
             text=(
-                f"Genera/actualiza {nucleo.ARCHIVO_SALIDA_PAGOS} "
-                f"(hoja '{nucleo.HOJA_CALCULO_ECOSTOS}', etapa base: "
-                f"H + CMg + traspaso de Medidores).\n\n"
-                f"Usa la hoja 'Medidores' ya generada en "
-                f"{nucleo.ARCHIVO_SALIDA} (no la recalcula: primero "
-                f"hay que generar esa con su propio boton), mas "
-                f"Centrales.xlsx y cmg.xlsx frescos.\n\n"
-                f"Por ahora es todo o nada (una sola hoja de salida); "
-                f"mas adelante se agregan casillas por parte, como en "
-                f"{nucleo.ARCHIVO_SALIDA}."
+                "Elegi que hojas recalcular esta vez. Lo que dejes "
+                "destildado se conserva tal cual esta hoy en "
+                f"{nucleo.ARCHIVO_SALIDA_PAGOS} (si ya existe).\n\n"
+                f"Usa la hoja 'Medidores' (y 'Subastas') ya generadas "
+                f"en {nucleo.ARCHIVO_SALIDA} (no las recalcula: "
+                f"primero hay que generar esa con su propio boton), "
+                f"mas Centrales.xlsx y cmg.xlsx frescos."
             ),
-            wraplength=520, justify="left", anchor="w",
+            wraplength=580, justify="left", anchor="w",
             font=("Segoe UI", 9),
-        ).pack(fill="both", expand=True, padx=14, pady=14)
+        ).pack(fill="x", padx=14, pady=(14, 8))
+
+        variables = {}
+
+        for id_seccion, etiqueta, descripcion, _ in nucleo.SECCIONES_PAGOS:
+            var = tk.BooleanVar(value=True)
+            variables[id_seccion] = var
+
+            fila = tk.LabelFrame(top, text=etiqueta, padx=8, pady=4)
+            fila.pack(fill="x", padx=14, pady=4)
+
+            tk.Checkbutton(
+                fila, text="Recalcular esta vez", variable=var,
+                font=("Segoe UI", 9, "bold"),
+            ).pack(anchor="w")
+
+            tk.Label(
+                fila, text=descripcion, fg=COLOR_NEUTRO,
+                font=("Segoe UI", 8), wraplength=560, justify="left",
+                anchor="w",
+            ).pack(anchor="w")
 
         pie = tk.Frame(top)
         pie.pack(fill="x", side="bottom", pady=10)
 
         def actualizar():
+            activas = {
+                id_seccion for id_seccion, var in variables.items()
+                if var.get()
+            }
+            if not activas:
+                messagebox.showwarning(
+                    "Nada tildado",
+                    "Tilda al menos una hoja para generar/actualizar.",
+                )
+                return
+
+            top.attributes("-topmost", False)
             lanzar_generacion(
                 nucleo.generar_pagos_bess,
-                dict(carpeta_base=var_base.get()),
+                dict(
+                    carpeta_base=var_base.get(),
+                    secciones_activas=activas,
+                ),
                 top,
                 btn_actualizar,
                 nucleo.ARCHIVO_SALIDA_PAGOS,

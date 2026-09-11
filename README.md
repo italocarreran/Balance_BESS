@@ -6,8 +6,8 @@ usa solo como referencia de validación; el proceso Python no depende de
 información almacenada exclusivamente en ese libro.
 
 Etapas implementadas hasta ahora: **Medidores** (incluye Ofertas SSCC), la
-carga de **CMg**, **FD** y **Subastas**, y una primera etapa (base) de
-**Calculo E Costos**.
+carga de **CMg**, **FD** y **Subastas**, y las dos hojas de cálculo del libro
+completas: **Calculo E Costos** y **Calculo RE545**.
 
 ## Instalación
 
@@ -31,8 +31,10 @@ python Balance_BESS.py
    diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
 4. Al final del diagrama están `Consolidado_entradas.xlsx` y
    `Pagos_BESS.xlsx`, cada una con su botón **Generar...**. Ese botón abre
-   una ventana aparte donde se elige qué partes recalcular esta vez; lo que
-   no se tilda se conserva tal cual estaba en el archivo existente.
+   una ventana aparte donde se elige qué partes recalcular esta vez (una
+   casilla por hoja); lo que no se tilda se conserva tal cual estaba en el
+   archivo existente. `Pagos_BESS.xlsx` tiene dos casillas: `Calculo E
+   Costos` y `Calculo RE545`.
 
 ## Estructura de carpeta de un caso
 
@@ -86,6 +88,7 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 | Historial de sesiones y pendientes abiertos | `BITACORA.md` |
 | Reglas de negocio del cálculo y el plan completo de migración | `docs/Plan_Traspaso_Python_Balance_BESS.md` |
 | El código VBA original, las fórmulas del `.xlsm` y de dónde sale cada dato | `docs/Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md` |
+| La hoja `Calculo RE545` real (recortada), con sus nombres de columna y fórmulas | `docs/Calculo_RE545_reducido_para_IA.xlsx` |
 
 ## Estado actual
 
@@ -110,8 +113,7 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
   SSCC" queda vacía: depende de `Calculo E Costos`.
 - `Log` — avisos e incidencias detectadas durante el cálculo.
 
-`Pagos_BESS.xlsx` (nombre y alcance provisorios, a pedido del usuario) tiene
-por ahora una sola hoja:
+`Pagos_BESS.xlsx` (nombre provisorio, a pedido del usuario) tiene dos hojas:
 
 - `Calculo E Costos` — traspaso desde `Medidores`, asignación de CMg, y casi
   toda `Actualizar_Calculos_Columnas` (`L, M, N, O, R, S, T, U, W, X, Y, AB,
@@ -125,8 +127,12 @@ por ahora una sola hoja:
   `Costo carga`, `Descuento FD`, `Total` y `Monto a compensar`, entre otros.
   Requiere ahora también el archivo `SSCC_Desempeño_*` (para el FD
   homologado). La hoja queda **completa** (`A:AZ`, sin la columna `AY`, que
-  la macro original tampoco escribe). Toda la hoja `Calculo RE545` sí queda
-  para una etapa posterior.
+  la macro original tampoco escribe).
+- `Calculo RE545` — la hoja hermana, también **completa** (`A:CE`): mismo
+  traspaso desde `Medidores` (la energía se reparte entre las dos hojas según
+  `Ventana_No_Completa`), las reservas por subasta (`AC:AU`), el resumen por
+  central+ventana (`AW:BG`, una tabla de otro largo que se escribe al lado) y
+  los Componentes 1 y 2 (`BI:CE`), hasta el `Monto a compensar`.
 
 Las macros de Ofertas SSCC, CMg, FD y Subastas replicadas son solo las de
 **carga** de esas hojas.

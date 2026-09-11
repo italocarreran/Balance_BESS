@@ -30,8 +30,18 @@ estado, no un historial.
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
   inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
   `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
-- Implementar toda la hoja `Calculo RE545`. `Calculo E Costos` ya está
-  completa (etapas base, 2, 3 y 4 — ver entradas de esta sesión).
+- `Calculo E Costos` y `Calculo RE545` están **completas** (ver plan §25
+  y §26). Lo que sigue son las hojas de salida que las consumen:
+  `PRORRATA_RETIROS`, `Compensacion total`, `Resumen` y el CSV
+  (`Verificacion_CSV`) — ninguna analizada todavía. El documento de
+  trazabilidad las marca como "capa de cálculo masiva, necesita rastreo
+  aguas arriba dedicado" (§7 de ese documento).
+- Confirmar contra un caso real cuál de las columnas de `Subastas` suma
+  cada bloque de reservas de `Calculo RE545` (`AC:AH`, `AI:AN`, `AO:AT`).
+  Se siguió la fórmula (posición `O`/`P`/`Q`), pero los nombres reales de
+  esas columnas (`FD`, `FMA`, sin nombre) están corridos una columna
+  respecto de los títulos de grupo de RE545 (Subastas/FD/FMA). Ver plan
+  §26.3.
 - Decidir si la columna `Energía SSCC` de la hoja `Subastas` de
   `Consolidado_entradas.xlsx` tiene que quedar escrita ahí. El cálculo ya
   no es un pendiente (`calcular_subastas_energia_sscc()`), pero se hace
@@ -51,9 +61,6 @@ estado, no un historial.
   hacía la macro original (ver plan §23.3).
 - Confirmar el nombre definitivo de `Pagos_BESS.xlsx` (provisorio, elegido
   por el usuario como "pagos_bess o algo así por ahora").
-- Agregar casillas por sección a la ventana "Generar" de `Pagos_BESS.xlsx`
-  (hoy es todo o nada, una sola hoja) — "ajustamos detalles después"
-  (pedido explícito del usuario, ver entrada de esta sesión).
 - Probar la ventana nueva (diagrama + botones "Generar") con una carpeta
   base real: solo se probó por ahora con `python -m py_compile` (no hay
   entorno grafico en esta sesión para abrir la ventana) y con pruebas
@@ -864,3 +871,229 @@ olvido.
   columnas de `NOMBRES_CALCULO_E_COSTOS` en orden, las tres nuevas numéricas en todas las filas.
 
 No se probó contra un caso real ni contra la planilla 11 — sigue siendo el pendiente principal.
+
+---
+
+## 2026-09-11 (8) — `Calculo RE545`, etapa base (`A:V`)
+
+El usuario pidió seguir con `Calculo RE545` y entregó `Calculo_RE545_reducido_para_IA.xlsx`
+(hoja real recortada: fila 3 = nombres de columna, filas 1-2 = títulos de grupo, hoja
+`Mapa_Formulas` con todas las familias de fórmulas, columna `CF` con la fila original). Se copió
+al repo como `docs/Calculo_RE545_reducido_para_IA.xlsx` — mismo criterio que el documento de
+trazabilidad: si es la fuente de una decisión, vive en el repo, no en un adjunto de sesión.
+
+Avisó además que quedaba poco contexto y que se iba a dormir, así que esta entrada se escribe
+con el detalle suficiente para que la próxima sesión continúe sin preguntarle nada.
+
+**Hallazgo estructural:** `Calculo RE545` es casi toda **fórmulas en la hoja**, no valores
+escritos por macro (al revés que `Calculo E Costos`, donde la macro J escribe casi todo). Las
+únicas columnas que escribe el VBA son las del traspaso y `Q`/`R`.
+
+**Cómo se reparten las dos hojas** (`Traspasar_Medidores_A_Calculos_Rapido` recorre `Medidores`
+una sola vez y escribe en las dos): `A:G`, `K` y `P` van **iguales a las dos**; lo que se reparte
+es la energía, según `Medidores!T` (`Ventana_No_Completa`): `= 1` → E Costos; cualquier otro
+número, vacío, no numérico o error → RE545. Solo RE545 recibe además `T` (= `Medidores!L`,
+"Ventana de valorizacion") y `R` (`CMg!I`, "CMg Promedio", porque `CompletarDestinoTurbo` se
+llama con `escribirR:=True` para esta hoja y `False` para la otra).
+
+**Cambios en `nucleo.py`:**
+
+- `construir_dic_cmg()` ahora guarda **el par** `(CMg!F, CMg!I)` en vez de solo `CMg!F` — son los
+  dos elementos del `Array()` del diccionario VBA. Se agregó `_buscar_cmg(dic_cmg, barra,
+  cuarto_hora)` como helper compartido (replica `CompletarDestinoTurbo`), y
+  `construir_calculo_e_costos()` ahora toma `[0]` de ese par. **Si algo se rompe en CMg, mirar
+  acá primero**: es un cambio en una estructura que ya usaban las dos hojas.
+- `construir_calculo_re545()`: etapa base (traspaso + Barra + Q/R + T).
+- `construir_dic_resumen_eficiencia()`: central → `Eficiencia` de `Resumen BESS` (la 9na columna
+  de las 9 de esa tabla = el `VLOOKUP(...,9,0)` de `V`). Es una **tercera** lectura de esa hoja,
+  distinta de `construir_mapa_barra()` y `construir_dic_resumen_factor()` — no fusionar.
+- `calcular_s_re545()`: el "ranking cmg" de esta hoja. **No es el mismo** que el de E Costos:
+  agrupa por central + `T` (ventana de valorización) y ordena por `CMg Promedio` + `Hora`, no por
+  `CMg` + ciclo.
+- `calcular_u_v_re545()`: `U` (`EiniT`) = `SoC % × Pmax (MW) × 1000`; `V` (`EalmT`) = la carga
+  total del grupo central+ventana cambiada de signo, por la `Eficiencia`. Central que no está en
+  `Resumen BESS` → las dos en blanco (equivale al `#N/A` del VLOOKUP).
+- `completar_calculo_re545()`: agrega `L`, `M`, `N`, `O`, `S`, `U`, `V` y renombra a
+  `NOMBRES_CALCULO_RE545`. `L`, `M`, `N` y `O` son **literalmente las mismas fórmulas** que en E
+  Costos, así que se reusan `calcular_l()`, `calcular_m()` y `calcular_n_o()` (verificado contra
+  la fórmula real de RE545, que es la versión explícita de lo que esa función ya hacía).
+- `escribir_pagos_bess()` acepta un `df_re545` opcional y escribe la hoja `Calculo RE545`
+  (`HOJA_CALCULO_RE545`) en `Pagos_BESS.xlsx`; `generar_pagos_bess()` la arma y la pasa.
+
+**Trampa nueva, importante:** `R`, `S`, `T`, `U` y `V` existen en las dos hojas y **significan
+cosas distintas** en cada una (`U` es "Total" en E Costos y "EiniT" en RE545). Nunca reusar una
+función de una hoja en la otra sin leer antes la fórmula real de la columna.
+
+**Verificación** (tests sintéticos, sin persistir en el repo): el reparto de energía entre las dos
+hojas (incluido el caso `Ventana_No_Completa` vacío → RE545) y que la hoja hermana sigue dando lo
+complementario; `T` = `Medidores!L`; `Q`/`R` del par de CMg; `S` con un grupo armado a propósito
+con empates de `CMg Promedio` resueltos por `Hora` (valores calculados a mano: 1.5, 1.25, 1.0,
+1.75, 1.0); `U`/`V` con una central sin ficha en `Resumen BESS` → blanco; y la corrida completa
+de `completar_calculo_re545()` devolviendo las 22 columnas con los nombres reales. Se corrieron
+también los tests de la etapa 4 de E Costos como regresión (el cambio de `construir_dic_cmg`
+podía romperlos): pasan.
+
+**Lo que sigue** (detalle por bloque en el plan §26.3): `AC:AU`, `AW:BG` y `BI:CE`.
+
+---
+
+## 2026-09-11 (9) — `Calculo RE545`, etapa 2: `AC:AU` (reservas por subasta)
+
+Segunda etapa de RE545, en la misma sesión (el usuario pidió avanzar sin consultarlo).
+
+`AC:AU` son tres bloques de 6 columnas con los **mismos 6 encabezados** (`CPF(-)`, `CSF(-)`,
+`CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)`), que se distinguen por el título de grupo de la fila 2:
+"Subastas" (`AC:AH`), "FD" (`AI:AN`) y "FMA" (`AO:AT`). Los tres son el mismo `SUMIFS` contra
+`Subastas` cambiando solo la columna sumada, y `AU` = `SUMPRODUCT` de los tres bloques `/4*1000`.
+
+- `construir_dic_reservas_subastas(df_subastas)`: arma los tres diccionarios
+  `(central, hora del mes, tipo) -> suma`. Criterios por NOMBRE (`Configuración`, `Hora_mes`,
+  `Control`), columnas sumadas por POSICIÓN (`O`, `P`, `Q`).
+- `calcular_reservas_re545(df_re545, dics)`: devuelve las 18 columnas + `AU`.
+- `NOMBRES_CALCULO_RE545` suma los 18 nombres repetidos + `SUMA Reservas*FMA*FD`.
+
+**Decisión documentada (pendiente de validar, no bloquea):** los nombres reales de `Subastas`
+llaman `FD` a `O` y `FMA` a `P` — corridos una columna respecto de los títulos de grupo de RE545,
+que dicen Subastas/FD/FMA para `O`/`P`/`Q`. Es el mismo corrimiento de una columna que el usuario
+ya había descrito para el archivo de Subastas. Se siguió **la fórmula** (posición), no el nombre,
+porque la fórmula es la fuente primaria. Si al validar con datos reales los tres bloques salen
+corridos entre sí, esto es lo primero que hay que revisar (plan §26.3).
+
+**Verificación:** tests sintéticos con dos filas de `Subastas` que comparten central+hora+tipo
+(para probar que el `SUMIFS` suma y no pisa), un tipo que no existe en los datos (→ 0, no blanco),
+una fila de RE545 cuya hora del mes no cruza con nada (→ los 18 en 0 y `AU` en 0) y `AU`
+calculado a mano (`(8x4x1 + 7x4x0.25)/4*1000 = 9.750`). Regresión completa de E Costos (etapas
+2-4) y de la etapa base de RE545: pasan.
+
+---
+
+## 2026-09-11 (10) — `Calculo RE545`, etapa 3: `AW:BG` (resumen por central + ventana)
+
+Tercera etapa de RE545 en la misma sesión.
+
+**Hallazgo estructural:** `AW:BG` **no son más columnas del bloque principal**: son una tabla
+aparte de 288 filas (9 centrales × 32 ventanas) contra las 26.787 del bloque principal,
+compartiendo la hoja. Tercer caso del mismo patrón en este proyecto (ya había pasado con los
+bloques CSF/CPF de `FD` y con las dos tablas de `Ofertas SSCC`). Se escribe al lado del bloque
+principal con una columna en blanco de separación (`escribir_pagos_bess()` ahora acepta
+`df_resumen_re545` y usa `startcol`).
+
+**De dónde sale `AY` ("Oferta Completa"), que no es fórmula ni la escribe ninguna macro:** es la
+columna `Completa` de `construir_resumen_ventana_oferta()` — la misma tabla central+ventana que ya
+alimenta `Medidores!T` (`T = 1 - Completa`). Coinciden el nombre, la clave, el dominio (0/1) y el
+sentido, y el archivo real lo confirma: la central cuya última ventana queda incompleta tiene
+`AY = 0` justo ahí. No hubo que inventar nada ni pedir un archivo nuevo: `generar_pagos_bess()`
+reconstruye ese resumen desde la hoja `Medidores` ya generada.
+
+**Otro dato que se resolvió de paso:** `Medidores!$S$1` (que usa `BV`) es la **hora de inicio de
+ventana**, el mismo dato que la constante `INICIO_VENTANA` — se deduce de la fórmula de
+`Medidores!L`, que incrementa la ventana justo cuando la hora es igual a `S1`.
+
+**Cambios en `nucleo.py`:** `NOMBRES_RESUMEN_RE545`, `calcular_bv_re545()`,
+`construir_resumen_ventanas_re545()`. Además `completar_calculo_re545()` ya **no** renombra (el
+renombre pasó a `renombrar_calculo_re545()`, que se llama al final): la tabla resumen necesita el
+DataFrame con los nombres internos.
+
+**Verificación:** tests sintéticos con grupos armados a propósito — `AZ`/`BA` tomando la PRIMERA
+fila del grupo y no la última (el `AGGREGATE(15,6,...,1)` del original), `BB` como suma de `AU`,
+`BF` sumando solo las filas de la hora anterior al inicio de ventana, `BC` calculado a mano
+(`MIN(MAX(MIN(120,50),20),40) = 40`), el caso "oferta incompleta → `BC = 0`" y el caso "ventana 31
+→ `BC = 0`". Más un test de escritura real del `.xlsx` confirmando que las dos tablas quedan lado
+a lado con una columna en blanco entre medio. Regresión de E Costos y de las etapas 1-2 de RE545:
+pasan.
+
+**Pendiente:** `BI:CE` (Componentes 1 y 2) y, con eso, `BD`/`BE` del resumen.
+
+---
+
+## 2026-09-11 (11) — `Calculo RE545`, etapa 4: `BI:CE` — hoja completa
+
+Última etapa de RE545 en la misma sesión. Con esto quedan **completas las dos hojas de cálculo**
+del libro (`Calculo E Costos` y `Calculo RE545`).
+
+**Corrección de un error propio de las etapas anteriores de esta misma sesión** (queda anotado
+porque cambia valores ya commiteados): `VLOOKUP(G, Resumen!$B$8:$J$26, 4, 0)` **no es `Pmax
+(MW)`**, es **`Capacidad (MWh)`**. El orden real de las 9 columnas de `Resumen BESS` es `Nombre
+activo`, `Pmax (MW)`, `Horas para descarga forzada`, `Capacidad (MWh)`, `Energía mínima`, `Barra
+inyección`, `% Energía sobre mínima`, `Ciclos max diarios`, `Eficiencia` — y es consistente con
+que `H` use el índice 6 para `Barra inyección`. Afectaba a `U` (`EiniT`) y a `BC` (`Edisp_T`), que
+se habían implementado con `Pmax`. Se agregó `construir_dic_resumen_capacidad()` y se corrigieron
+las dos. Tabla de referencia de qué índice usa cada columna, en el plan §26.7. **`AE`/`AF` de
+E Costos siguen bien con `Pmax`** (ahí el VBA usa `Resumen!B:C`, o sea el índice 2), igual que `BN`
+de RE545.
+
+**Implementado (`calcular_componentes_re545()` + `completar_checks_resumen_re545()`):** `BI`
+(`Orden`, con el salto de 4 filas del original), `BJ` (`Periodo`), `BK`/`BL` (sumas por
+central+orden+ventana+periodo), `BM` (`LARGE(IF(...))` matricial: el k-ésimo `CMg` más grande
+entre todas las filas con el mismo `BK`, con `k = Periodo/15 + 1`), `BN` (`Edisp_Asig`), `BO`,
+`BQ`, `BR`, `BS` (`INDEX/MATCH` matricial), `BT`, `BU`, `BV`, `BW`, `BX`, `BY`, `BZ`, `CA`, `CC` y
+`CE` (`Monto a compensar`). Y con eso, `BD`/`BE` del resumen `AW:BG`.
+
+**Las dos recursiones, que es lo único que no se puede vectorizar:** `BN` necesita los `BN`
+anteriores de su grupo (se recorre de arriba hacia abajo) y `BU` necesita los `BU` **posteriores**
+(se recorre de abajo hacia arriba, porque `BT` mira las filas siguientes). `BY` necesita los `BZ`
+anteriores, pero `BZ` no depende de `BY`, así que ahí alcanza con calcular `BZ` primero.
+
+**Verificación:** un caso sintético de 8 filas (2 horas × 4 bloques) con todos los valores
+elegidos para poder calcular a mano: `BI` = 1,1,1,1,2,2,2,2; `BM` = 80,70,60,50 repetido; `BN`
+cortándose al llegar al `Edisp_T` del grupo (150, 150, 100, 0, ...); `BT`/`BU` con la recursión
+hacia arriba (400,400,400,400,300,200,100,0 y 0,0,0,0,100,100,100,100); `BY` como acumulado de
+`BZ`; y `CE` en sus dos ramas — la de `MAX(...,0)` (da 0) y una positiva calculada a mano
+(`(28.500 - 26.000)/8 = 312,5` por fila). Más el caso de inyección negativa (`BZ = 0`, `BY = BX`,
+`BU = 0` por `BS = 0`) y los dos checks del resumen. Regresión de E Costos (etapas 2-4) y de las
+etapas 1-3 de RE545: pasan.
+
+**Lo que sigue** (nuevo frente, ninguna analizada todavía): las hojas de salida que consumen estas
+dos — `PRORRATA_RETIROS`, `Compensacion total`, `Resumen` y el CSV.
+
+---
+
+## 2026-09-11 (12) — Casillas por hoja en la ventana "Generar" de `Pagos_BESS.xlsx`
+
+El usuario pidió cerrar el pendiente que había quedado anotado ("ajustamos detalles después"):
+la ventana "Generar" de `Pagos_BESS.xlsx` era todo o nada (una sola hoja, sin casillas), a
+diferencia de la de `Consolidado_entradas.xlsx` (`SECCIONES_CONSOLIDADO`). Ahora que la hoja
+tiene dos salidas (`Calculo E Costos` y `Calculo RE545`, completas desde la sesión anterior),
+pedido explícito: **dos casillas, una por hoja**.
+
+**Cambios en `nucleo.py`** (mismo patrón que `SECCIONES_CONSOLIDADO`/`generar_consolidado`):
+
+- `SECCIONES_PAGOS`: tupla con `("ecostos", "Calculo E Costos", descripción, ("Calculo E
+  Costos",))` y `("re545", "Calculo RE545", descripción, ("Calculo RE545",))`.
+- `escribir_pagos_bess()` gana `ruta_existente` y `hojas_regenerar` (antes solo tenía
+  `df_ecostos`/`df_re545`/`df_resumen_re545`/`registrar`). Con `hojas_regenerar=None` se
+  comporta exactamente igual que antes (retrocompatible: los tests de sesiones anteriores que
+  la llaman posicionalmente sin estos parámetros nuevos siguen funcionando tal cual). Con un
+  `set`, la hoja que NO está en el set se copia tal cual desde `ruta_existente` en vez de
+  escribirse desde el DataFrame — reusa `_copiar_hoja_existente()`, la misma función que ya
+  usaba `escribir_salida()` para `Consolidado_entradas.xlsx`. Si no hay versión anterior para
+  preservar, la hoja queda vacía y se registra un aviso (mismo criterio, sin duplicar código).
+- `generar_pagos_bess()` gana el parámetro obligatorio `secciones_activas` (antes no lo tenía;
+  es un cambio incompatible a propósito, como ya había pasado con `generar_consolidado()`).
+  Valida secciones desconocidas y "ninguna tildada" antes de tocar ningún archivo. Las lecturas
+  compartidas (`Medidores`, `Subastas`, `Centrales.xlsx`, `cmg.xlsx`) se hacen siempre que haga
+  falta alguna sección; lo que se condiciona es el CÁLCULO de cada hoja:
+  - `dic_eficiencia`/`dic_capacidad` (que solo usa RE545: `V`, `U`/`BC`/`BN`) solo se arman si
+    `"re545"` está tildada.
+  - El archivo `SSCC_Desempeño_*` (que solo usa `Calculo E Costos`, para `AM:AR`) solo se exige
+    y se lee si `"ecostos"` está tildada. **Confirmado con un caso real armado a propósito**:
+    tildar solo `"re545"` corre sin pedir ese archivo aunque no exista en la carpeta del caso;
+    tildar solo `"ecostos"` sí lo exige y falla con un mensaje claro si falta.
+  - `df_ecostos`/`df_re545`/`df_resumen_re545` quedan en `None` si su sección no está tildada, y
+    así se le pasan a `escribir_pagos_bess()` junto con el `hojas_regenerar` correspondiente.
+
+**Cambios en `Balance_BESS.py`:** `abrir_ventana_generar_pagos()` reescrita para recorrer
+`nucleo.SECCIONES_PAGOS` igual que `abrir_ventana_generar_consolidado()` recorre
+`SECCIONES_CONSOLIDADO` — un `LabelFrame` con casilla + descripción por sección, valida que haya
+al menos una tildada, y pasa `secciones_activas` a `generar_pagos_bess()`.
+
+**Verificación:** tests sintéticos de `escribir_pagos_bess()` (primera corrida escribe las dos
+hojas; segunda corrida con solo `"ecostos"` recalcula esa hoja y preserva RE545 tal cual estaba,
+sin vaciarlo; tercera corrida con solo `"re545"` al revés; caso sin versión anterior para
+preservar → hoja vacía + aviso) y de `generar_pagos_bess()` (secciones vacías/desconocidas →
+`ErrorEntrada`). Además un caso **con archivos reales** armado a propósito (`Centrales.xlsx`,
+`cmg.xlsx`, `Consolidado_entradas.xlsx` con `Medidores`/`Subastas`) para confirmar en la práctica
+que "solo RE545" no pide `SSCC_Desempeño_*` y que "solo E Costos" sí, y que una corrida que falla
+a mitad de camino (por archivo faltante) no toca el `Pagos_BESS.xlsx` ya existente. Regresión
+completa de las sesiones anteriores (Calculo E Costos etapas 2-4, Calculo RE545 etapas 1-4):
+pasa. No se probó la ventana tkinter en sí (sin entorno gráfico en esta sesión, como siempre).

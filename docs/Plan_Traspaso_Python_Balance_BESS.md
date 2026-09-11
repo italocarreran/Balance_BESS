@@ -1987,3 +1987,171 @@ fórmulas para `AY4:AY26787` (sección 5.4). Queda fuera, igual que toda la hoja
 que `CPF(-)`/`CSF(-)`/... repetidos entre `AG:AL` y `AM:AR`: se distinguen por el encabezado de
 grupo de las filas 1-2, que este esquema de una sola fila no replica. Para llegar sin
 ambigüedad a una de esas columnas hay que ir por posición, no por nombre.
+
+---
+
+# 26. `Calculo RE545`
+
+La segunda hoja de cálculo del libro, hermana de `Calculo E Costos`. El usuario entregó
+`Calculo_RE545_reducido_para_IA.xlsx` (versión reducida de la hoja real: fila 3 = nombres de
+columna, filas 1-2 = títulos de grupo, una hoja `Mapa_Formulas` con todas las familias de
+fórmulas y la columna `CF` con el número de fila original), así que los **nombres de columna son
+reales, no inferidos**.
+
+A diferencia de `Calculo E Costos`, esta hoja es casi toda **fórmulas en la hoja**, no valores
+escritos por macro: las únicas columnas que escribe el VBA son las del traspaso (A:G, I/J, K, P,
+T) y `Q`/`R` (CMg).
+
+## 26.1. Cómo se reparten las dos hojas
+
+`Traspasar_Medidores_A_Calculos_Rapido` recorre `Medidores` **una sola vez** y escribe en las dos
+hojas. `A:G`, `K` (SoC) y `P` (Ciclo de Carga del mes) van **iguales a las dos**. Lo que se
+reparte es la energía, según `Medidores!T` (`Ventana_No_Completa`):
+
+| `Ventana_No_Completa` | Energía va a |
+|---|---|
+| `= 1` (numérico) | `Calculo E Costos` (RE545 queda en 0) |
+| cualquier otro número | `Calculo RE545` |
+| vacío, no numérico o error | `Calculo RE545` |
+
+Además, solo `Calculo RE545` recibe `T` = `Medidores!L` (`Ventana` → "Ventana de valorizacion"),
+y solo esta hoja recibe `R` (`CMg!I`, "CMg Promedio"): `CompletarDestinoTurbo` se llama con
+`escribirR:=False` para E Costos y `escribirR:=True` para RE545. Por eso `construir_dic_cmg()`
+ahora guarda **el par** `(CMg!F, CMg!I)` — los dos elementos del `Array()` del diccionario VBA.
+
+## 26.2. Etapa base implementada (`A:V`)
+
+| Columna | Nombre real | Lógica |
+|---|---|---|
+| `A:G` | `Mes`, `Dia`, `Hora`, `Hora mes`, `Minuto`, `Bloque horario`, `Configuracion` | Traspaso desde `Medidores` (mismo bloque que E Costos, con `D`↔`E` invertidas). |
+| `H` | `Barra` | `VLOOKUP(G,Resumen!B:G,6,FALSE)` → homologado por nombre contra `Resumen BESS`, igual que en E Costos. |
+| `I`, `J` | `Descarga kWh`, `Carga kWh` | Energía de `Medidores!Gen_Unidad` separada por signo, **solo** si `Ventana_No_Completa <> 1`. |
+| `K` | `SoC %` | `Medidores!J`. |
+| `L` | `Adj SSCC` | La **misma** fórmula que `Calculo E Costos!L` (`COUNTIFS` contra `Subastas`) → se reusa `calcular_l()`. |
+| `M` | `SoC sobre el minimo` | `1*(K > Resumen!$H$8)` → se reusa `calcular_m()`. |
+| `N`, `O` | `Energía SSCC (-)/(+) por remunerar` | `SUMIFS` del grupo menos `SUMIFS` de los bloques anteriores = la suma, dentro del grupo central+ciclo y contando solo filas con `L=1`, de la energía de los bloques horarios `>=` al de la fila. Es la versión en fórmula de lo que `calcular_n_o()` ya hacía para E Costos → se reusa. |
+| `P` | `Ciclo de Carga del mes` | `Medidores!K`. |
+| `Q` | `CMg` | `CMg!F` por Barra+Bloque horario. |
+| `R` | `CMg Promedio` | `CMg!I`, por la misma clave (`escribirR`). |
+| `S` | `ranking cmg` | `(COUNTIFS(T=T4, R>R4, G=G4) + COUNTIFS(T=T4, R=R4, C>C4, G=G4))/4 + 1`. **No** es el mismo ranking que el de E Costos: agrupa por `T` (ventana de valorización) y ordena por `CMg Promedio`, no por `CMg`. |
+| `T` | `Ventana de valorizacion` | `Medidores!L`. |
+| `U` | `EiniT` | `K * VLOOKUP(G,Resumen!B:J,4,0) * 1000` = `SoC % × Pmax (MW) × 1000`. |
+| `V` | `EalmT` | `-SUMIFS(J:J, T:T, T4, G:G, G4) * VLOOKUP(G,Resumen!B:J,9,0)` = la carga total del grupo central+ventana, cambiada de signo, por la `Eficiencia` de esa central (9na columna de las 9 de `Resumen BESS`). |
+
+**Trampa de letras:** `R`, `S`, `T`, `U` y `V` existen en las dos hojas y **significan cosas
+distintas** en cada una (`U` es "Total" en E Costos y "EiniT" acá). Nunca reusar una función de
+una hoja en la otra sin mirar la fórmula real primero.
+
+`W:AB` están vacías en el original. Igual que en E Costos, las columnas vacías no se escriben: la
+hoja de salida conserva el orden y el contenido, no la letra de Excel.
+
+## 26.3. Etapa 2 implementada: `AC:AU` (reservas por subasta)
+
+Tres bloques de 6 columnas con los **mismos 6 encabezados** (`CPF(-)`, `CSF(-)`, `CTF(-)`,
+`CPF(+)`, `CSF(+)`, `CTF(+)`), que se distinguen por el título de grupo de la fila 2: "Subastas"
+(`AC:AH`), "FD" (`AI:AN`) y "FMA" (`AO:AT`). Los tres son el mismo `SUMIFS` contra `Subastas`,
+cambiando solo la columna que se suma:
+
+```
+AC4 = SUMIFS(Subastas!$O:$O, Subastas!$K:$K,$G4, Subastas!$J:$J,$D4, Subastas!$B:$B,AC$3)
+AI4 = idem sobre Subastas!$P:$P
+AO4 = idem sobre Subastas!$Q:$Q
+AU4 = SUMPRODUCT($AC4:$AH4, $AI4:$AN4, $AO4:$AT4) / 4 * 1000
+```
+
+Criterios homologados **por nombre** contra nuestra hoja `Subastas` (igual que `calcular_l()` y
+los umbrales de E Costos): central → `Configuración`, hora del mes → `Hora_mes`, tipo → `Control`
+(la columna con los valores `CPF`/`CSF`, la misma que ya usa `construir_prorrata_sscc()`). Un
+`SUMIFS` sin coincidencias da **0**, no blanco.
+
+**Pendiente de confirmar (no bloquea):** las tres columnas que se *suman* se toman por
+**posición** (`O`, `P`, `Q` de nuestra hoja `Subastas`, que es como las escribe la macro de
+carga), no por nombre. Los nombres reales que trajo el archivo de encabezados llaman `FD` a `O` y
+`FMA` a `P`, o sea corridos una columna respecto de los títulos de grupo de RE545 (que dicen
+Subastas/FD/FMA para `O`/`P`/`Q`) — el mismo corrimiento de una columna que el usuario ya
+describió para el archivo de Subastas. Se siguió la **fórmula** (posición), no el nombre, porque
+la fórmula es la fuente primaria; si al validar contra un caso real los tres bloques salen
+corridos entre sí, esto es lo primero que hay que mirar.
+
+## 26.4. Etapa 3 implementada: `AW:BG` (resumen por central + ventana)
+
+**Otra tabla, no más columnas de la misma**: 288 filas en el original (9 centrales × 32 ventanas)
+contra las 26.787 del bloque principal, compartiendo la hoja de la fila 4 para abajo. Es el mismo
+patrón "dos tablas de distinto largo en una hoja" que ya apareció en `FD` (bloques CSF/CPF) y en
+`Ofertas SSCC`. Se escribe al lado del bloque principal, con una columna en blanco de separación.
+
+`AW` (central), `AX` (`Ventana`) y `AY` (`Oferta Completa`) **no son fórmulas ni las escribe
+ninguna macro**: en el `.xlsm` son constantes. `AW`/`AX` son el cruce central × ventana, y `AY` no
+hay que inventarlo: es la columna `Completa` de `construir_resumen_ventana_oferta()`, la misma que
+ya alimenta `Medidores!T` (`T = 1 - Completa`). Coinciden el nombre, la clave (central+ventana),
+el dominio (0/1) y el sentido — y el archivo real lo confirma: la central cuya última ventana
+queda incompleta tiene `AY = 0` justo ahí.
+
+| Columna | Nombre real | Lógica |
+|---|---|---|
+| `AZ` | `EiniT` | `U` de la **primera** fila del bloque principal con `G = AW` y `T = AX` (`INDEX` + `AGGREGATE(15,6,...,1)`). |
+| `BA` | `EalmT` | Ídem con `V`. |
+| `BB` | `Total Reservas* FD *FMA` | `SUMIFS(AU:AU, T:T,AX, G:G,AW)`. |
+| `BC` | `Edisp_T` | `MIN(MAX(MIN(AZ+BA, Pmax*1000), BA), BB) * AY * (AX<>31)`. La ventana 31 y la oferta incompleta lo anulan. |
+| `BF` | `Margen ultima hora` | `SUMIFS(BV:BV, BR:BR,AX, G:G,AW)`, con `BV` = `IF(AND(C = Medidores!$S$1 - 1, AU<>0), AU, 0)`. **`Medidores!S1` es la hora de inicio de ventana** — el mismo dato que la constante `INICIO_VENTANA` (la fórmula de `Medidores!L` incrementa la ventana justo cuando la hora es igual a `S1`), así que la condición es "la última hora de la ventana que termina". |
+| `BG` | `flag ultima hora` | `AND(AZ+BA - BF(misma central, ventana-1) > Pmax*1000, BF_de_la_fila_anterior<>0)*1`. La segunda condición usa la fila **física** anterior de la tabla; en el original la primera fila apunta a la fila de encabezados (texto), que en Excel también cumple `<>0`. Se replicó así. |
+
+`BD` (`check 1`) y `BE` (`check 2`) quedan para la etapa siguiente: dependen de `BN` y `BU`, del
+bloque principal. Son columnas de **control**, no entran en ningún cálculo posterior.
+
+## 26.5. Lo que sigue pendiente de `Calculo RE545`
+
+Nada: la hoja quedó completa. Lo único que **no** se replica son las columnas vacías del original
+(`W:AB`, `AV`, `BH`, `BP`, `BR` duplicada, `CB`, `CD`) y las celdas de totales de la fila 1-2
+(`H1`, `J1`, `R1`, `BL2`, `BT2`), que son sumas de control de la propia hoja, no datos por fila.
+
+## 26.6. Etapa 4: `BI:CE` (Componente 1 y Componente 2)
+
+| Columna | Nombre real | Lógica |
+|---|---|---|
+| `BI` | `Orden` | 1 en las 4 primeras filas; después `IF(T(i)=T(i-4), BI(i-4)+1, 1)` — **salto de 4 filas** (los 4 bloques de 15 minutos de cada hora). |
+| `BJ` | `Periodo` | `0, 15, 30, 45` en las 4 primeras; después `BJ(i-4)`. |
+| `BK` | `Curva Cmg Decendente promedio horario` | `SUMIFS(R, G=G, S=BI, T=T, E=BJ)`. |
+| `BL` | *(sin nombre)* | Ídem sobre `Q` (`CMg`). |
+| `BM` | `Curva Cmg Decendente` | `LARGE(IF(BK_todas = BK(i), BL_todas), BJ/15 + 1)` — el k-ésimo `BL` más grande entre **todas** las filas de la hoja con el mismo `BK`. Matricial. |
+| `BN` | `Edisp_Asig` | `MAX(0, MIN(MAX(0, Pmax*1000/4 - BS), BC(central,ventana) - suma de los BN anteriores del grupo))`. **`VLOOKUP` con índice 2 = `Pmax (MW)`**, distinto del índice 4 de `U`/`BC`. |
+| `BO` | `Total  C1_545` | `BN * BM`. |
+| `BQ` | `Energia Total` | `BS + BN`. |
+| `BR` | `Ventana de Valorizacion` | `= T`. |
+| `BS` | `inyeccion en el periodo del Cmg Descendente` | `I` de la **primera** fila con `BR`, `S=BI`, `G`, `E=BJ` iguales (`INDEX/MATCH` matricial). |
+| `BT` | `Energía ya Asignada` | Suma de los `BU` **posteriores** del mismo grupo. |
+| `BU` | `Asignacion Edisponible` | `IF(BS=0, 0, MAX(0, MIN(BQ, BC - BT - suma de BV del grupo)))`. |
+| `BV` | `SSCC ultima hora` | Ver 26.4 (ya se usaba para `BF`). |
+| `BW` | `inyeccion orden cronologico` | `I + J`. |
+| `BX` | `Energia Ultima hora` | El `BF` del resumen para esa central+ventana. |
+| `BY` | `Energía ya Asignada ultima hora` | `IF(BW<0, BX, suma de los BZ anteriores del grupo)`. |
+| `BZ` | `Energia Asignada Ultima hora` | `IF(BW<0, 0, 8) * BG(central,ventana)`. |
+| `CA` | `Asignacion Edisponible+SSCC ultima hora` | `BU + BZ`. |
+| `CC` | `Total C2_545` | `CA * BM`. |
+| `CE` | `Monto a compensar` | `MAX(suma(BO del grupo) - suma(CC del grupo), 0) * AU / suma(AU del grupo)`; si la suma de `AU` es 0, el `IFERROR` original devuelve 0. |
+
+**Las dos recursiones** (lo único que no se puede vectorizar de una): `BN` necesita los `BN`
+anteriores de su grupo → se recorre de arriba hacia abajo; `BU` necesita los `BU` **posteriores**
+→ se recorre de abajo hacia arriba. `BY` necesita los `BZ` anteriores, pero `BZ` no depende de
+`BY`, así que ahí alcanza con calcular `BZ` primero.
+
+Con esto se completan también `BD` (`check 1`) y `BE` (`check 2`) del resumen `AW:BG`, que
+dependían de `BN` y `BU` (`completar_checks_resumen_re545()`).
+
+## 26.7. Corrección importante: el `VLOOKUP` con índice 4 **no** es `Pmax`
+
+Al implementar `U` y `BC` se había usado `Pmax (MW)` para
+`VLOOKUP(G, Resumen!$B$8:$J$26, 4, 0)`. Es **Capacidad (MWh)**: el orden real de las 9 columnas de
+`Resumen BESS` es `Nombre activo`, `Pmax (MW)`, `Horas para descarga forzada`, `Capacidad (MWh)`,
+`Energía mínima`, `Barra inyección`, `% Energía sobre mínima`, `Ciclos max diarios`, `Eficiencia`
+— y es consistente con que `H` use el índice 6 para `Barra inyección`. Se corrigió en la misma
+sesión (`construir_dic_resumen_capacidad()`).
+
+Queda claro entonces qué índice usa cada columna:
+
+| Índice | Columna de `Resumen BESS` | La usan |
+|---|---|---|
+| 2 | `Pmax (MW)` | `AE`/`AF` de E Costos (`construir_dic_resumen_factor`), `BN` de RE545 |
+| 4 | `Capacidad (MWh)` | `U` y `BC` de RE545, `BC` de E Costos |
+| 6 | `Barra inyección` | `H` de las dos hojas |
+| 9 | `Eficiencia` | `V` de RE545 |
