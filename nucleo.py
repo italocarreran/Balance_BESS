@@ -62,6 +62,7 @@ ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
 # provisorio, puede cambiar.
 ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"
 HOJA_CALCULO_ECOSTOS = "Calculo E Costos"
+HOJA_CALCULO_RE545 = "Calculo RE545"
 
 # El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
 # lo ingresa el usuario en la ventana. El archivo de SoC solo debe
@@ -2081,11 +2082,18 @@ def _normaliza_cuarto(valor):
 def construir_dic_cmg(df_cmg):
     """
     Replica el paso 1) de Asignar_CMg_a_Calculos_Turbo: arma un
-    diccionario clave -> valor a asignar en Q, a partir de la hoja
-    CMg (columnas por posicion, sin renombrar - ver leer_cmg):
+    diccionario clave -> (valor para Q, valor para R), a partir de la
+    hoja CMg (columnas por posicion, sin renombrar - ver leer_cmg):
         D (indice 3) = Barra
         F (indice 5) = valor a asignar en Q
         H (indice 7) = Cuarto de Hora
+        I (indice 8) = valor a asignar en R ("CMg Promedio")
+
+    Los dos valores son los dos elementos del Array() que guarda el
+    diccionario del VBA: dictCMg(clave)(0) va a Q en las dos hojas y
+    dictCMg(clave)(1) va a R, pero SOLO en "Calculo RE545"
+    (CompletarDestinoTurbo se llama con escribirR:=False para
+    "Calculo E Costos" y escribirR:=True para "Calculo RE545").
 
     Si una clave se repite, gana la primera fila (igual que
     "If Not dictCMg.Exists(clave) Then Add" en VBA).
@@ -2094,6 +2102,7 @@ def construir_dic_cmg(df_cmg):
     columna_d = df_cmg.columns[3]
     columna_f = df_cmg.columns[5]
     columna_h = df_cmg.columns[7]
+    columna_i = df_cmg.columns[8]
 
     diccionario = {}
 
@@ -2110,7 +2119,7 @@ def construir_dic_cmg(df_cmg):
         clave = barra.upper() + "|" + cuarto_hora
 
         if clave not in diccionario:
-            diccionario[clave] = fila[columna_f]
+            diccionario[clave] = (fila[columna_f], fila[columna_i])
 
     return diccionario
 
@@ -2225,6 +2234,23 @@ def construir_dic_resumen_factor(resumen_bess):
     return dic_factor, umbral_soc_minimo
 
 
+def _buscar_cmg(dic_cmg, barra, cuarto_hora):
+    """
+    Replica la busqueda de CompletarDestinoTurbo: clave
+    UCase(Barra)+"|"+NormalizaCuarto(Cuarto de Hora). Devuelve
+    siempre un par (valor para Q, valor para R); sin match, los dos
+    en blanco (el VBA escribe vbNullString en las dos).
+    """
+
+    barra = "" if not barra else str(barra).strip()
+    cuarto = _normaliza_cuarto(cuarto_hora)
+
+    if barra == "" or cuarto == "":
+        return (pd.NA, pd.NA)
+
+    return dic_cmg.get(barra.upper() + "|" + cuarto, (pd.NA, pd.NA))
+
+
 def construir_calculo_e_costos(
     df_medidores, mapa_barra, dic_cmg, registrar=print
 ):
@@ -2278,15 +2304,8 @@ def construir_calculo_e_costos(
     df["SoC"] = df_medidores["SoC"]
     df["Copia_Ventana"] = df_medidores["Copia_Ventana"]
 
-    def _buscar_cmg(barra, cuarto_hora):
-        barra = "" if not barra else str(barra).strip()
-        cuarto = _normaliza_cuarto(cuarto_hora)
-        if barra == "" or cuarto == "":
-            return pd.NA
-        return dic_cmg.get(barra.upper() + "|" + cuarto, pd.NA)
-
     df["CMg"] = [
-        _buscar_cmg(barra, cuarto_hora)
+        _buscar_cmg(dic_cmg, barra, cuarto_hora)[0]
         for barra, cuarto_hora in zip(df["Barra"], df["Cuarto de Hora"])
     ]
 
@@ -2312,13 +2331,15 @@ def construir_calculo_e_costos(
     return df
 
 
-def escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print):
+def escribir_pagos_bess(
+    ruta_salida, df_ecostos, df_re545=None, registrar=print
+):
     """
-    Escribe Pagos_BESS.xlsx: por ahora solo la hoja "Calculo E
-    Costos" en su etapa base (ver comentario de construir_calculo_e_
-    costos). El usuario pidio explicitamente que esto viva en un
-    archivo separado de Consolidado_entradas.xlsx ("pagos_bess o algo
-    asi por ahora") -- nombre y alcance son provisorios.
+    Escribe Pagos_BESS.xlsx: la hoja "Calculo E Costos" y, si se le
+    pasa, la hoja "Calculo RE545" (que todavia esta por etapas, ver
+    completar_calculo_re545). El usuario pidio explicitamente que esto
+    viva en un archivo separado de Consolidado_entradas.xlsx
+    ("pagos_bess o algo asi por ahora") -- el nombre es provisorio.
     """
 
     ruta_salida = Path(ruta_salida)
@@ -2330,9 +2351,351 @@ def escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print):
             index=False,
         )
 
+        if df_re545 is not None:
+            df_re545.to_excel(
+                writer,
+                sheet_name=HOJA_CALCULO_RE545,
+                index=False,
+            )
+
     registrar(f"Archivo generado: {ruta_salida}")
 
     return ruta_salida
+
+
+# ============================================================
+# CALCULO RE545 (etapa base): A:V
+#
+# La otra hoja de calculo del libro, hermana de "Calculo E Costos".
+# Las dos se alimentan de la MISMA macro de traspaso
+# (Traspasar_Medidores_A_Calculos_Rapido), que reparte cada fila de
+# Medidores a una o a la otra segun Medidores!L (Ventana_No_Completa):
+#   Ventana_No_Completa = 1  -> la energia va a "Calculo E Costos"
+#   cualquier otro valor, o vacio -> va a "Calculo RE545"
+# Las columnas A:G, K y P se escriben IGUALES en las dos hojas (no se
+# reparten): lo unico que cambia es I/J, que quedan en 0 en la hoja
+# que no corresponde.
+#
+# Diferencias propias de RE545 respecto de E Costos:
+#   - T ("Ventana de valorizacion") = Medidores!L. En E Costos no
+#     existe: la macro solo escribe T en RE545.
+#   - R ("CMg Promedio") = CMg!I, via el mismo diccionario de
+#     Asignar_CMg_a_Calculos_Turbo, que para esta hoja se llama con
+#     escribirR:=True.
+#   - Las columnas calculadas son OTRAS y, cuando comparten letra con
+#     E Costos, casi nunca significan lo mismo (R, S, T, U, V son el
+#     ejemplo claro). Los nombres reales estan en NOMBRES_CALCULO_RE545,
+#     confirmados contra el archivo "Calculo_RE545_reducido_para_IA.xlsx"
+#     que entrego el usuario (fila 3 del original = nombres, filas 1-2
+#     = titulos de grupo).
+#
+# Igual que en E Costos, las columnas vacias del original (W:AB, AV,
+# BH, BP, BS...) no se escriben: la hoja de salida no reproduce la
+# letra de Excel, solo el orden y el contenido.
+#
+# Ver plan seccion 26.
+# ============================================================
+
+# Nombres reales de columna de "Calculo RE545" (fila 3 del archivo
+# real). Mismo criterio que NOMBRES_CALCULO_E_COSTOS: se calcula todo
+# con las letras/nombres internos y se renombra recien al final.
+NOMBRES_CALCULO_RE545 = {
+    "Mes": "Mes",
+    "Dia": "Dia",
+    "Hora": "Hora",
+    "Hora Mes": "Hora mes",
+    "Minutos": "Minuto",
+    "Cuarto de Hora": "Bloque horario",
+    "clave": "Configuracion",
+    "Barra": "Barra",
+    "Energia_Positiva": "Descarga kWh",
+    "Energia_Negativa": "Carga kWh",
+    "SoC": "SoC %",
+    "L": "Adj SSCC",
+    "M": "SoC sobre el minimo",
+    "N": "Energía SSCC (-) por remunerar",
+    "O": "Energía SSCC (+) por remunerar",
+    "Copia_Ventana": "Ciclo de Carga del mes",
+    "CMg": "CMg",
+    "R": "CMg Promedio",
+    "S": "ranking cmg",
+    "T": "Ventana de valorizacion",
+    "U": "EiniT",
+    "V": "EalmT",
+}
+
+
+def construir_dic_resumen_eficiencia(resumen_bess):
+    """
+    Arma nombre_central -> "Eficiencia", de la misma hoja
+    "Resumen BESS" de Centrales.xlsx que ya usan construir_mapa_barra()
+    y construir_dic_resumen_factor().
+
+    Es el VLOOKUP(G, Resumen!$B$8:$J$26, 9, 0) de la columna V de
+    RE545: la 9na columna del rango B:J es la ultima de las 9 de esa
+    tabla, "Eficiencia". (El VLOOKUP con indice 4 del resto del libro
+    es "Pmax (MW)", que ya resuelve construir_dic_resumen_factor.)
+    """
+
+    columna_nombre = None
+    columna_eficiencia = None
+
+    for columna in resumen_bess.columns:
+        clave = normalizar(columna)
+        if columna_nombre is None and "nombre" in clave and "activ" in clave:
+            columna_nombre = columna
+        if columna_eficiencia is None and "eficiencia" in clave:
+            columna_eficiencia = columna
+
+    if columna_nombre is None or columna_eficiencia is None:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} debe "
+            f"tener columnas de nombre de central ('Nombre activo') y de "
+            f"'Eficiencia' (hace falta para EalmT de Calculo RE545). "
+            f"Columnas encontradas: {list(resumen_bess.columns)}"
+        )
+
+    dic = {}
+
+    for _, fila in resumen_bess.iterrows():
+
+        nombre = fila[columna_nombre]
+        if pd.isna(nombre):
+            continue
+
+        valor = fila[columna_eficiencia]
+        dic[normalizar(nombre)] = pd.NA if pd.isna(valor) else float(valor)
+
+    return dic
+
+
+def construir_calculo_re545(
+    df_medidores, mapa_barra, dic_cmg, registrar=print
+):
+    """
+    Etapa base de "Calculo RE545": traspaso desde Medidores (A:G, I/J,
+    K, P, T) + H (Barra) + Q/R (CMg y CMg Promedio).
+
+    Es la hoja espejo de construir_calculo_e_costos(): misma macro de
+    traspaso, misma A:G, misma K/P, y la energia repartida al reves
+    (aca entra la de las filas con Ventana_No_Completa <> 1, incluido
+    el caso "vacio o no numerico", que el VBA manda explicitamente a
+    RE545).
+    """
+
+    n = len(df_medidores)
+    df_medidores = df_medidores.reset_index(drop=True)
+
+    df = pd.DataFrame(index=range(n))
+
+    df["Mes"] = df_medidores["Mes"]
+    df["Dia"] = df_medidores["Dia"]
+    df["Hora"] = df_medidores["Hora"]
+    df["Hora Mes"] = df_medidores["Hora Mes"]
+    df["Minutos"] = df_medidores["Minutos"]
+    df["Cuarto de Hora"] = df_medidores["Cuarto de Hora"]
+    df["clave"] = df_medidores["clave"]
+
+    df["Barra"] = df["clave"].map(
+        lambda valor: mapa_barra.get(normalizar(valor), "")
+    )
+
+    energia = pd.to_numeric(
+        df_medidores["Gen_Unidad"], errors="coerce"
+    ).fillna(0.0)
+
+    # El VBA manda a RE545 todo lo que NO tiene T = 1 numerico:
+    # distinto de 1, vacio, no numerico o error.
+    va_a_ecostos = pd.to_numeric(
+        df_medidores["Ventana_No_Completa"], errors="coerce"
+    ).eq(1)
+    va_a_re545 = ~va_a_ecostos
+
+    df["Energia_Positiva"] = energia.where(energia > 0, 0.0).where(
+        va_a_re545, 0.0
+    )
+    df["Energia_Negativa"] = energia.where(energia < 0, 0.0).where(
+        va_a_re545, 0.0
+    )
+
+    df["SoC"] = df_medidores["SoC"]
+    df["Copia_Ventana"] = df_medidores["Copia_Ventana"]
+
+    # Medidores L -> RE545 T (solo esta hoja lo recibe).
+    df["T"] = df_medidores["Ventana"]
+
+    pares = [
+        _buscar_cmg(dic_cmg, barra, cuarto_hora)
+        for barra, cuarto_hora in zip(df["Barra"], df["Cuarto de Hora"])
+    ]
+    df["CMg"] = [par[0] for par in pares]
+    df["R"] = [par[1] for par in pares]
+
+    filas_con_energia = int(va_a_re545.sum())
+
+    registrar(
+        f"  Calculo RE545: {n:,} fila(s) traspasadas desde Medidores "
+        f"({filas_con_energia:,} con energia; el resto la tiene "
+        f"'Calculo E Costos')."
+    )
+
+    return df
+
+
+def calcular_s_re545(df_re545):
+    """
+    Replica S ("ranking cmg") de RE545:
+
+        =(COUNTIFS($T:$T,T4,$R:$R,">"&R4,G:G,G4)
+        + COUNTIFS($T:$T,T4,$R:$R,R4,$C:$C,">"&C4,G:G,G4))/4 + 1
+
+    O sea, dentro del grupo central (G) + ventana de valorizacion (T):
+    cuantas filas tienen CMg Promedio (R) mayor, mas cuantas lo tienen
+    igual pero con Hora (C) mayor; todo eso dividido por 4 y +1.
+
+    Ojo: NO es la misma columna que el "ranking cmg" de Calculo E
+    Costos (esa es la R de esa hoja, agrupa por P y ordena por CMg, no
+    por CMg Promedio).
+    """
+
+    df = df_re545.reset_index(drop=True)
+
+    grupos = {}
+
+    for posicion, (central, ventana) in enumerate(
+        zip(df["clave"], df["T"])
+    ):
+        clave = (
+            _normaliza_valor_vba(central),
+            _normaliza_valor_vba(ventana),
+        )
+        grupos.setdefault(clave, []).append(posicion)
+
+    r = pd.to_numeric(df["R"], errors="coerce")
+    c = pd.to_numeric(df["Hora"], errors="coerce")
+
+    resultado = [pd.NA] * len(df)
+
+    for posiciones in grupos.values():
+
+        for posicion in posiciones:
+
+            r_fila = r.iloc[posicion]
+            c_fila = c.iloc[posicion]
+
+            if pd.isna(r_fila):
+                # COUNTIFS contra un blanco no cuenta nada: queda el +1.
+                resultado[posicion] = 1.0
+                continue
+
+            mayores = 0
+            empates = 0
+
+            for otra in posiciones:
+
+                r_otra = r.iloc[otra]
+
+                if pd.isna(r_otra):
+                    continue
+
+                if r_otra > r_fila:
+                    mayores += 1
+                elif r_otra == r_fila:
+                    c_otra = c.iloc[otra]
+                    if pd.notna(c_otra) and pd.notna(c_fila) and c_otra > c_fila:
+                        empates += 1
+
+            resultado[posicion] = (mayores + empates) / 4.0 + 1.0
+
+    return pd.Series(resultado, index=df_re545.index)
+
+
+def calcular_u_v_re545(df_re545, dic_factor, dic_eficiencia):
+    """
+    Replica U ("EiniT") y V ("EalmT") de RE545:
+
+        U = K * VLOOKUP(G, Resumen!B:J, 4, 0) * 1000
+            (SoC % x "Pmax (MW)" x 1000)
+
+        V = -SUMIFS(J:J, T:T, T4, G:G, G4)
+            * VLOOKUP(G, Resumen!B:J, 9, 0)
+            (la carga total del grupo central+ventana, cambiada de
+             signo, por la "Eficiencia" de esa central)
+
+    Una central que no esta en "Resumen BESS" deja las dos en blanco
+    (equivale al #N/A del VLOOKUP original).
+    """
+
+    df = df_re545
+
+    factor = df["clave"].map(
+        lambda valor: dic_factor.get(normalizar(valor), pd.NA)
+    )
+    eficiencia = df["clave"].map(
+        lambda valor: dic_eficiencia.get(normalizar(valor), pd.NA)
+    )
+
+    soc = pd.to_numeric(df["SoC"], errors="coerce")
+    factor_num = pd.to_numeric(factor, errors="coerce")
+    eficiencia_num = pd.to_numeric(eficiencia, errors="coerce")
+
+    u = soc * factor_num * 1000.0
+
+    carga = pd.to_numeric(df["Energia_Negativa"], errors="coerce").fillna(0.0)
+    suma_carga = carga.groupby([df["clave"], df["T"]]).transform("sum")
+
+    v = -suma_carga * eficiencia_num
+
+    return u, v
+
+
+def completar_calculo_re545(
+    df_re545, df_subastas, umbral_soc_minimo, dic_factor, dic_eficiencia,
+    registrar=print,
+):
+    """
+    Agrega a la etapa base de RE545 las columnas calculadas L, M, N,
+    O, S, U y V, y renombra todo a los nombres reales
+    (NOMBRES_CALCULO_RE545).
+
+    L y M son literalmente las mismas formulas que en Calculo E Costos
+    (mismo COUNTIFS contra Subastas, mismo 1*(SoC > umbral)), asi que
+    se reusan calcular_l() y calcular_m(). N y O tambien: la formula
+    de RE545 (SUMIFS del grupo menos SUMIFS de los bloques anteriores)
+    es la version en formula de lo mismo que calcula calcular_n_o()
+    para E Costos -- suma, dentro del grupo central+ciclo y contando
+    solo filas con L=1, la energia de los bloques horarios >= al de la
+    fila. El resto (S, U, V) es propio de esta hoja.
+
+    Todavia FUERA de esta etapa (ver plan seccion 26): AC:AU
+    (Subastas/FD/FMA), AW:BG (el resumen por central+ventana, que es
+    una tabla de otro largo) y BI:CE (Componentes 1 y 2).
+    """
+
+    df = df_re545.reset_index(drop=True).copy()
+
+    df["L"] = calcular_l(df, df_subastas)
+    df["M"] = calcular_m(df, umbral_soc_minimo)
+
+    n, o = calcular_n_o(df)
+    df["N"] = n.reset_index(drop=True)
+    df["O"] = o.reset_index(drop=True)
+
+    df["S"] = calcular_s_re545(df)
+
+    u, v = calcular_u_v_re545(df, dic_factor, dic_eficiencia)
+    df["U"] = u
+    df["V"] = v
+
+    df = df[list(NOMBRES_CALCULO_RE545)]
+
+    participa = int(df["L"].sum())
+    registrar(
+        f"  Calculo RE545: {participa:,} de {len(df):,} fila(s) "
+        f"marcadas como 'participa en subasta' (L=1)."
+    )
+
+    return df.rename(columns=NOMBRES_CALCULO_RE545)
 
 
 # ============================================================
@@ -4323,6 +4686,7 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     resumen, diccionario = leer_centrales(rutas["centrales"])
     mapa_barra = construir_mapa_barra(resumen)
     dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
+    dic_eficiencia = construir_dic_resumen_eficiencia(resumen)
     avanzar(40)
 
     if not rutas["cmg"].is_file():
@@ -4384,9 +4748,22 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     )
     avanzar(90)
 
+    registrar(
+        "Construyendo Calculo RE545 (etapa base: traspaso de Medidores + "
+        "L, M, N, O, S, U, V)..."
+    )
+    df_re545 = construir_calculo_re545(
+        df_medidores, mapa_barra, dic_cmg, registrar=registrar
+    )
+    df_re545 = completar_calculo_re545(
+        df_re545, df_subastas, umbral_soc_minimo, dic_factor,
+        dic_eficiencia, registrar=registrar,
+    )
+    avanzar(95)
+
     registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
     escribir_pagos_bess(
-        rutas["salida_pagos"], df_ecostos, registrar=registrar
+        rutas["salida_pagos"], df_ecostos, df_re545, registrar=registrar
     )
 
     avanzar(100)

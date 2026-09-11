@@ -1987,3 +1987,74 @@ fórmulas para `AY4:AY26787` (sección 5.4). Queda fuera, igual que toda la hoja
 que `CPF(-)`/`CSF(-)`/... repetidos entre `AG:AL` y `AM:AR`: se distinguen por el encabezado de
 grupo de las filas 1-2, que este esquema de una sola fila no replica. Para llegar sin
 ambigüedad a una de esas columnas hay que ir por posición, no por nombre.
+
+---
+
+# 26. `Calculo RE545`
+
+La segunda hoja de cálculo del libro, hermana de `Calculo E Costos`. El usuario entregó
+`Calculo_RE545_reducido_para_IA.xlsx` (versión reducida de la hoja real: fila 3 = nombres de
+columna, filas 1-2 = títulos de grupo, una hoja `Mapa_Formulas` con todas las familias de
+fórmulas y la columna `CF` con el número de fila original), así que los **nombres de columna son
+reales, no inferidos**.
+
+A diferencia de `Calculo E Costos`, esta hoja es casi toda **fórmulas en la hoja**, no valores
+escritos por macro: las únicas columnas que escribe el VBA son las del traspaso (A:G, I/J, K, P,
+T) y `Q`/`R` (CMg).
+
+## 26.1. Cómo se reparten las dos hojas
+
+`Traspasar_Medidores_A_Calculos_Rapido` recorre `Medidores` **una sola vez** y escribe en las dos
+hojas. `A:G`, `K` (SoC) y `P` (Ciclo de Carga del mes) van **iguales a las dos**. Lo que se
+reparte es la energía, según `Medidores!T` (`Ventana_No_Completa`):
+
+| `Ventana_No_Completa` | Energía va a |
+|---|---|
+| `= 1` (numérico) | `Calculo E Costos` (RE545 queda en 0) |
+| cualquier otro número | `Calculo RE545` |
+| vacío, no numérico o error | `Calculo RE545` |
+
+Además, solo `Calculo RE545` recibe `T` = `Medidores!L` (`Ventana` → "Ventana de valorizacion"),
+y solo esta hoja recibe `R` (`CMg!I`, "CMg Promedio"): `CompletarDestinoTurbo` se llama con
+`escribirR:=False` para E Costos y `escribirR:=True` para RE545. Por eso `construir_dic_cmg()`
+ahora guarda **el par** `(CMg!F, CMg!I)` — los dos elementos del `Array()` del diccionario VBA.
+
+## 26.2. Etapa base implementada (`A:V`)
+
+| Columna | Nombre real | Lógica |
+|---|---|---|
+| `A:G` | `Mes`, `Dia`, `Hora`, `Hora mes`, `Minuto`, `Bloque horario`, `Configuracion` | Traspaso desde `Medidores` (mismo bloque que E Costos, con `D`↔`E` invertidas). |
+| `H` | `Barra` | `VLOOKUP(G,Resumen!B:G,6,FALSE)` → homologado por nombre contra `Resumen BESS`, igual que en E Costos. |
+| `I`, `J` | `Descarga kWh`, `Carga kWh` | Energía de `Medidores!Gen_Unidad` separada por signo, **solo** si `Ventana_No_Completa <> 1`. |
+| `K` | `SoC %` | `Medidores!J`. |
+| `L` | `Adj SSCC` | La **misma** fórmula que `Calculo E Costos!L` (`COUNTIFS` contra `Subastas`) → se reusa `calcular_l()`. |
+| `M` | `SoC sobre el minimo` | `1*(K > Resumen!$H$8)` → se reusa `calcular_m()`. |
+| `N`, `O` | `Energía SSCC (-)/(+) por remunerar` | `SUMIFS` del grupo menos `SUMIFS` de los bloques anteriores = la suma, dentro del grupo central+ciclo y contando solo filas con `L=1`, de la energía de los bloques horarios `>=` al de la fila. Es la versión en fórmula de lo que `calcular_n_o()` ya hacía para E Costos → se reusa. |
+| `P` | `Ciclo de Carga del mes` | `Medidores!K`. |
+| `Q` | `CMg` | `CMg!F` por Barra+Bloque horario. |
+| `R` | `CMg Promedio` | `CMg!I`, por la misma clave (`escribirR`). |
+| `S` | `ranking cmg` | `(COUNTIFS(T=T4, R>R4, G=G4) + COUNTIFS(T=T4, R=R4, C>C4, G=G4))/4 + 1`. **No** es el mismo ranking que el de E Costos: agrupa por `T` (ventana de valorización) y ordena por `CMg Promedio`, no por `CMg`. |
+| `T` | `Ventana de valorizacion` | `Medidores!L`. |
+| `U` | `EiniT` | `K * VLOOKUP(G,Resumen!B:J,4,0) * 1000` = `SoC % × Pmax (MW) × 1000`. |
+| `V` | `EalmT` | `-SUMIFS(J:J, T:T, T4, G:G, G4) * VLOOKUP(G,Resumen!B:J,9,0)` = la carga total del grupo central+ventana, cambiada de signo, por la `Eficiencia` de esa central (9na columna de las 9 de `Resumen BESS`). |
+
+**Trampa de letras:** `R`, `S`, `T`, `U` y `V` existen en las dos hojas y **significan cosas
+distintas** en cada una (`U` es "Total" en E Costos y "EiniT" acá). Nunca reusar una función de
+una hoja en la otra sin mirar la fórmula real primero.
+
+`W:AB` están vacías en el original. Igual que en E Costos, las columnas vacías no se escriben: la
+hoja de salida conserva el orden y el contenido, no la letra de Excel.
+
+## 26.3. Lo que sigue pendiente de `Calculo RE545`
+
+- **`AC:AU`** — reservas por subasta: `AC:AH` (`CPF(-)`...`CTF(+)`, `SUMIFS` sobre `Subastas!O`),
+  `AI:AN` (lo mismo sobre `Subastas!P`, grupo "FD"), `AO:AT` (sobre `Subastas!Q`, grupo "FMA") y
+  `AU` = `SUMPRODUCT(AC:AH, AI:AN, AO:AT)/4*1000`. Los tres bloques usan como criterio el
+  encabezado de la propia columna (`'Calculo RE545'!AC$3`) contra `Subastas!B` (`Control`).
+- **`AW:BG`** — resumen por central + ventana (`EiniT`, `EalmT`, `Edisp_T`, checks, margen y flag
+  de última hora). Es una tabla de **otro largo** (288 filas en el original, no 26.787): mismo
+  patrón "dos tablas de distinto largo compartiendo hoja" que ya apareció en `FD` y en
+  `Ofertas SSCC`.
+- **`BI:CE`** — Componente 1 (`BI:BO`) y Componente 2 (`BQ:CE`), incluidas las fórmulas
+  matriciales `LARGE(IF(...))` de `BM` y `INDEX/MATCH` de `BS`, y el `Monto a compensar` final
+  (`CE`). Varias de estas dependen de `AW:BG`, así que van después.

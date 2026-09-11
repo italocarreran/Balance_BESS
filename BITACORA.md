@@ -30,8 +30,12 @@ estado, no un historial.
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
   inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
   `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
-- Implementar toda la hoja `Calculo RE545`. `Calculo E Costos` ya está
-  completa (etapas base, 2, 3 y 4 — ver entradas de esta sesión).
+- Terminar `Calculo RE545`: falta `AC:AU` (reservas por subasta:
+  Subastas/FD/FMA + `SUMPRODUCT`), `AW:BG` (resumen por central+ventana,
+  que es una tabla de OTRO largo, mismo patrón que `FD`) y `BI:CE`
+  (Componentes 1 y 2, con fórmulas matriciales `LARGE(IF(...))` e
+  `INDEX/MATCH`, y el `Monto a compensar` final). La etapa base (`A:V`)
+  ya está implementada — ver plan §26. `Calculo E Costos` está completa.
 - Decidir si la columna `Energía SSCC` de la hoja `Subastas` de
   `Consolidado_entradas.xlsx` tiene que quedar escrita ahí. El cálculo ya
   no es un pendiente (`calcular_subastas_energia_sscc()`), pero se hace
@@ -864,3 +868,66 @@ olvido.
   columnas de `NOMBRES_CALCULO_E_COSTOS` en orden, las tres nuevas numéricas en todas las filas.
 
 No se probó contra un caso real ni contra la planilla 11 — sigue siendo el pendiente principal.
+
+---
+
+## 2026-09-11 (8) — `Calculo RE545`, etapa base (`A:V`)
+
+El usuario pidió seguir con `Calculo RE545` y entregó `Calculo_RE545_reducido_para_IA.xlsx`
+(hoja real recortada: fila 3 = nombres de columna, filas 1-2 = títulos de grupo, hoja
+`Mapa_Formulas` con todas las familias de fórmulas, columna `CF` con la fila original). Se copió
+al repo como `docs/Calculo_RE545_reducido_para_IA.xlsx` — mismo criterio que el documento de
+trazabilidad: si es la fuente de una decisión, vive en el repo, no en un adjunto de sesión.
+
+Avisó además que quedaba poco contexto y que se iba a dormir, así que esta entrada se escribe
+con el detalle suficiente para que la próxima sesión continúe sin preguntarle nada.
+
+**Hallazgo estructural:** `Calculo RE545` es casi toda **fórmulas en la hoja**, no valores
+escritos por macro (al revés que `Calculo E Costos`, donde la macro J escribe casi todo). Las
+únicas columnas que escribe el VBA son las del traspaso y `Q`/`R`.
+
+**Cómo se reparten las dos hojas** (`Traspasar_Medidores_A_Calculos_Rapido` recorre `Medidores`
+una sola vez y escribe en las dos): `A:G`, `K` y `P` van **iguales a las dos**; lo que se reparte
+es la energía, según `Medidores!T` (`Ventana_No_Completa`): `= 1` → E Costos; cualquier otro
+número, vacío, no numérico o error → RE545. Solo RE545 recibe además `T` (= `Medidores!L`,
+"Ventana de valorizacion") y `R` (`CMg!I`, "CMg Promedio", porque `CompletarDestinoTurbo` se
+llama con `escribirR:=True` para esta hoja y `False` para la otra).
+
+**Cambios en `nucleo.py`:**
+
+- `construir_dic_cmg()` ahora guarda **el par** `(CMg!F, CMg!I)` en vez de solo `CMg!F` — son los
+  dos elementos del `Array()` del diccionario VBA. Se agregó `_buscar_cmg(dic_cmg, barra,
+  cuarto_hora)` como helper compartido (replica `CompletarDestinoTurbo`), y
+  `construir_calculo_e_costos()` ahora toma `[0]` de ese par. **Si algo se rompe en CMg, mirar
+  acá primero**: es un cambio en una estructura que ya usaban las dos hojas.
+- `construir_calculo_re545()`: etapa base (traspaso + Barra + Q/R + T).
+- `construir_dic_resumen_eficiencia()`: central → `Eficiencia` de `Resumen BESS` (la 9na columna
+  de las 9 de esa tabla = el `VLOOKUP(...,9,0)` de `V`). Es una **tercera** lectura de esa hoja,
+  distinta de `construir_mapa_barra()` y `construir_dic_resumen_factor()` — no fusionar.
+- `calcular_s_re545()`: el "ranking cmg" de esta hoja. **No es el mismo** que el de E Costos:
+  agrupa por central + `T` (ventana de valorización) y ordena por `CMg Promedio` + `Hora`, no por
+  `CMg` + ciclo.
+- `calcular_u_v_re545()`: `U` (`EiniT`) = `SoC % × Pmax (MW) × 1000`; `V` (`EalmT`) = la carga
+  total del grupo central+ventana cambiada de signo, por la `Eficiencia`. Central que no está en
+  `Resumen BESS` → las dos en blanco (equivale al `#N/A` del VLOOKUP).
+- `completar_calculo_re545()`: agrega `L`, `M`, `N`, `O`, `S`, `U`, `V` y renombra a
+  `NOMBRES_CALCULO_RE545`. `L`, `M`, `N` y `O` son **literalmente las mismas fórmulas** que en E
+  Costos, así que se reusan `calcular_l()`, `calcular_m()` y `calcular_n_o()` (verificado contra
+  la fórmula real de RE545, que es la versión explícita de lo que esa función ya hacía).
+- `escribir_pagos_bess()` acepta un `df_re545` opcional y escribe la hoja `Calculo RE545`
+  (`HOJA_CALCULO_RE545`) en `Pagos_BESS.xlsx`; `generar_pagos_bess()` la arma y la pasa.
+
+**Trampa nueva, importante:** `R`, `S`, `T`, `U` y `V` existen en las dos hojas y **significan
+cosas distintas** en cada una (`U` es "Total" en E Costos y "EiniT" en RE545). Nunca reusar una
+función de una hoja en la otra sin leer antes la fórmula real de la columna.
+
+**Verificación** (tests sintéticos, sin persistir en el repo): el reparto de energía entre las dos
+hojas (incluido el caso `Ventana_No_Completa` vacío → RE545) y que la hoja hermana sigue dando lo
+complementario; `T` = `Medidores!L`; `Q`/`R` del par de CMg; `S` con un grupo armado a propósito
+con empates de `CMg Promedio` resueltos por `Hora` (valores calculados a mano: 1.5, 1.25, 1.0,
+1.75, 1.0); `U`/`V` con una central sin ficha en `Resumen BESS` → blanco; y la corrida completa
+de `completar_calculo_re545()` devolviendo las 22 columnas con los nombres reales. Se corrieron
+también los tests de la etapa 4 de E Costos como regresión (el cambio de `construir_dic_cmg`
+podía romperlos): pasan.
+
+**Lo que sigue** (detalle por bloque en el plan §26.3): `AC:AU`, `AW:BG` y `BI:CE`.
