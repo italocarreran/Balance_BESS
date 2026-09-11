@@ -555,6 +555,8 @@ En Python no se debe asumir que el mismo nombre aparece idéntico en todas las f
 
 **Regla de migración:** durante la primera réplica no se corregirán ni reinterpretarán homologaciones aunque parezcan desplazadas o poco intuitivas. Se usarán exactamente como estén en `Centrales.xlsx` y cualquier inconsistencia se reportará para validación manual.
 
+**Corrección (sesión de validación con datos reales, ver `BITACORA.md`):** los "bloques asociados a FD/Subastas/ofertas" mencionados arriba son, literalmente, **columnas separadas por columnas en blanco** (ej. `A:B`=FD, `C:D` vacías, `E:F:G`=Subastas/ofertas) — **no** garantizan que la fila de una tabla corresponda a la misma central que la fila de la tabla de al lado. `construir_homologacion()` (usada para el SoC) originalmente trataba cada fila completa como un solo grupo de sinónimos, mezclando así columnas de bloques distintos cuando el orden de una tabla se corría respecto del de la otra (confirmado con un `Diccionario` real: para 6 de 9 centrales las dos tablas coincidían fila a fila por casualidad, pero para las últimas 3 no, y esa fila mezclada homologaba una central hacia la central del bloque vecino). Corregido para detectar los bloques de columnas automáticamente (separador = columna vacía en TODAS las filas) y homologar cada bloque por separado — ver `_bloques_columnas_diccionario()`. `construir_dic_mapeo_diccionario()` (columnas A:B) y `_mapas_homologacion_fge()` (columnas E:F:G) ya usaban posiciones fijas y nunca tuvieron este problema.
+
 ## 4.2. Rol de `Centrales.xlsx`
 
 `Centrales.xlsx` será un **maestro externo obligatorio** para el proceso Python.
@@ -1870,6 +1872,19 @@ encuentra, avisa y usa 0. `calcular_prorratas()` homologa por central+`Hora Mes`
 Replicando el VBA (`salidaAGAX(i,1)=valorAG; salidaAGAX(i,4)=valorAG` — **AG y AJ son el mismo
 valor**, igual `AH`/`AK`): `AJ = AG`, `AK = AH` (Prorratas "+" duplica literalmente las
 Prorratas "-"; no es un error, así está en el original). `AI = AL = 0` (`CTF`, ver arriba).
+
+**Corrección (sesión de validación con datos reales, ver `BITACORA.md`): "Cuenta de Sub_Baj" es
+el `aggfunc` de la tabla dinámica, pero el valor final NO es esa cuenta cruda.** El nombre
+"Prorrata" lo dice literalmente: cada celda se divide por la suma de su propia fila (entre TODOS
+los valores de `Control` que aparecen para esa `Configuración`+`Hora_mes`), así que cada fila
+termina sumando exactamente 1 — una proporción, no un conteo. Confirmado fila por fila contra la
+planilla 11 real: donde la cuenta cruda daba `(CPF=1, CSF=1)`, la planilla real trae `(0.5,
+0.5)`; donde daba `(CPF=2, CSF=1)`, trae `(0.6666..., 0.3333...)` — exactamente `cuenta/total`.
+Antes de esta corrección se devolvía la cuenta cruda tal cual, lo que hacía que `AG`/`AH`
+salieran mayores a 1 cuando había más de una fila del mismo tipo en el mismo
+`Configuración`+`Hora_mes` (reportado por el usuario: "los controles de frecuencia salen con
+2"). `construir_prorrata_sscc()` ahora normaliza cada fila del pivot por su propia suma antes de
+devolverlo.
 
 ### FD homologado (`AM, AN, AO, AP, AQ, AR`)
 

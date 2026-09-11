@@ -54,6 +54,20 @@ estado, no un historial.
   hasta ahora, los nombres de la fila 2 ya vienen idénticos a
   `Medidas_SAE.xlsx` — sospechar que el `Diccionario` quizás ni haga falta
   para el SoC, pero falta confirmarlo con otro período/archivo.
+- Validar la Prorrata SSCC normalizada (corregida esta sesión) contra más
+  filas de la planilla 11 real — solo se confirmaron 2 casos puntuales
+  (los que el usuario reportó), aunque el mecanismo (normalizar por fila)
+  quedó confirmado con certeza matemática, no es una inferencia.
+- Revisar si `construir_dic_mapeo_diccionario()` (columnas A:B, usada por
+  el FD homologado de `Calculo E Costos!AM:AR`) y `_mapas_homologacion_
+  fge()` (columnas E:F:G, usada por `Medidores!V`) también deberían usar
+  `_bloques_columnas_diccionario()` en vez de índices de columna fijos
+  (`0,1` y `4,5,6`) — hoy coinciden con los bloques reales por casualidad
+  en el único `Diccionario` visto, pero si el orden de los bloques
+  cambiara en otro archivo (o se agregara un bloque nuevo a la izquierda)
+  esas posiciones fijas se romperían. No se tocó porque HOY funcionan
+  bien y cambiarlas sin otro caso real de por medio sería un cambio
+  especulativo.
 - Correr un caso real completo (`Consolidado_entradas.xlsx` +
   `Pagos_BESS.xlsx`) con la corrección de `Subastas` aplicada, para
   confirmar que ahora sí aparecen filas `L=1` (participa en subasta) y
@@ -1446,3 +1460,133 @@ tildar solo `"ofertas_sscc"` dispara igual la lectura combinada (se llama a `con
 medidores()`) pero `Medidores` queda preservado tal cual estaba, y viceversa con solo
 `"medidores"` tildada. Regresión completa de las 16 sesiones anteriores: pasa. No se probó la
 ventana tkinter en sí (sin entorno gráfico en esta sesión, como siempre).
+
+---
+
+## 2026-09-11 (18) — Diagnóstico mejorado: "sin bloque de SoC" ahora dice si es un problema de Diccionario
+
+El usuario corrió de nuevo con el fix de la sesión anterior. Mejoró mucho (de 9 centrales sin
+cruzar a 1): `Centrales en Medidas_SAE.xlsx sin bloque de SoC: ['SAE-CRCA-PFV-NUEVO-QUILLAGUA-2']`
+— pero avisó que esa central sí está en su archivo de SoC.
+
+**Diagnóstico:** con el `SOC_2607.xlsx` real que había compartido, `extraer_soc()` (aislado, sin
+`Diccionario`) SÍ detecta esa central perfectamente — fila 2 trae literalmente
+`'SAE-CRCA-PFV-NUEVO-QUILLAGUA-2'`, idéntico a `Medidas_SAE.xlsx`, sin ningún carácter raro (se
+revisó con `repr()`, sin espacios/unicode ocultos). Sin `Diccionario`, esta central cruza sola.
+
+**Hipótesis más probable, confirmada como técnicamente posible con una prueba:** el
+`Centrales.xlsx!Diccionario` del usuario probablemente tiene una fila para esta central con el
+nombre "feo" (estilo ruta SCADA, ej. `"SAE-PFV Nuevo Quillagua II"`) escrito ANTES que el nombre
+limpio en esa misma fila. `construir_homologacion()` toma el PRIMER valor de cada fila como
+"canónico" — si ese orden quedó así (probablemente porque el `Diccionario` se armó en una época
+en que solo se conocía el nombre feo, antes de esta sesión), la homologación **rompe** un cruce
+que la fila 2 del SoC ya resolvía sola: convierte el nombre limpio en el feo, y el feo no cruza
+contra nada en `Medidas_SAE.xlsx`. Se armó una prueba sintética que reproduce exactamente este
+mecanismo (`construir_homologacion()` con una fila `["SAE-PFV Nuevo Quillagua II",
+"SAE-CRCA-PFV-NUEVO-QUILLAGUA-2"]` → el nombre limpio homologa hacia el feo).
+
+**No se tocó la lógica de homologación** (cambiar cuál valor de la fila gana como "canónico"
+afectaría potencialmente otras centrales que sí dependen del orden actual — cambio de más riesgo
+del que amerita una hipótesis todavía sin confirmar con el archivo real del usuario). En cambio,
+se mejoró el **diagnóstico**: el aviso "Centrales en Medidas_SAE.xlsx sin bloque de SoC" ahora
+busca, para cada central faltante, si existe algún `nombre_scada_original` (el nombre crudo antes
+de homologar) que normalice igual a esa central — si lo encuentra, lo dice explícitamente en el
+aviso ("el SoC SÍ trae un bloque con nombre crudo [...] — revisar si Diccionario lo está
+homologando a otro nombre"). Si el usuario corre de nuevo, el mensaje mismo va a confirmar o
+descartar la hipótesis sin necesitar que comparta su `Diccionario`.
+
+**Verificación:** test sintético (`test_soc_diagnostico.py`, no persistido) con la lógica exacta
+del bloque nuevo: caso "hay candidato crudo" (muestra la pista) y caso "de verdad no hay bloque"
+(mensaje simple, sin inventar pistas falsas). Regresión completa: pasa.
+
+**Pendiente:** confirmar con el próximo aviso (o con el contenido real de `Diccionario`) si la
+hipótesis es correcta. Si lo es, la corrección más simple sería reordenar esa fila del
+`Diccionario` (poner el nombre limpio primero) — eso ya lo puede hacer el usuario directamente en
+su archivo, sin esperar un cambio de código.
+
+---
+
+## 2026-09-11 (19) — Dos bugs reales confirmados y arreglados con la primera comparación fila a fila contra la planilla 11
+
+El usuario compartió, por primera vez, una comparación directa: `Pagos_BESS.xlsx` generado por
+Python con una hoja extra pegada a mano (`Ecostos planilla 11`) con los valores reales del
+`.xlsm` original para las mismas filas, más su `Centrales.xlsx` real (dos veces) y confirmó que
+el aviso mejorado de la sesión anterior efectivamente detectó la pista ("el SoC SÍ trae un
+bloque..."). Con estos tres archivos se resolvieron dos bugs reales de una — la primera vez que
+el proyecto se valida contra datos reales, no solo sintéticos, y encontró exactamente el tipo de
+error que esa validación existe para atrapar.
+
+### Fix 1: `construir_homologacion()` mezclaba tablas de equivalencia distintas
+
+Se leyó el `Diccionario` real completo. Confirmó algo que el plan ya sabía en teoría (sección
+4.2/B: "la hoja presenta bloques asociados a FD/Subastas/ofertas") pero que `construir_
+homologacion()` nunca implementó correctamente: son **tablas independientes por columnas**
+(`A:B`=FD, columnas `C:D` vacías, `E:F:G`=Subastas/ofertas), no una fila = todos los sinónimos de
+una central. Para 6 de las 9 centrales las dos tablas coinciden fila a fila por casualidad del
+orden en que se cargaron — pero para las últimas 3 (`VICTOR-JARA`, `ANDES4`, `NUEVO-QUILLAGUA-2`)
+el orden de la tabla de la derecha está corrido una fila respecto de la izquierda. La función
+vieja trataba la fila entera como un solo grupo de sinónimos, así que en esas 3 filas mezclaba
+central de una tabla con la central de la fila vecina de la otra tabla — literalmente homologaba
+`NUEVO-QUILLAGUA-2` hacia `ANDES4` (la central de la fila anterior en el bloque de la derecha).
+Esto explica el aviso persistente que el usuario venía reportando (y que el diagnóstico de la
+sesión anterior confirmó correctamente: "el SoC SÍ trae el bloque").
+
+**Pista clave para encontrarlo:** las otras dos funciones que leen esta misma hoja
+(`construir_dic_mapeo_diccionario()`, columnas `A:B`; `_mapas_homologacion_fge()`, columnas
+`E:F:G`) **ya** usaban posiciones de columna fijas — nunca tuvieron este bug, porque ya estaban
+diseñadas sabiendo que son tablas separadas. Solo `construir_homologacion()` (la más vieja de
+las tres, escrita antes de que se entendiera bien la estructura de bloques) se había quedado con
+el enfoque ingenuo de "toda la fila es un grupo".
+
+**Fix:** `_bloques_columnas_diccionario()` — detecta los bloques de columnas automáticamente
+(separador = una columna vacía en TODAS las filas del archivo, no alcanza con mirar una sola
+fila porque la fila de encabezados de grupo típicamente solo tiene texto en la primera columna
+de cada bloque). `construir_homologacion()` ahora arma el mapa bloque por bloque, sin mezclar
+equivalencias entre bloques distintos.
+
+**Verificación:** con el `Diccionario` real completo, las 9 centrales homologan correctamente
+hacia sí mismas (antes, `NUEVO-QUILLAGUA-2` homologaba mal). Corrida de punta a punta con el
+`SOC_2607.xlsx` real + el `Diccionario` real: 9 centrales, 26.793 filas, **cero** incidencias.
+Test sintético (`test_diccionario_bloques.py`, no persistido) que reproduce exactamente la
+estructura real (incluida la fila corrida) y confirma retrocompatibilidad con un `Diccionario`
+de una sola tabla (sin bloques separados por columnas vacías).
+
+### Fix 2: la Prorrata SSCC (`AG:AL`) devolvía la cuenta cruda, no la proporción
+
+El usuario reportó: "hay algunos pocos casos en los que los controles de frecuencia salen con 2
+y otras diferencias donde en la planilla 11 es 0.5 y en la que genera el python es 1 [...] el
+problema está en la prorrata de CF". Con la hoja de comparación se encontró la causa exacta:
+para un grupo con 1 fila `CPF` + 1 fila `CSF`, la planilla real trae `AG=0.5, AH=0.5` — pero
+nuestro código, que hacía `pivot_table(..., aggfunc="count")` y devolvía la cuenta tal cual, daba
+`AG=1, AH=1` (la cuenta cruda de cada tipo). Para un grupo con 2 `CPF` + 1 `CSF`, la planilla
+real trae `AG=0.6666..., AH=0.3333...` — exactamente `2/3` y `1/3`. El nombre "Prorrata" lo decía
+literalmente: es una **proporción** (reparte el 100% del grupo entre los tipos que aparecen), no
+una cuenta. El "sale con 2" que reportó el usuario es el mismo bug: cuando había 2 filas del
+mismo tipo sin ningún otro tipo compitiendo, la cuenta cruda daba 2 en vez de la proporción
+correcta (1.0, ya que 2/2=1).
+
+**Fix:** `construir_prorrata_sscc()` ahora divide cada fila del pivot por la suma de esa misma
+fila (entre todos los valores de `Control` presentes), antes de devolverlo — convirtiendo la
+cuenta cruda en una proporción que suma exactamente 1 por fila.
+
+**Verificación:** los DOS casos exactos que trajo la comparación real (`1+1 → 0.5/0.5` y
+`2+1 → 0.6666../0.3333..`) coinciden ahora al dígito. Test sintético (`test_prorrata_
+normalizada.py`, no persistido) con esos dos casos más un caso de una sola fila (retrocompatible,
+sigue dando 1.0) y una prueba general de que cada fila del pivot siempre suma 1. Regresión
+completa de las 18 sesiones anteriores: pasa (ningún test viejo dependía de un grupo con más de
+una fila del mismo tipo, así que ninguno se rompió con la normalización).
+
+**Downstream, sin cambios de código:** `AS`/`AT` (`_calcular_costo_ponderado`, "Energía descarga/
+carga con FD") y todo lo que depende de `AG:AL` ya eran fieles a la fórmula real
+(`factor = precio1*cantidad1 + precio2*cantidad2`, una suma ponderada, no un promedio) — el bug
+estaba enteramente aguas arriba, en qué valores de `cantidad1`/`cantidad2` recibían. Con `AG:AL`
+corregidos, `AS`/`AT` deberían salir bien ahora sin tocar esa función.
+
+**Archivos de referencia guardados** (mismo criterio que sesiones anteriores — si es la fuente de
+una decisión, vive en el repo): `docs/Centrales_real.xlsx`, `docs/SOC_real_2607.xlsx`,
+`docs/Pagos_BESS_comparacion_real.xlsx` (esta última es la primera comparación real vs Python
+lado a lado que existe en el proyecto — vale la pena mirarla de nuevo si aparece otra
+discrepancia).
+
+**Pendiente:** el usuario todavía no confirmó si con estos dos fixes el resto de la hoja coincide
+completamente contra la planilla 11 — falta una corrida nueva de punta a punta.

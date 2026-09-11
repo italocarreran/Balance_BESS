@@ -682,35 +682,96 @@ def leer_centrales(ruta):
     return resumen, diccionario
 
 
+def _bloques_columnas_diccionario(diccionario):
+    """
+    Detecta los bloques de columnas de la hoja Diccionario: son
+    VARIAS tablas de equivalencia independientes puestas una al lado
+    de la otra (encontrado con un Diccionario real: encabezados "FD"
+    en A1, "Subastas" en E1, "ofertas" en G1, con las columnas C:D
+    completamente vacias separando el primer bloque del segundo).
+
+    Una columna separa dos bloques cuando esta VACIA EN TODAS LAS
+    FILAS del archivo (no alcanza con mirar una sola fila: la fila de
+    encabezados, por ejemplo, suele tener texto solo en la primera
+    columna de cada bloque). Devuelve una lista de listas de indices
+    de columna, un grupo por bloque.
+    """
+
+    vacia = []
+    for col in range(diccionario.shape[1]):
+        serie = diccionario.iloc[:, col]
+        vacia.append(
+            serie.map(lambda v: not _tiene_valor(v)).all()
+        )
+
+    bloques = []
+    actual = []
+
+    for col, es_vacia in enumerate(vacia):
+        if es_vacia:
+            if actual:
+                bloques.append(actual)
+                actual = []
+        else:
+            actual.append(col)
+
+    if actual:
+        bloques.append(actual)
+
+    return bloques
+
+
 def construir_homologacion(diccionario):
     """
     Arma un mapa nombre_origen -> nombre_canonico a partir de la
-    hoja Diccionario, que viene en bloques sin encabezado fijo.
+    hoja Diccionario.
 
-    Estrategia deliberadamente conservadora: cada fila aporta
-    equivalencias entre todos sus textos no vacios. No se
-    corrige ni reinterpreta nada, tal como pide el plan.
+    TRAMPA REAL (encontrada con un Diccionario real, no en los
+    sinteticos): la hoja NO es "una fila = todos los sinonimos de una
+    central". Son VARIAS tablas independientes de equivalencia
+    puestas lado a lado por columnas (ej. "FD" en A:B, "Subastas" en
+    E:F:G -- ver _bloques_columnas_diccionario()), y el orden de
+    filas de una tabla NO tiene por que coincidir con el de la de al
+    lado (se vio con datos reales: para la mayoria de las centrales
+    las dos tablas coinciden fila a fila por casualidad, pero para las
+    ultimas 2-3 centrales el orden se corre). Tratar la fila entera
+    como un solo grupo de sinonimos (como hacia esta funcion antes)
+    mezclaba centrales de una tabla con las de la otra en esas filas
+    corridas -- por ejemplo, homologaba una central hacia la central
+    de la fila de al lado, no hacia si misma.
+
+    Ahora cada BLOQUE de columnas se procesa por separado: dentro de
+    un bloque, cada fila SI aporta equivalencias entre todos sus
+    textos no vacios (esa parte de la estrategia original era
+    correcta), pero un bloque nunca contribuye equivalencias con
+    otro. Si dos bloques distintos terminan dando canonicos distintos
+    para el mismo texto normalizado, gana el primero encontrado
+    (mismo criterio que ya usaba esta funcion dentro de una fila).
     """
 
     mapa = {}
 
-    for _, fila in diccionario.iterrows():
+    for columnas_bloque in _bloques_columnas_diccionario(diccionario):
 
-        valores = [
-            str(v).strip()
-            for v in fila.tolist()
-            if v is not None
-            and str(v).strip() != ""
-            and str(v).strip().lower() != "nan"
-        ]
+        sub = diccionario.iloc[:, columnas_bloque]
 
-        if len(valores) < 2:
-            continue
+        for _, fila in sub.iterrows():
 
-        canonico = valores[0]
+            valores = [
+                str(v).strip()
+                for v in fila.tolist()
+                if v is not None
+                and str(v).strip() != ""
+                and str(v).strip().lower() != "nan"
+            ]
 
-        for valor in valores:
-            mapa.setdefault(normalizar(valor), canonico)
+            if len(valores) < 2:
+                continue
+
+            canonico = valores[0]
+
+            for valor in valores:
+                mapa.setdefault(normalizar(valor), canonico)
 
     return mapa
 
@@ -4239,6 +4300,21 @@ def construir_prorrata_sscc(df_subastas):
         Filas: Configuración, Hora_mes
         Columnas: Control
         Valores: Cuenta de Sub_Baj
+
+    "Cuenta de Sub_Baj" es el AGGFUNC de la tabla dinamica (cuenta
+    filas), pero el resultado final NO es esa cuenta cruda: es una
+    "prorrata" (proporcion), tal como dice el nombre -- cada celda se
+    divide por la suma de su propia fila (entre TODOS los valores de
+    Control que aparecen para esa Configuración+Hora_mes), asi que
+    cada fila termina sumando 1. Encontrado comparando fila a fila
+    contra la planilla 11 real: donde nuestra cuenta cruda daba
+    (CPF=1, CSF=1) la planilla real trae (0.5, 0.5); donde daba
+    (CPF=2, CSF=1) trae (0.6666..., 0.3333...) -- exactamente
+    cuenta/total. Antes de esta correccion se devolvia la cuenta
+    cruda tal cual, lo que hacia que Prorratas > 1 aparecieran cuando
+    una central tenia mas de una fila del mismo tipo en la misma
+    Configuración+Hora_mes (el aviso del usuario: "a veces sale con
+    2").
     """
 
     tabla = (
@@ -4253,6 +4329,16 @@ def construir_prorrata_sscc(df_subastas):
         .reset_index()
     )
     tabla.columns.name = None
+
+    columnas_valor = [
+        c for c in tabla.columns if c not in ("Configuración", "Hora_mes")
+    ]
+
+    total_fila = tabla[columnas_valor].sum(axis=1)
+
+    tabla[columnas_valor] = (
+        tabla[columnas_valor].div(total_fila, axis=0).fillna(0.0)
+    )
 
     return tabla
 
@@ -5180,9 +5266,35 @@ def construir_medidores(
     sobrantes = sorted(centrales_soc - centrales_sae)
 
     if sin_soc:
+        # Para cada central sin bloque, se busca si algun nombre CRUDO
+        # (antes de homologar, "nombre_scada_original") normaliza igual
+        # a esa central -- si lo encuentra, es una pista fuerte de que
+        # el bloque SI esta en el archivo de SoC pero la homologacion
+        # (Centrales.xlsx!Diccionario) lo esta mandando a otro nombre.
+        candidatos_por_normalizado = {}
+        for origen in soc["nombre_scada_original"].unique():
+            candidatos_por_normalizado.setdefault(
+                normalizar(origen), []
+            ).append(origen)
+
+        detalle_sin_soc = []
+        for central in sin_soc:
+            candidatos = candidatos_por_normalizado.get(
+                normalizar(central), []
+            )
+            if candidatos:
+                detalle_sin_soc.append(
+                    f"{central} (el SoC SI trae un bloque con nombre "
+                    f"crudo {candidatos!r} -- revisar si "
+                    f"Centrales.xlsx!Diccionario lo esta homologando "
+                    f"a otro nombre distinto de '{central}')"
+                )
+            else:
+                detalle_sin_soc.append(central)
+
         avisos.append(
             f"Centrales en {ARCHIVO_MEDIDAS_SAE} sin bloque de "
-            f"SoC: {sin_soc}"
+            f"SoC: {detalle_sin_soc}"
         )
 
     if sobrantes:

@@ -90,6 +90,8 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 | El código VBA original, las fórmulas del `.xlsm` y de dónde sale cada dato | `docs/Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md` |
 | La hoja `Calculo RE545` real (recortada), con sus nombres de columna y fórmulas | `docs/Calculo_RE545_reducido_para_IA.xlsx` |
 | La hoja `Subastas` real, con encabezados y fórmulas (fuente de la corrección de `NOMBRES_SUBASTAS`) | `docs/Libro1_Subastas_real.xlsx` |
+| `Centrales.xlsx` y `SOC_AAMM.xlsx` reales (fuente de las correcciones de `detectar_fila_nombres()` y `construir_homologacion()`) | `docs/Centrales_real.xlsx`, `docs/SOC_real_2607.xlsx` |
+| Primera comparación real vs Python de `Calculo E Costos` fila a fila (fuente de la corrección de la Prorrata SSCC) | `docs/Pagos_BESS_comparacion_real.xlsx` |
 
 ## Estado actual
 
