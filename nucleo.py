@@ -723,9 +723,21 @@ def detectar_fila_nombres(df_crudo, maximo_filas=30):
     """
     Busca la fila que contiene los nombres de centrales.
 
-    Criterio: la fila inmediatamente anterior a aquella donde
-    aparecen los encabezados 'Time Stamp' / 'Value', mirando
-    hacia arriba hasta encontrar una fila con varios textos.
+    Criterio: se sube desde la fila de encabezados 'Time Stamp'/
+    'Value' hasta encontrar una fila con contenido util, y desde ahi
+    se sigue subiendo mientras las filas sigan teniendo contenido
+    util (sin saltar un hueco en blanco) -- se devuelve la MAS
+    ARRIBA de ese bloque contiguo, no la primera que se encuentra.
+
+    Hace falta este segundo paso porque un archivo real (visto con
+    datos reales) puede traer DOS filas de metadata pegadas justo
+    arriba del hueco en blanco que precede a los encabezados: la fila
+    con el nombre limpio de la central, y debajo (mas cerca de
+    'Time Stamp'/'Value') una fila con informacion adicional (ej. la
+    ruta SCADA completa del punto). Quedarse con "la primera fila util
+    subiendo" agarra la fila equivocada (la de mas informacion, no la
+    del nombre limpio) en ese caso -- subir hasta el tope del bloque
+    contiguo trae la de mas arriba, que es la que tiene el nombre.
     """
 
     fila_encabezados = None
@@ -747,8 +759,6 @@ def detectar_fila_nombres(df_crudo, maximo_filas=30):
             "'Time Stamp' y 'Value' en el archivo SOC."
         )
 
-    # Hacia arriba, la primera fila con al menos un texto que
-    # no sea un encabezado del bloque.
     encabezados_bloque = {
         "status",
         "questionable",
@@ -757,25 +767,36 @@ def detectar_fila_nombres(df_crudo, maximo_filas=30):
         "",
     }
 
-    for indice in range(fila_encabezados - 1, -1, -1):
-
+    def _fila_tiene_contenido_util(indice):
         textos = [
             normalizar(v)
             for v in df_crudo.iloc[indice].tolist()
         ]
+        return any(t not in encabezados_bloque for t in textos)
 
-        utiles = [
-            t for t in textos
-            if t not in encabezados_bloque
-        ]
+    fila_nombres = None
 
-        if utiles:
-            return indice, fila_encabezados
+    for indice in range(fila_encabezados - 1, -1, -1):
 
-    raise ErrorEntrada(
-        "Se encontraron los encabezados 'Time Stamp'/'Value' "
-        "pero no una fila de nombres de centrales arriba."
-    )
+        if _fila_tiene_contenido_util(indice):
+            # Sigue siendo candidata mientras haya contenido util;
+            # se actualiza en cada vuelta para quedarse con la MAS
+            # ARRIBA del bloque contiguo, no la primera encontrada.
+            fila_nombres = indice
+            continue
+
+        # Fila en blanco: si ya se encontro una candidata, el bloque
+        # contiguo termino aca -- se corta la busqueda.
+        if fila_nombres is not None:
+            break
+
+    if fila_nombres is None:
+        raise ErrorEntrada(
+            "Se encontraron los encabezados 'Time Stamp'/'Value' "
+            "pero no una fila de nombres de centrales arriba."
+        )
+
+    return fila_nombres, fila_encabezados
 
 
 def detectar_bloques(df_crudo, fila_nombres, fila_encabezados):
@@ -5537,12 +5558,20 @@ def escribir_salida(
 SECCIONES_CONSOLIDADO = (
     (
         "medidores",
-        "Medidores + Ofertas SSCC",
+        "Medidores",
         f"Usa {ARCHIVO_MEDIDAS_SAE}, el SoC del periodo, "
-        f"{ARCHIVO_CENTRALES} (hoja Diccionario) y el archivo "
-        f"OfertasSSCC -- los 4 se leen juntos para armar estas dos "
-        f"hojas, no se pueden actualizar por separado.",
-        ("Medidores", "Ofertas SSCC"),
+        f"{ARCHIVO_CENTRALES} y OfertasSSCC (comparte esta lectura "
+        f"con 'Ofertas SSCC' de abajo: alcanza con que una de las dos "
+        f"este tildada). Esta casilla decide si se reescribe la hoja "
+        f"'Medidores' en particular.",
+        ("Medidores",),
+    ),
+    (
+        "ofertas_sscc",
+        "Ofertas SSCC",
+        f"Misma lectura que 'Medidores' (arriba) -- esta casilla "
+        f"decide si se reescribe la hoja 'Ofertas SSCC' en particular.",
+        ("Ofertas SSCC",),
     ),
     (
         "cmg",
@@ -5596,7 +5625,13 @@ def generar_consolidado(
     escribir_salida). La usa la ventana "Generar" de esa fila.
 
     secciones_activas: iterable de ids de SECCIONES_CONSOLIDADO
-    ("medidores", "cmg", "fd", "subastas") a recalcular esta vez.
+    ("medidores", "ofertas_sscc", "cmg", "fd", "subastas") a
+    recalcular esta vez. "medidores" y "ofertas_sscc" comparten una
+    unica lectura/calculo (construir_medidores() arma las dos hojas
+    de una, porque Medidores!R:S:T depende de Ofertas SSCC) -- alcanza
+    con que UNA de las dos este tildada para que esa lectura se
+    dispare; lo que cada id decide por separado es solo que hoja se
+    reescribe.
     """
 
     def avanzar(valor):
@@ -5631,7 +5666,7 @@ def generar_consolidado(
 
     avanzar(5)
 
-    if "medidores" in secciones_activas:
+    if "medidores" in secciones_activas or "ofertas_sscc" in secciones_activas:
 
         aamm_val = validar_aamm(aamm)
 

@@ -48,6 +48,12 @@ estado, no un historial.
   RE545`) usaba por error `Control` cuando necesitaba `Concepto` (las
   etiquetas completas `CPF(-)`/`CSF(+)`/etc que usa la fórmula real de
   `Subastas!$B:$B`) — corregido en esta sesión.
+- Confirmar con más de un archivo de SoC real que el patrón "fila de
+  nombre limpio + fila de ruta SCADA apiladas" (resuelto esta sesión,
+  `detectar_fila_nombres()`) es estable. Con el único archivo real visto
+  hasta ahora, los nombres de la fila 2 ya vienen idénticos a
+  `Medidas_SAE.xlsx` — sospechar que el `Diccionario` quizás ni haga falta
+  para el SoC, pero falta confirmarlo con otro período/archivo.
 - Correr un caso real completo (`Consolidado_entradas.xlsx` +
   `Pagos_BESS.xlsx`) con la corrección de `Subastas` aplicada, para
   confirmar que ahora sí aparecen filas `L=1` (participa en subasta) y
@@ -1383,3 +1389,60 @@ mismo `Libro1.xlsx` — se revisaron de pasada y coinciden con lo ya implementad
 corrección aplicada, para confirmar que ahora sí aparecen filas `L=1` y que Prorratas/reservas de
 RE545 no quedan en 0 (la falta de la columna `Concepto` explicaría, retroactivamente, por qué el
 caso real de la sesión anterior daba 0 filas `BAJADA`/`SUBIDA`).
+
+---
+
+## 2026-09-11 (17) — Fix: fila de nombres del SoC (fila 2, no la 3) + selector Medidores/Ofertas separado
+
+Dos pedidos cortos del usuario, con un archivo real (`SOC_2607.xlsx`) que resolvió el primero de
+punta a punta.
+
+### Fix: `detectar_fila_nombres()` se quedaba con la fila equivocada
+
+El usuario avisó: "el soc sigue sin nada en la fila 2 está el nombre de la central porsi no la
+3". Con el archivo real se confirmó la estructura exacta: fila 2 = nombre limpio de la central
+(`"SAE-CRCA-PFV-DON-HUMBERTO"`, idéntico al de `Medidas_SAE.xlsx`), fila 3 = la ruta SCADA
+completa (`"\\SRV-SCADA-AF2\SEN\Generación\...\SAE-PFV Don Humberto|Nombre"`, la misma pieza que
+ya se había resuelto la sesión anterior con `_extraer_nombre_desde_ruta_scada`), fila 4 en blanco,
+fila 5 los encabezados `Status/Questionable/Time Stamp/Value`. Dos filas útiles APILADAS (sin
+blanco entre medio) antes del hueco en blanco que precede a los encabezados — `detectar_fila_
+nombres()` subía desde los encabezados y se quedaba con la PRIMERA fila útil que encontraba
+(fila 3, la ruta), sin darse cuenta de que había otra más arriba (fila 2, el nombre limpio).
+
+**Fix:** en vez de devolver la primera fila útil encontrada subiendo, ahora se sigue subiendo
+mientras las filas sigan siendo útiles (sin blanco de por medio) y se devuelve la MÁS ARRIBA de
+ese bloque contiguo. Con una sola fila útil (el caso más común hasta ahora) el comportamiento es
+idéntico a antes — retrocompatible.
+
+**Verificación, con el archivo real completo:** `extraer_soc()` sobre `SOC_2607.xlsx` (sin ningún
+`Diccionario`/homologación, `mapa_homologacion={}`) detecta las **9 centrales exactas** de
+`Medidas_SAE.xlsx` (`SAE-CRCA-PE-LA-CABANA`, `SAE-CRCA-PFV-ANDES3`, ..., `SAE-TOCOPILLA`),
+**26.793 filas**, **cero incidencias**. La misteriosa central suelta `'07 Region RM'` de la sesión
+anterior queda explicada: es lo que la fila 3 (ruta SCADA) tiene para el bloque de `SAE-CRCA-
+PFV-MANZANO` en particular — un dato incompleto que ya no se usa, porque ahora se lee la fila 2.
+Con esto, y salvo que otro archivo real muestre lo contrario, probablemente **ya no hace falta
+ningún `Diccionario` para homologar el SoC** — los nombres de fila 2 ya vienen idénticos a
+`Medidas_SAE.xlsx`. Se agregó `test_soc_fila_nombres.py` (no persistido) con el caso real (2 filas
+apiladas), el caso simple (1 fila, retrocompatibilidad) y un caso con 3 filas apiladas.
+
+### Selector separado: `Medidores` y `Ofertas SSCC` como casillas independientes
+
+Pedido: "separa medidas de ofertas el selector". Hasta ahora `SECCIONES_CONSOLIDADO` tenía una
+sola sección `"medidores"` que escribía las dos hojas juntas (`("Medidores", "Ofertas SSCC")`),
+porque `construir_medidores()` las arma en una sola pasada (`Medidores!R:S:T` depende de Ofertas
+SSCC). Ahora son dos ids separados (`"medidores"` → hoja `Medidores`; `"ofertas_sscc"` → hoja
+`Ofertas SSCC`), cada uno decidiendo solo si se REESCRIBE su propia hoja — pero **la lectura
+combinada sigue siendo una sola**: alcanza con que cualquiera de las dos esté tildada para que se
+lean los 4 archivos de entrada (`Medidas_SAE.xlsx`, SoC, `Centrales.xlsx`, OfertasSSCC) y se corra
+`construir_medidores()`; lo que cambia es solo qué hoja(s) se escriben al final (`hojas_
+regenerar`, mismo mecanismo de preservación que ya usaban `CMg`/`FD`/`Subastas`). No hacía falta
+tocar `Balance_BESS.py`: la ventana ya recorre `SECCIONES_CONSOLIDADO` genéricamente, así que
+ahora dibuja 5 casillas en vez de 4 sin ningún cambio de código — solo se agrandó la ventana
+(`620x420` → `620x560`) para que entren.
+
+**Verificación:** `test_selector_medidas_ofertas.py` (no persistido), con las funciones de
+lectura/cálculo monkeypatcheadas para no depender de archivos Excel completos: confirma que
+tildar solo `"ofertas_sscc"` dispara igual la lectura combinada (se llama a `construir_
+medidores()`) pero `Medidores` queda preservado tal cual estaba, y viceversa con solo
+`"medidores"` tildada. Regresión completa de las 16 sesiones anteriores: pasa. No se probó la
+ventana tkinter en sí (sin entorno gráfico en esta sesión, como siempre).

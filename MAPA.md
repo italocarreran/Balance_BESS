@@ -20,14 +20,15 @@ de.
   dos últimas filas del mismo diagrama, cada una con su botón **Generar...**
   que abre una ventana aparte:
   - *Generar Consolidado_entradas.xlsx*: una casilla por sección de
-    `nucleo.SECCIONES_CONSOLIDADO` ("Medidores + Ofertas SSCC", "CMg", "FD",
-    "Subastas"; todas tildadas por defecto). Lo destildado se **conserva**
-    tal cual estaba en el archivo existente (no se recalcula ni se borra) —
-    ver `nucleo.generar_consolidado`.
-  - *Generar Pagos_BESS.xlsx*: sin casillas todavía (una sola hoja de
-    salida); explica que usa la hoja `Medidores` ya generada (no la
-    recalcula) más `Centrales.xlsx`/`cmg.xlsx` frescos — ver
-    `nucleo.generar_pagos_bess`.
+    `nucleo.SECCIONES_CONSOLIDADO` ("Medidores", "Ofertas SSCC", "CMg",
+    "FD", "Subastas" -- 5 casillas, "Medidores"/"Ofertas SSCC" separadas
+    a pedido del usuario aunque comparten una unica lectura, ver
+    comentario de esa constante; todas tildadas por defecto). Lo
+    destildado se **conserva** tal cual estaba en el archivo existente
+    (no se recalcula ni se borra) — ver `nucleo.generar_consolidado`.
+  - *Generar Pagos_BESS.xlsx*: una casilla por hoja de
+    `nucleo.SECCIONES_PAGOS` ("Calculo E Costos", "Calculo RE545"),
+    mismo criterio de preservación — ver `nucleo.generar_pagos_bess`.
 
   Ambas ventanas corren su función de `nucleo` en un hilo aparte
   (`lanzar_generacion()`, helper compartido) y reportan al log/barra de
@@ -253,10 +254,14 @@ de.
     (`_copiar_hoja_existente()`, copia cruda vía `openpyxl`, sin fórmulas ni
     formato) en vez de recalcularse.
   - `SECCIONES_CONSOLIDADO` — tupla de `(id, etiqueta, descripción, hojas)`
-    por cada casilla de la ventana "Generar" de `Consolidado_entradas.xlsx`
-    (`"medidores"` agrupa Medidas_SAE + SoC + Centrales + OfertasSSCC,
-    porque `construir_medidores()` los necesita siempre juntos; `"cmg"`,
-    `"fd"`, `"subastas"` son independientes).
+    por cada casilla de la ventana "Generar" de `Consolidado_entradas.xlsx`.
+    `"medidores"` y `"ofertas_sscc"` son ids SEPARADOS (una casilla cada
+    uno, cada una decide si se reescribe su propia hoja) pero comparten
+    una unica LECTURA/calculo (`construir_medidores()` arma las dos hojas
+    de una sola pasada porque `Medidores!R:S:T` depende de Ofertas SSCC):
+    alcanza con que cualquiera de las dos este tildada para que se lean
+    Medidas_SAE + SoC + Centrales + OfertasSSCC. `"cmg"`, `"fd"`,
+    `"subastas"` si son independientes de punta a punta.
   - `generar_consolidado(carpeta_base, aamm, secciones_activas, registrar=print, progreso=None)`
     — genera/actualiza `Consolidado_entradas.xlsx` recalculando solo las
     secciones tildadas; valida los archivos de entrada únicamente para las
