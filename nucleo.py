@@ -55,6 +55,12 @@ HOJA_SUBASTAS_ORIGEN = "DB"
 
 ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
 
+# Etapa siguiente (Calculo E Costos / "Ecostos"): el usuario pidio que
+# viva en una planilla aparte de Consolidado_entradas.xlsx. Nombre
+# provisorio, puede cambiar.
+ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"
+HOJA_CALCULO_ECOSTOS = "Calculo E Costos"
+
 # El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
 # lo ingresa el usuario en la ventana. El archivo de SoC solo debe
 # contener "SOC" y el AAMM en su nombre (plan, seccion 19.1) - no existe
@@ -199,6 +205,7 @@ def resolver_rutas(carpeta_base):
         "centrales": auxiliares_dir / ARCHIVO_CENTRALES,
         "cmg": cmg_dir / ARCHIVO_CMG,
         "salida": base / ARCHIVO_SALIDA,
+        "salida_pagos": base / ARCHIVO_SALIDA_PAGOS,
     }
 
 
@@ -1962,6 +1969,263 @@ def construir_subastas(ruta_subastas, registrar=print):
 
 
 # ============================================================
+# CALCULO E COSTOS (etapa base)
+#
+# El usuario pidio avanzar "por etapas: primero H + CMg + traspaso
+# de Medidores". Lo que sigue replica solo esa parte de dos macros:
+#
+#   - Traspasar_Medidores_A_Calculos_Rapido (modulo
+#     B_medidores_a_calculos): A:G (con D<->E invertidas), I/J
+#     (energia de Medidores!I separada por signo, solo si
+#     Ventana_No_Completa==1; si no, es de "Calculo RE545", fuera de
+#     alcance), Medidores!J -> K, Medidores!K -> P. H NO la toca esta
+#     macro (es formula, ver mas abajo).
+#   - Asignar_CMg_a_Calculos_Turbo (modulo A_Carga_Cmg_a_Destino):
+#     arma un diccionario CMg!D (Barra) + "|" + CMg!H (Cuarto de
+#     Hora, normalizado con NormalizaCuarto) -> CMg!F, y lo vuelca en
+#     la columna Q. Para "Calculo E Costos" la macro NO escribe R
+#     (escribirR=False): eso solo aplica a "Calculo RE545".
+#
+# H (Barra), en la planilla original, es formula:
+#     =VLOOKUP(G4, Resumen!B:G, 6, FALSE)
+# Se homologa por NOMBRE de columna ("Nombre activo" / "Barra
+# inyeccion" de Centrales.xlsx!Resumen BESS) en vez de por posicion,
+# porque Centrales.xlsx no reproduce el layout Resumen!B:G del libro
+# original.
+#
+# El resto de columnas de Actualizar_Calculos_Columnas (L, M, N, O,
+# R, S, T, U, W, X, Y, AB:AF, AG:AX, AZ) queda para una etapa
+# posterior (decision explicita del usuario).
+#
+# Nombres de columna: son PLACEHOLDERS derivados de los comentarios
+# de la macro. Todavia no se pudo confirmar contra un archivo real
+# con los encabezados de "Calculo E Costos" (las dos veces que el
+# usuario adjunto un archivo para esto, solo traia las hojas FD y
+# Subastas) -- se corrigen apenas se reciba ese archivo.
+# ============================================================
+
+def _normaliza_cuarto(valor):
+    """
+    Replica NormalizaCuarto:
+        Error       -> ""
+        Numerico    -> CStr(CLng(valor))  (texto del entero redondeado)
+        Otro        -> Trim(CStr(valor))
+    """
+
+    if valor is None:
+        return ""
+
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if texto == "":
+            return ""
+        try:
+            numero = float(texto.replace(",", "."))
+        except ValueError:
+            return texto
+        return str(round(numero))
+
+    if isinstance(valor, (int, float)):
+        return str(round(float(valor)))
+
+    return str(valor).strip()
+
+
+def construir_dic_cmg(df_cmg):
+    """
+    Replica el paso 1) de Asignar_CMg_a_Calculos_Turbo: arma un
+    diccionario clave -> valor a asignar en Q, a partir de la hoja
+    CMg (columnas por posicion, sin renombrar - ver leer_cmg):
+        D (indice 3) = Barra
+        F (indice 5) = valor a asignar en Q
+        H (indice 7) = Cuarto de Hora
+
+    Si una clave se repite, gana la primera fila (igual que
+    "If Not dictCMg.Exists(clave) Then Add" en VBA).
+    """
+
+    columna_d = df_cmg.columns[3]
+    columna_f = df_cmg.columns[5]
+    columna_h = df_cmg.columns[7]
+
+    diccionario = {}
+
+    for _, fila in df_cmg.iterrows():
+
+        barra = fila[columna_d]
+        barra = "" if pd.isna(barra) else str(barra).strip()
+
+        cuarto_hora = _normaliza_cuarto(fila[columna_h])
+
+        if barra == "" or cuarto_hora == "":
+            continue
+
+        clave = barra.upper() + "|" + cuarto_hora
+
+        if clave not in diccionario:
+            diccionario[clave] = fila[columna_f]
+
+    return diccionario
+
+
+def construir_mapa_barra(resumen_bess):
+    """
+    Arma nombre_central -> barra de inyeccion, a partir de la hoja
+    "Resumen BESS" de Centrales.xlsx (columnas "Nombre activo" y
+    "Barra inyeccion", confirmadas en el plan de traspaso, seccion
+    4.1). Se busca por nombre de columna normalizado, no por
+    posicion.
+    """
+
+    columna_nombre = None
+    columna_barra = None
+
+    for columna in resumen_bess.columns:
+        clave = normalizar(columna)
+        if columna_nombre is None and "nombre" in clave and "activ" in clave:
+            columna_nombre = columna
+        if columna_barra is None and "barra" in clave:
+            columna_barra = columna
+
+    if columna_nombre is None or columna_barra is None:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} debe "
+            f"tener una columna de nombre de central ('Nombre activo') y "
+            f"una de barra de inyeccion ('Barra inyección'). Columnas "
+            f"encontradas: {list(resumen_bess.columns)}"
+        )
+
+    mapa = {}
+
+    for _, fila in resumen_bess.iterrows():
+
+        nombre = fila[columna_nombre]
+        if pd.isna(nombre):
+            continue
+
+        barra = fila[columna_barra]
+        mapa[normalizar(nombre)] = "" if pd.isna(barra) else str(barra).strip()
+
+    return mapa
+
+
+def construir_calculo_e_costos(
+    df_medidores, mapa_barra, dic_cmg, registrar=print
+):
+    """
+    Etapa base de "Calculo E Costos": traspaso desde Medidores (A:G
+    con D<->E invertidas, I/J, K, P) + H (Barra, homologada por
+    nombre) + Q (CMg, homologado por Barra+Cuarto de Hora). Ver el
+    comentario de seccion mas arriba para el detalle de cada macro
+    replicada.
+
+    Solo cubre "Calculo E Costos" (Ventana_No_Completa == 1);
+    "Calculo RE545" (Ventana_No_Completa <> 1) queda fuera de esta
+    etapa.
+    """
+
+    n = len(df_medidores)
+    df_medidores = df_medidores.reset_index(drop=True)
+
+    df = pd.DataFrame(index=range(n))
+
+    df["Mes"] = df_medidores["Mes"]
+    df["Dia"] = df_medidores["Dia"]
+    df["Hora"] = df_medidores["Hora"]
+
+    # D <-> E invertidas: Destino D = Medidores E, Destino E = Medidores D.
+    df["Hora Mes"] = df_medidores["Hora Mes"]
+    df["Minutos"] = df_medidores["Minutos"]
+
+    df["Cuarto de Hora"] = df_medidores["Cuarto de Hora"]
+    df["clave"] = df_medidores["clave"]
+
+    df["Barra"] = df["clave"].map(
+        lambda valor: mapa_barra.get(normalizar(valor), "")
+    )
+
+    energia = pd.to_numeric(
+        df_medidores["Gen_Unidad"], errors="coerce"
+    ).fillna(0.0)
+
+    va_a_ecostos = pd.to_numeric(
+        df_medidores["Ventana_No_Completa"], errors="coerce"
+    ).eq(1)
+
+    energia_positiva = energia.where(energia > 0, 0.0).where(va_a_ecostos, 0.0)
+    energia_negativa = energia.where(energia < 0, 0.0).where(va_a_ecostos, 0.0)
+
+    df["Energia_Positiva"] = energia_positiva
+    df["Energia_Negativa"] = energia_negativa
+
+    # Medidores J (SoC) -> Destino K; Medidores K (Copia_Ventana) -> Destino P.
+    df["SoC"] = df_medidores["SoC"]
+    df["Copia_Ventana"] = df_medidores["Copia_Ventana"]
+
+    def _buscar_cmg(barra, cuarto_hora):
+        barra = "" if not barra else str(barra).strip()
+        cuarto = _normaliza_cuarto(cuarto_hora)
+        if barra == "" or cuarto == "":
+            return pd.NA
+        return dic_cmg.get(barra.upper() + "|" + cuarto, pd.NA)
+
+    df["CMg"] = [
+        _buscar_cmg(barra, cuarto_hora)
+        for barra, cuarto_hora in zip(df["Barra"], df["Cuarto de Hora"])
+    ]
+
+    sin_barra = int((df["Barra"] == "").sum())
+    sin_cmg = int(df["CMg"].isna().sum())
+
+    if sin_barra:
+        registrar(
+            f"  Calculo E Costos: {sin_barra:,} fila(s) sin barra de "
+            f"inyeccion (central no encontrada en '{HOJA_RESUMEN_BESS}')."
+        )
+
+    if sin_cmg:
+        registrar(
+            f"  Calculo E Costos: {sin_cmg:,} fila(s) sin CMg (sin match "
+            f"Barra+Cuarto de Hora en {ARCHIVO_CMG})."
+        )
+
+    registrar(
+        f"  Calculo E Costos: {n:,} fila(s) traspasadas desde Medidores."
+    )
+
+    return df
+
+
+def escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print):
+    """
+    Escribe Pagos_BESS.xlsx: por ahora solo la hoja "Calculo E
+    Costos" en su etapa base (ver comentario de construir_calculo_e_
+    costos). El usuario pidio explicitamente que esto viva en un
+    archivo separado de Consolidado_entradas.xlsx ("pagos_bess o algo
+    asi por ahora") -- nombre y alcance son provisorios.
+    """
+
+    ruta_salida = Path(ruta_salida)
+
+    with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
+        df_ecostos.to_excel(
+            writer,
+            sheet_name=HOJA_CALCULO_ECOSTOS,
+            index=False,
+        )
+
+    registrar(f"Archivo generado: {ruta_salida}")
+
+    return ruta_salida
+
+
+# ============================================================
 # COLUMNAS CALCULADAS
 # ============================================================
 
@@ -2478,7 +2742,7 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
     avanzar(5)
 
     registrar("Leyendo Centrales.xlsx...")
-    _, diccionario = leer_centrales(rutas["centrales"])
+    resumen, diccionario = leer_centrales(rutas["centrales"])
     mapa = construir_homologacion(diccionario)
     registrar(f"  homologaciones cargadas: {len(mapa):,}")
     avanzar(20)
@@ -2547,8 +2811,21 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
         df_fd_cpf,
         df_subastas,
     )
+    avanzar(97)
+
+    registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
+               "traspaso de Medidores)...")
+    mapa_barra = construir_mapa_barra(resumen)
+    dic_cmg = construir_dic_cmg(df_cmg)
+    df_ecostos = construir_calculo_e_costos(
+        df_medidores, mapa_barra, dic_cmg, registrar=registrar
+    )
+
+    registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
+    escribir_pagos_bess(rutas["salida_pagos"], df_ecostos, registrar=registrar)
 
     avanzar(100)
     registrar(f"Listo: {rutas['salida']}")
+    registrar(f"Listo: {rutas['salida_pagos']}")
 
     return df_medidores, avisos, incidencias

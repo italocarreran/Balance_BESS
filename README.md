@@ -5,8 +5,9 @@ Herramienta en Python que reemplaza, hoja por hoja, el cálculo hecho hoy en
 usa solo como referencia de validación; el proceso Python no depende de
 información almacenada exclusivamente en ese libro.
 
-Etapas implementadas hasta ahora: **Medidores** (incluye Ofertas SSCC) y la
-carga de **CMg**, **FD** y **Subastas**.
+Etapas implementadas hasta ahora: **Medidores** (incluye Ofertas SSCC), la
+carga de **CMg**, **FD** y **Subastas**, y una primera etapa (base) de
+**Calculo E Costos**.
 
 ## Instalación
 
@@ -29,7 +30,8 @@ python Balance_BESS.py
 3. La ventana detecta automáticamente las entradas y muestra un checklist
    (`OK` / `FALTA` / `PENDIENTE`).
 4. El botón **Ejecutar** se habilita cuando no falta nada requerido y genera
-   `Consolidado_entradas.xlsx` directamente en la carpeta base.
+   `Consolidado_entradas.xlsx` y `Pagos_BESS.xlsx` directamente en la carpeta
+   base.
 
 ## Estructura de carpeta de un caso
 
@@ -50,7 +52,9 @@ python Balance_BESS.py
 ├── Subastas/
 │   └── <algún archivo Excel cuyo nombre empiece con
 │        "3_REMUNERACIÓN_SUBASTAS_E_ID_">
-└── Consolidado_entradas.xlsx    <- salida generada por el programa
+├── Consolidado_entradas.xlsx    <- salida generada por el programa
+└── Pagos_BESS.xlsx              <- salida generada por el programa
+                                     (nombre provisorio)
 ```
 
 Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
@@ -101,14 +105,30 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 - `Subastas` — datos de la hoja `DB` filtrados por "Propietario" (BESS/SAE),
   más la columna "Ciclo" calculada, con sus nombres reales de columna
   (replica `Cargar_Remuneracion_Subastas_Rapido`). La columna "Energía
-  SSCC" queda vacía: depende de `Calculo E Costos`, una etapa posterior
-  todavía sin implementar.
+  SSCC" queda vacía: depende de `Calculo E Costos`.
 - `Log` — avisos e incidencias detectadas durante el cálculo.
 
+`Pagos_BESS.xlsx` (nombre y alcance provisorios, a pedido del usuario) tiene
+por ahora una sola hoja:
+
+- `Calculo E Costos` — primera etapa (base) del traspaso desde `Medidores` y
+  la asignación de CMg, replicando parcialmente `Traspasar_Medidores_A_
+  Calculos_Rapido` y `Asignar_CMg_a_Calculos_Turbo`: columnas A:G (con D y E
+  invertidas, igual que la macro), `Barra` (H, antes fórmula
+  `=VLOOKUP(G,Resumen!B:G,6,FALSE)`, acá homologada por nombre contra
+  `Resumen BESS`), `Energia_Positiva`/`Energia_Negativa` (I/J, la energía de
+  `Medidores!Gen_Unidad` separada por signo, solo para filas con
+  `Ventana_No_Completa = 1`), `SoC` (K, copia de `Medidores!SoC`),
+  `Copia_Ventana` (P, copia de `Medidores!Copia_Ventana`) y `CMg` (Q,
+  homologado por `Barra` + `Cuarto de Hora`). Los nombres de columna son
+  placeholders derivados de los comentarios de la macro: todavía no se pudo
+  confirmar contra un archivo real con los encabezados de `Calculo E
+  Costos`. El resto de `Actualizar_Calculos_Columnas` (L, M, N, O, R, S, T,
+  U, W, X, Y, AB:AF, AG:AX, AZ) y toda la hoja `Calculo RE545` quedan para
+  una etapa posterior (decisión explícita del usuario: avanzar por etapas).
+
 Las macros de Ofertas SSCC, CMg, FD y Subastas replicadas son solo las de
-**carga** de esas hojas; las macros que las consumen después (`Asignar_CMg_
-a_Calculos_Turbo`, `Actualizar_Calculos_Columnas`) pertenecen a la etapa
-`Calculo E Costos` / `Calculo RE545`, todavía sin implementar.
+**carga** de esas hojas.
 
 Validado con casos sintéticos (no con datos reales todavía): ver
 `BITACORA.md` → "Pendientes abiertos" para lo que falta antes de dar por

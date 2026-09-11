@@ -21,10 +21,11 @@ acceso de escritura, sin verse en tiempo real, este documento es además la
 ## 1. Qué es este repositorio
 
 Herramienta en Python que reemplaza, hoja por hoja, el cálculo hecho hoy en
-`11_PAGOS_BESS_2607_Definitivo.xlsm` (Balance BESS / SSCC). Por ahora
-implementa únicamente la primera etapa, **Medidores**: dos scripts
-interdependientes que comparten un `config.json` guardado junto al código
-(no versionado, es de la herramienta, no del caso).
+`11_PAGOS_BESS_2607_Definitivo.xlsm` (Balance BESS / SSCC). Implementa hasta
+ahora **Medidores** (incluida Ofertas SSCC), la carga de **CMg**, **FD** y
+**Subastas**, y una primera etapa (base) de **Calculo E Costos**: dos
+scripts interdependientes que comparten un `config.json` guardado junto al
+código (no versionado, es de la herramienta, no del caso).
 
 - `Balance_BESS.py` — ventana tkinter. Único punto de entrada para el
   usuario.
@@ -215,11 +216,9 @@ contra él.
   comparable con la planilla 11 aunque la columna no tenga valor.
 - **CMg, FD, Subastas (plan §23):** replican únicamente las macros de
   *carga* de esas hojas (`Cargar_CMg_Desde_Archivo`,
-  `Cargar_SSCC_Desempeno_En_FD`, `Cargar_Remuneracion_Subastas_Rapido`), no
-  las que las consumen después (`Asignar_CMg_a_Calculos_Turbo`,
-  `Actualizar_Calculos_Columnas`) — esas pertenecen a la etapa `Calculo E
-  Costos`/`Calculo RE545`, todavía sin implementar. Ninguna de las tres
-  tiene un documento de dominio tan detallado como Medidores; sus nombres
+  `Cargar_SSCC_Desempeno_En_FD`, `Cargar_Remuneracion_Subastas_Rapido`).
+  Ninguna de las tres tiene un documento de dominio tan detallado como
+  Medidores; sus nombres
   de columna (`NOMBRES_FD_CSF`, `NOMBRES_FD_CPF`, `NOMBRES_SUBASTAS`, plan
   §24) los confirmó el usuario contra un caso real, no se inventaron. Si
   aparece una columna sin ese respaldo, usar su letra de Excel tal cual
@@ -241,8 +240,24 @@ contra él.
   `_contiene_bess_o_sae()` (Ofertas SSCC) sí. Son dos filtros distintos que
   se parecen — no fusionarlos en una sola función aunque parezca tentador.
 - **Subastas!N queda vacía a propósito:** su fórmula real depende de
-  `'Calculo E Costos'!D/G/P`, una hoja que todavía no existe en esta
-  migración. No se adivina su valor.
+  `'Calculo E Costos'!D/G/P`; la hoja ya existe (en `Pagos_BESS.xlsx`,
+  etapa base, plan §25) pero todavía no las columnas específicas que esa
+  fórmula necesita. No se adivina su valor.
+- **`Calculo E Costos` (plan §25), etapa base, en archivo separado
+  (`Pagos_BESS.xlsx`, nombre provisorio):** replica solo una parte de
+  `Traspasar_Medidores_A_Calculos_Rapido` (traspaso A:G con D↔E
+  invertidas, I/J según signo y `Ventana_No_Completa`, J→K, K→P) y de
+  `Asignar_CMg_a_Calculos_Turbo` (columna Q, con `escribirR=False` — la
+  hoja no incluye `Calculo RE545`). `H` (Barra) es fórmula
+  (`VLOOKUP(G,Resumen!B:G,6,FALSE)` en el original) y se homologa por
+  **nombre de columna** contra `Resumen BESS!Nombre activo`/`Barra
+  inyección` (`construir_mapa_barra()`), no por posición: `Centrales.xlsx`
+  no reproduce el layout `Resumen!B:G` del libro original. El resto de
+  `Actualizar_Calculos_Columnas` (L, M, N, O, R, S, T, U, W, X, Y, AB:AF,
+  AG:AX, AZ) y `Calculo RE545` completo quedan pendientes — decisión
+  explícita del usuario de avanzar por etapas. Nombres de columna:
+  placeholders derivados de los comentarios de la macro, todavía sin
+  confirmar contra un archivo real (ver trampa en §7).
 
 ---
 
@@ -272,6 +287,7 @@ causa raíz deje de existir en el código.
 | La fórmula de `Medidores!V` usa `Diccionario!F` y `Diccionario!G` como alias hacia `Diccionario!E` (columnas 5,6,7 del sheet, índices 4,5,6 en el DataFrame `header=None`) — un mapeo posicional específico, distinto de `construir_homologacion()` (que usa toda la fila, sin posición fija). | No usar `construir_homologacion()` para resolver Ofertas SSCC ni `_mapas_homologacion_fge()` para el SoC: son dos bloques distintos de la misma hoja `Diccionario`, con reglas de lectura distintas. |
 | `calcular_s()` no se reinicia por central: sigue siendo "igual a la fila anterior mientras `Ventana` no cambie" incluso cruzando de una central a otra. | Es fiel a la fórmula de Excel (`IF(L3=L2,S2,...)`, sin comparar `G`). Si dos centrales consecutivas terminan/empiezan con la misma `Ventana`, `S` no se reinicia — así es también en la planilla original, no es un bug a corregir. |
 | Que un archivo se llame `SOC_2607.csv` (o cualquier nombre que contenga "SOC"+AAMM) no garantiza que sea el archivo de SoC de la etapa Medidores. Ya apareció un CSV con ese patrón de nombre que en realidad era un archivo de pagos/liquidación (columnas `Fecha_Hora, CONFIGURACION, Central, Pago, Tipo_pago, Bloque_15min`, sin ninguna columna de SoC), sin relación con `Medidores!J`. | El archivo de SoC real siempre es `.xlsx`, con la estructura de bloques horizontales `Status/Questionable/Time Stamp/Value` (ver `extraer_soc()`). Si un archivo que matchea el patrón de nombre no tiene esa estructura, **no asumir que el formato cambió**: es señal de que no es el archivo correcto. Preguntar antes de adaptar el parser a una estructura nueva. |
+| Los nombres de columna de `Calculo E Costos` (`nucleo.construir_calculo_e_costos`) son placeholders (`Mes`, `Dia`, `Hora`, `Hora Mes`, `Minutos`, `Cuarto de Hora`, `clave`, `Barra`, `Energia_Positiva`, `Energia_Negativa`, `SoC`, `Copia_Ventana`, `CMg`) derivados de los comentarios de la macro, no confirmados. El usuario adjuntó dos veces un archivo pensado para traer los encabezados reales de "Ecostos" y ambas veces solo traía las hojas `FD`/`Subastas` (ya confirmadas). | No dar estos nombres por definitivos ni usarlos como referencia para otra hoja. Corregirlos apenas llegue el archivo correcto, sin tocar la lógica de cálculo ya implementada (plan §25.4). |
 | `"OfertasSSCC"` tiene **tres** "s" seguidas al pasarlo a minúsculas (`"Ofertas"` termina en "s" + `"SSCC"` empieza con dos "s" más = `"...tas" + "sscc"` = `"...tasssc c"`). Un primer intento transcribió el literal a mano con solo dos "s" (`"ofertasscc"`) y `buscar_archivo_ofertas()` nunca encontraba ningún archivo real. | No transcribir a mano un literal derivado de un nombre con letras dobles/triples repetidas: calcularlo en tiempo de ejecución (`"OfertasSSCC".lower()`, constante `PATRON_NOMBRE_OFERTAS` en `nucleo.py`) y comparar contra eso. Se detectó con un test sintético antes de llegar a producción; si vuelve a fallar la detección del archivo de Ofertas, este es el primer sospechoso a descartar. |
 
 ---
@@ -319,3 +335,11 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   Confiar en un regex sobre el nombre para extraer el período era frágil;
   pedirlo explícitamente en la ventana es la fuente de verdad y además
   sirve para validar el archivo de SoC encontrado (debe contener ese AAMM).
+- **`Calculo E Costos` vive en un archivo separado (`Pagos_BESS.xlsx`,
+  nombre provisorio), no en `Consolidado_entradas.xlsx`.** Pedido explícito
+  del usuario. Y se implementa **por etapas**: primero H (Barra) + CMg +
+  traspaso base desde Medidores (elegido explícitamente por el usuario
+  frente a la alternativa de traducir de una sola vez toda
+  `Actualizar_Calculos_Columnas`, ~1500 líneas con dependencias profundas);
+  el resto de columnas y `Calculo RE545` quedan para una etapa posterior
+  (plan §25).

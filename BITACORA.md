@@ -10,20 +10,32 @@ estado, no un historial.
 
 - Crear casos de prueba con datos reales y comparar la salida Python
   contra `11_PAGOS_BESS_2607_Definitivo.xlsm` (Medidores, Ofertas SSCC,
-  CMg, FD, Subastas) (plan §13 punto 10, §20.3). Todo se validó hasta
-  ahora solo con casos sintéticos.
+  CMg, FD, Subastas, Calculo E Costos) (plan §13 punto 10, §20.3). Todo se
+  validó hasta ahora solo con casos sintéticos.
 - Confirmar si la columna `V` (clave de homologación día+central, interna
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
-- Implementar la etapa `Calculo E Costos`/`Calculo RE545` (macros
-  `Asignar_CMg_a_Calculos_Turbo`, `Actualizar_Calculos_Columnas`), de la
-  que depende `Subastas!N` (hoy vacía) y el consumo real de CMg/FD/
-  Subastas/Medidores.
+- Obtener del usuario los encabezados reales de la hoja `Calculo E Costos`
+  ("Ecostos"): las dos veces que adjuntó un archivo pensado para esto solo
+  traía las hojas `FD`/`Subastas` (ya confirmadas). Mientras tanto,
+  `construir_calculo_e_costos()` usa nombres placeholder derivados de los
+  comentarios de la macro (ver plan §25.4, `METODOLOGIA.md` §7).
+- Completar el resto de `Actualizar_Calculos_Columnas` (L, M, N, O, R, S,
+  T, U, W, X, Y, AB:AF, AG:AX, AZ) y toda la hoja `Calculo RE545` — la
+  etapa base (H, CMg, traspaso de Medidores) ya está implementada (ver
+  entrada de esta sesión). Incluye construir la "Prorrata SSCC" como tabla
+  dinámica derivada de `Subastas` (confirmado por el usuario que no es un
+  archivo externo: `Filas: Configuración, Hora_mes` / `Columnas: Control` /
+  `Valores: Cuenta de Sub_Baj`).
+- Una vez completo `Calculo E Costos`, resolver `Subastas!N` ("Energía
+  SSCC"), que depende de columnas de esa hoja.
 - Confirmar si la carpeta `Subastas/` (creada esta sesión, no existe en
   la planilla original) es el nombre/ubicación que se quiere mantener, o
   si se prefiere buscar el archivo directamente en `<CARPETA_BASE>` como
   hacía la macro original (ver plan §23.3).
+- Confirmar el nombre definitivo de `Pagos_BESS.xlsx` (provisorio, elegido
+  por el usuario como "pagos_bess o algo así por ahora").
 - Evaluar si `guardar_config()` necesita escritura atómica (ver
   `METODOLOGIA.md` §7).
 
@@ -362,3 +374,62 @@ Probado con el mismo caso sintético de sesiones anteriores: los encabezados de 
 `Subastas` en el archivo generado coinciden letra por letra con los del `Libro1.xlsx` entregado,
 y la hoja "Ofertas SSCC" quedó con "Ofertas SSCC por dia" en A1:C... y "Resumen ventana oferta"
 arrancando 2 columnas después (F1:I...), ambas en la fila 1.
+
+---
+
+## 2026-09-11 — `Calculo E Costos`: etapa base (H + CMg + traspaso de Medidores)
+
+El usuario pidió crear la hoja `Calculo E Costos` ("Ecostos"), cuya lógica sale de la macro
+`Actualizar_Calculos_Columnas` (columna H de barras por fórmula, CMg asignado por
+`Asignar_CMg_a_Calculos_Turbo`), en un archivo **separado** de `Consolidado_entradas.xlsx`
+("pagos_bess o algo así por ahora"). El archivo de encabezados reales que el usuario intentó
+enviar para esta hoja llegó dos veces sin la hoja `Ecostos` (solo traía `FD`/`Subastas`, ya
+confirmadas la sesión anterior) — queda pendiente, ver "Pendientes abiertos".
+
+`Actualizar_Calculos_Columnas` resultó ser una macro de ~1500 líneas con dependencias profundas
+(Subastas, Resumen, Diccionario, FD, y una "Prorrata SSCC" que en el documento de trazabilidad
+figuraba como fuente externa pendiente). Antes de traducir todo de una vez, se preguntó al
+usuario: (a) si la Prorrata SSCC era un archivo externo disponible, y (b) cómo priorizar el
+trabajo dado el tamaño de la macro. Respuestas: la Prorrata SSCC **no es un archivo externo**,
+es una tabla dinámica derivable de `Subastas` (`Filas: Configuración, Hora_mes` / `Columnas:
+Control` / `Valores: Cuenta de Sub_Baj`) — no es un bloqueador real. Y la prioridad elegida fue
+explícitamente **"por etapas: primero H + CMg + traspaso de Medidores"**.
+
+Esta sesión implementa exactamente esa primera etapa (plan §25):
+
+- `_normaliza_cuarto()`: replica `NormalizaCuarto` (numérico → texto del entero redondeado,
+  otro → texto recortado, vacío/error → `""`).
+- `construir_dic_cmg(df_cmg)`: replica el armado del diccionario de
+  `Asignar_CMg_a_Calculos_Turbo` a partir de `df_cmg` (columnas por posición, ya sin renombrar
+  desde `leer_cmg()`: D=Barra, F=valor a asignar en Q, H=Cuarto de Hora). Clave
+  `UCase(Barra)+"|"+NormalizaCuarto(CuartoHora)`; ante clave repetida gana la primera fila.
+- `construir_mapa_barra(resumen_bess)`: resuelve `H` (antes fórmula
+  `=VLOOKUP(G,Resumen!B:G,6,FALSE)`) homologando **por nombre de columna**
+  (`Nombre activo`/`Barra inyección` de `Resumen BESS`) en vez de por posición, porque
+  `Centrales.xlsx` no reproduce el layout `Resumen!B:G` del libro original. `leer_centrales()`
+  ya devolvía `resumen` pero `ejecutar()` lo descartaba (`_, diccionario = ...`); ahora se
+  captura y se usa.
+- `construir_calculo_e_costos(df_medidores, mapa_barra, dic_cmg, registrar=print)`: arma A:G
+  (con D↔E invertidas, igual que `Traspasar_Medidores_A_Calculos_Rapido`), `Barra` (H),
+  `Energia_Positiva`/`Energia_Negativa` (I/J, energía de `Medidores!Gen_Unidad` separada por
+  signo, solo si `Ventana_No_Completa=1`), `SoC` (K, copia de `Medidores!SoC`),
+  `Copia_Ventana` (P, copia de `Medidores!Copia_Ventana`) y `CMg` (Q, homologado por Barra +
+  Cuarto de Hora). Nombres de columna: placeholders, ver "Pendientes abiertos".
+- `escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print)`: escribe `Pagos_BESS.xlsx`
+  (nueva constante `ARCHIVO_SALIDA_PAGOS`) con la única hoja `Calculo E Costos`
+  (`HOJA_CALCULO_ECOSTOS`).
+- `ejecutar()`: encadena las funciones anteriores después de escribir
+  `Consolidado_entradas.xlsx`, y ahora también escribe `Pagos_BESS.xlsx`.
+
+Explícitamente fuera de esta etapa (decisión del usuario): el resto de columnas de
+`Actualizar_Calculos_Columnas` (L, M, N, O, R, S, T, U, W, X, Y, AB:AF, AG:AX, AZ) y toda la
+hoja `Calculo RE545`.
+
+**Verificación:** dos scripts de prueba sintéticos (sin persistir en el repo, borrados al
+cerrar la sesión, según la convención). El primero prueba cada función nueva contra
+`DataFrame`s armados a mano (incluye el caso "clave CMg repetida gana la primera fila" y el
+caso "Ventana_No_Completa≠1 → energía en 0 en esta hoja"). El segundo repite las pruebas clave
+pasando por un `.xlsx` real (vía `leer_centrales()`/`leer_cmg()`) para confirmar que los tipos
+que devuelve `pandas`/`openpyxl` al leer un archivo real (no un `DataFrame` construido a mano)
+no rompen `_normaliza_cuarto()` ni la homologación por nombre. Todos los casos coincidieron con
+lo esperado a mano. No se probó contra un caso real ni contra la planilla 11.
