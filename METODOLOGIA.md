@@ -86,10 +86,20 @@ con él (import relativo simple, sin paquete).
 | `MAPA.md` | Un bloque corto por script: qué hace · consume · produce · expone · depende de. Es la primera lectura de cualquier sesión. | Se actualiza cuando cambia la estructura o el rol de un script. |
 | `README.md` | Puerta de entrada: instalación/uso y tabla de "querés X → leé Y". | Se actualiza si cambia la estructura de carpetas o el flujo de instalación. |
 | `docs/Plan_Traspaso_Python_Balance_BESS.md` | Reglas de negocio del cálculo: fórmulas, de dónde sale cada dato, qué queda pendiente. Es largo a propósito y no se reescribe por comodidad. | Se corrige ahí mismo cuando el dominio cambia (p. ej. se confirma la lógica de una columna pendiente); nunca se duplica en otro archivo. |
+| `docs/Estructura_Archivos_Reales.md` | Referencia rápida de CADA archivo Excel real (los 7 de entrada del proceso + los de validación/comparación): hoja, fila donde arrancan los encabezados, columnas reales en orden, trampas ya confirmadas. Se lee **antes de pedirle al usuario un archivo o una aclaración** que ya podría estar ahí. | Se agrega/corrige una fila cada vez que un archivo real (adjuntado por el usuario) confirma o corrige una estructura — mismo criterio que las correcciones de `docs/Plan_Traspaso...`. |
 
 **Regla de prioridad de lectura:** `REGLAS.md` → `METODOLOGIA.md` →
 `MAPA.md` → el archivo a modificar → (si hace falta) la sección puntual de
 `docs/Plan_Traspaso_Python_Balance_BESS.md`.
+
+**Si el usuario menciona o adjunta un archivo Excel real** (`Centrales.xlsx`,
+un `SOC_*.xlsx`, una hoja de comparación contra la planilla 11, etc.): leer
+`docs/Estructura_Archivos_Reales.md` primero. Ahí está la estructura real ya
+confirmada de cada uno (hoja, fila de encabezados, columnas, trampas) — no
+hace falta pedirle al usuario que la explique de nuevo ni volver a inspeccionar
+un archivo ya documentado ahí, salvo que la sesión encuentre una diferencia
+real (en cuyo caso se corrige ese documento, no se duplica la explicación en
+otro lado).
 
 **Donde el código y el documento de dominio difieren, manda el código.**
 Las diferencias detectadas se anotan en una tabla al final de `MAPA.md`

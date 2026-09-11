@@ -1806,3 +1806,56 @@ siempre por clave interna, nunca por nombre de columna, que no es único).
 Subastas) por falta de un archivo real de referencia con títulos de grupo para esas hojas — si el
 usuario comparte uno, se puede repetir el mismo mecanismo (`_escribir_encabezados_grupo()`, ya
 genérico) para esas hojas también.
+
+## 2026-09-11 (23) — Nuevo documento: `docs/Estructura_Archivos_Reales.md`
+
+El usuario pidió que los archivos Excel reales que manda (de entrada del proceso, o de
+comparación/validación) queden bien descritos en algún `.md`, específicamente dudando si
+`Centrales.xlsx` estaba bien documentado. Motivo explícito: va a abrir otra sesión de chat y no
+quiere tener que re-adjuntar archivos ni re-explicar cosas ya dichas — la sesión nueva tiene que
+entender la estructura real "a la primera".
+
+**Diagnóstico:** la información SÍ existía, pero repartida y parcialmente desactualizada —
+`docs/Plan_Traspaso_Python_Balance_BESS.md` secciones 3.4/3.5/3.6 (las que describen
+`Medidas_SAE.xlsx`/`SOC_AAMM.xlsx`/`Centrales.xlsx`/Ofertas SSCC) son de las primeras del
+documento, escritas ANTES de que se validara nada contra datos reales, y solo algunas tienen una
+nota de "corrección" pegada al final (la de `Diccionario` sí, gracias a una sesión anterior; la de
+`SOC` no tanto). Para reconstruir el resto de una sesión nueva había que rastrear `BITACORA.md`
+sesión por sesión — exactamente lo que el usuario no quiere tener que hacer, y exactamente lo que
+esta sesión no quiere que la SIGUIENTE tenga que hacer.
+
+**Qué se hizo:** documento nuevo, `docs/Estructura_Archivos_Reales.md`, escrito de cero (no
+parcheado sobre el plan viejo) como referencia única y actual de CADA archivo Excel real del
+proyecto, con dos secciones:
+
+- **A. Archivos de entrada del proceso** (los 7 que arma el usuario en la carpeta del caso:
+  `Medidas_SAE.xlsx`, `SOC_AAMM.xlsx`, `Centrales.xlsx` [`Resumen BESS` + `Diccionario`],
+  `*OfertasSSCC*`, `cmg.xlsx`, `SSCC_Desempeño_*.xlsx`, `3_REMUNERACIÓN_SUBASTAS_E_ID_*.xlsx`).
+  Para cada uno: ubicación/patrón de nombre, hoja(s), fila exacta donde arrancan encabezados y
+  datos, columnas reales en orden (tabla), trampas ya confirmadas, función de `nucleo.py` que lo
+  lee, y el archivo real guardado en `docs/` que lo respalda (si hay). Reconstruido leyendo
+  directo con `openpyxl` los 5 archivos reales que ya teníamos guardados
+  (`docs/Centrales_real.xlsx`, `docs/SOC_real_2607.xlsx`, `docs/Libro1_Subastas_real.xlsx` [hojas
+  `FD`/`subastas`/`E COSTOS`]) más el código ya funcionando de `nucleo.py` para los dos archivos
+  sin copia real guardada (`Medidas_SAE.xlsx`, `*OfertasSSCC*`, `cmg.xlsx` — marcados con ⚠️ donde
+  la estructura sale del código y no de un archivo real visto).
+- **B. Archivos de referencia real para validar la salida** (las hojas de comparación tipo
+  "planilla 11" que el usuario pega/adjunta cuando reporta una diferencia): qué trae cada uno de
+  los 5 archivos ya guardados en `docs/` y el método de comparación (por clave/nombre de columna,
+  nunca por letra de Excel — la salida propia nunca reprodujo la letra real).
+- **C.** una guía corta de qué hacer si mandan un Excel nuevo no descrito acá.
+
+**Corrección real encontrada al escribir la sección de `Centrales.xlsx!Diccionario`:** el ejemplo
+que se iba a poner tenía un typo de transcripción (`"BESS PE LA CAÑADA"` en vez del valor real
+`"BESS PE LA CABAÑA"`) — se relee el archivo real (`docs/Centrales_real.xlsx`) letra por letra
+antes de cerrar el documento, en vez de confiar en la memoria de la sesión, y se corrige.
+
+**Enganchado a `README.md`** (fila nueva al principio de la tabla de documentación, con el caso de
+uso explícito) **y a `METODOLOGIA.md`** (fila nueva en "el set de documentos" + una regla nueva:
+"si el usuario menciona o adjunta un archivo Excel real, leer `docs/Estructura_Archivos_Reales.md`
+primero" — para que una sesión nueva lo encuentre solo con la regla de expansión de contexto
+normal, sin que el usuario tenga que señalarlo).
+
+**Pendiente:** no hay archivo real guardado todavía para `Medidas_SAE.xlsx`, `*OfertasSSCC*` ni
+`cmg.xlsx` — si el usuario comparte alguno, guardarlo en `docs/` y sacar el ⚠️ de esa sección
+(pasa a ✅).

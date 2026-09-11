@@ -82,6 +82,7 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 
 | Querés... | Leé |
 |---|---|
+| **Saber qué estructura real tiene cada archivo Excel que arma el usuario (o que manda para validar), sin tener que pedírselo de nuevo ni que te lo vuelva a explicar** | `docs/Estructura_Archivos_Reales.md` |
 | Entender cómo se trabaja en este repo (para un asistente de IA o alguien nuevo) | `METODOLOGIA.md` |
 | El checklist obligatorio de inicio/cierre de sesión | `REGLAS.md` |
 | Qué hace cada script, en dos líneas | `MAPA.md` |
