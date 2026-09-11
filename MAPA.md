@@ -20,8 +20,8 @@ de.
   `config.json` (última carpeta base y último AAMM recordados, por
   PC/usuario).
 - **Produce:** `config.json` actualizado con la carpeta base y el AAMM
-  elegidos; dispara en `nucleo` la escritura de `Hoja_Medidas.xlsx` dentro
-  de la carpeta base del caso.
+  elegidos; dispara en `nucleo` la escritura de `Consolidado_entradas.xlsx`
+  y `Pagos_BESS.xlsx` dentro de la carpeta base del caso.
 - **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`).
 - **Depende de:** `nucleo.py` (mismo directorio, import directo).
 
@@ -29,21 +29,62 @@ de.
 
 ## `nucleo.py`
 
-- **Qué hace:** todo el cálculo de la etapa Medidores, sin interfaz. Resuelve
-  las rutas de un caso a partir de la carpeta base, valida que existan las
-  entradas requeridas (incluido el período AAMM que ingresa el usuario), lee
-  `Medidas_SAE.xlsx`, el archivo de SoC del período y el archivo
-  `*OfertasSSCC*` de `Ofertas/`, homologa nombres de central contra
-  `Centrales.xlsx`/`Diccionario`, calcula las columnas A:U de `Medidores`
-  (incluye R, S, T) y escribe `Hoja_Medidas.xlsx` con la hoja `Medidores`
-  más las tablas auxiliares de Ofertas SSCC (ver plan §16.3, §20) y un
-  `Log`. Calculadas: J (SoC), K (Copia_Ventana = copia de L), L (Ventana),
-  N (Clave_Dia_HoraMes), O (Indicador_SoC), R (Oferta_Completa_Dia), S
-  (Indicador_Ventana_Oferta), T (Ventana_No_Completa). Deliberadamente
-  vacías (diseño confirmado, no pendiente): M, P, Q, U. `V, W, X, Y, AB,
-  AC, AD, AE` del plan **no son columnas de `Medidores`**: son tablas
-  auxiliares de otro largo (central × día, central × ventana) que se
-  calculan y se escriben como hojas propias — ver plan §20.1.
+- **Qué hace:** todo el cálculo de la etapa Medidores (Medidores, Ofertas
+  SSCC), la carga de CMg, FD y Subastas, y una primera etapa (base) de
+  Calculo E Costos, sin interfaz. Resuelve las rutas de un caso a partir de
+  la carpeta base, valida que existan las entradas requeridas (incluido el
+  período AAMM que ingresa el usuario), y escribe `Consolidado_entradas.xlsx`
+  (hojas `Medidores`, `Ofertas SSCC`, `CMg`, `FD`, `Subastas`, `Log`) y
+  `Pagos_BESS.xlsx` (hoja `Calculo E Costos`, nombre y alcance provisorios).
+
+  **Medidores** (A:U): calculadas J (SoC), K (Copia_Ventana = copia de L),
+  L (Ventana), N (Clave_Dia_HoraMes), O (Indicador_SoC), R
+  (Oferta_Completa_Dia), S (Indicador_Ventana_Oferta), T
+  (Ventana_No_Completa). Deliberadamente vacías (diseño confirmado, no
+  pendiente): M, P, Q, U. `V, W, X, Y, AB, AC, AD, AE` del plan **no son
+  columnas de `Medidores`**: son tablas auxiliares de otro largo (central ×
+  día, central × ventana) que se calculan y se escriben juntas en una sola
+  hoja (`HOJA_OFERTAS_SSCC = "Ofertas SSCC"`) — ver plan §20.1 y §22. El
+  resumen intermedio equivalente a la hoja "Resumen Ofertas SSCC" del
+  `.xlsm` original es puramente auxiliar para construir la tabla W:Y: no se
+  persiste.
+
+  **CMg**, **FD**, **Subastas** (plan §23): replican únicamente las macros
+  de *carga* (`Cargar_CMg_Desde_Archivo`, `Cargar_SSCC_Desempeno_En_FD`,
+  `Cargar_Remuneracion_Subastas_Rapido`), no las que las consumen después
+  (`Asignar_CMg_a_Calculos_Turbo`, `Actualizar_Calculos_Columnas`), que
+  pertenecen a una etapa posterior sin implementar. `FD` tiene el mismo
+  patrón de "dos tablas de distinto largo compartiendo hoja" que Ofertas
+  SSCC, pero por **columnas** en vez de por filas: el bloque CSF (A:M) y el
+  CPF (Q:AE) van lado a lado, cada uno con su propio número de filas.
+  `Subastas!N` ("Energía SSCC") queda vacía y documentada como pendiente
+  (depende de `'Calculo E Costos'`, cuyo resto de columnas todavía no se
+  implementa). Los nombres de columna de `FD` y `Subastas` (`NOMBRES_FD_CSF`,
+  `NOMBRES_FD_CPF`, `NOMBRES_SUBASTAS`) fueron confirmados por el usuario
+  contra un caso real (plan §24), no inventados — antes de eso se usaba la
+  letra de Excel tal cual por no tener esa información.
+
+  **Calculo E Costos** (plan §25, etapa base — a pedido del usuario, "por
+  etapas: primero H + CMg + traspaso de Medidores"): replica parcialmente
+  `Traspasar_Medidores_A_Calculos_Rapido` (módulo `B_medidores_a_calculos`)
+  y `Asignar_CMg_a_Calculos_Turbo` (módulo `A_Carga_Cmg_a_Destino`). Cubre
+  A:G (con D↔E invertidas, igual que la macro), H/`Barra` (antes fórmula
+  `=VLOOKUP(G,Resumen!B:G,6,FALSE)`; acá homologada por **nombre** de
+  columna contra `Resumen BESS!Nombre activo`/`Barra inyección`, no por
+  posición, porque `Centrales.xlsx` no reproduce el layout `Resumen!B:G`
+  del libro original), I/J (`Energia_Positiva`/`Energia_Negativa`, la
+  energía de `Medidores!Gen_Unidad` separada por signo, solo si
+  `Ventana_No_Completa = 1`; si no, la fila es de `Calculo RE545`, fuera de
+  alcance), K/`SoC` (copia de `Medidores!SoC`), P/`Copia_Ventana` (copia de
+  `Medidores!Copia_Ventana`) y Q/`CMg` (homologado por `Barra` + `Cuarto de
+  Hora` normalizado, vía `NormalizaCuarto`). Va a un archivo **separado**
+  (`Pagos_BESS.xlsx`, nombre provisorio) a pedido explícito del usuario. Los
+  nombres de columna son placeholders derivados de los comentarios de la
+  macro — todavía no confirmados contra un archivo real (pendiente: el
+  usuario adjuntó dos veces un archivo de encabezados que no traía la hoja
+  `Ecostos`). El resto de `Actualizar_Calculos_Columnas` (L, M, N, O, R, S,
+  T, U, W, X, Y, AB:AF, AG:AX, AZ) y toda la hoja `Calculo RE545` quedan
+  para una etapa posterior.
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
@@ -51,40 +92,53 @@ de.
     archivo fijo; debe existir exactamente uno)
   - `<CARPETA_BASE>/Auxiliares/Centrales.xlsx` (hojas `Resumen BESS` y
     `Diccionario`; `Diccionario` columnas E/F/G — índices 4/5/6 — se usan
-    específicamente para homologar Ofertas SSCC)
+    específicamente para homologar Ofertas SSCC; `Resumen BESS` columnas
+    `Nombre activo`/`Barra inyección` se usan para `Calculo E Costos!Barra`)
   - Un archivo `.xlsx`/`.xlsm`/`.xlsb`/`.xls` dentro de
-    `<CARPETA_BASE>/Ofertas/` cuyo nombre contenga "OfertasSSCC" (si hay
-    más de uno, a diferencia del SoC, se toma el más reciente por fecha de
-    modificación — así lo hace la macro original)
-- **Produce:** `<CARPETA_BASE>/Hoja_Medidas.xlsx`, hojas: `Medidores`,
-  `Resumen Ofertas SSCC`, `Ofertas SSCC por Dia`, `Resumen Ventana Oferta`,
-  `Log`.
-- **Expone (además de lo ya listado antes de esta sesión):**
-  - `buscar_archivo_ofertas(ofertas_dir)` — busca el archivo `*OfertasSSCC*`
-    más reciente.
-  - `construir_resumen_ofertas_sscc(ruta_ofertas, registrar=print)` —
-    replica `Generar_Resumen_Ofertas_SSCC`.
-  - `cargar_resumen_en_medidores(df_resumen, claves_medidores, diccionario, registrar=print)`
-    → `(df_wxy, (anio, mes), avisos)` — replica `OSSCC_CargarResumenEnMedidores`
-    (equivalente a `Medidores!W:Y`).
-  - `calcular_r(df_medidores, df_wxy, diccionario, registrar=print)` →
-    `(serie_r, avisos)` — replica la fórmula de `Medidores!R` (usa `V`
-    internamente, vía `_homologar_fge`/`_mapas_homologacion_fge`).
-  - `calcular_s(ventana, r_valor)` — replica la fórmula de `Medidores!S`.
-  - `construir_resumen_ventana_oferta(clave, ventana, oferta_r, inicio_ventana=INICIO_VENTANA, registrar=print)`
-    — replica `Resumir_Medidores_Central_Ventana_Oferta_Completa`
-    (equivalente a `Medidores!AB:AE`).
-  - `calcular_t(clave, ventana, resumen_ventana_oferta)` →
-    `(serie_t, cantidad_sin_match)` — replica la fórmula de `Medidores!T`.
+    `<CARPETA_BASE>/Ofertas/` cuyo nombre contenga "OfertasSSCC" (más
+    reciente si hay varios)
+  - `<CARPETA_BASE>/Cmg/cmg.xlsx` (nombre literal fijo, sin AAMM)
+  - Un archivo Excel dentro de `<CARPETA_BASE>/SSCC_Desempeño/` cuyo nombre
+    empiece con "SSCC_Desempeño_" (más reciente si hay varios), hojas `CPF
+    Horario` y `CSF Horario`
+  - Un archivo Excel dentro de `<CARPETA_BASE>/Subastas/` cuyo nombre
+    empiece con "3_REMUNERACIÓN_SUBASTAS_E_ID_" (más reciente si hay
+    varios; carpeta propia — la macro original lo buscaba junto al .xlsm,
+    ver plan §23.3), hoja `DB`
+- **Produce:**
+  - `<CARPETA_BASE>/Consolidado_entradas.xlsx`, hojas: `Medidores`, `Ofertas
+    SSCC` (las tablas W:Y y AB:AE equivalentes, una al lado de la otra — ver
+    `_escribir_tabla_con_titulo()`), `CMg`, `FD` (los bloques CSF y CPF lado
+    a lado, columnas A:M y Q:AE, con sus nombres reales), `Subastas` (con
+    sus nombres reales), `Log`.
+  - `<CARPETA_BASE>/Pagos_BESS.xlsx` (nombre provisorio), hoja `Calculo E
+    Costos` (etapa base, ver más arriba).
+- **Expone (funciones clave agregadas hasta ahora, además de las básicas
+  de E/S y homologación):**
+  - Ofertas SSCC: `buscar_archivo_ofertas`, `construir_resumen_ofertas_sscc`,
+    `cargar_resumen_en_medidores`, `calcular_r`, `calcular_s`,
+    `construir_resumen_ventana_oferta`, `calcular_t`.
+  - CMg/FD/Subastas: `buscar_archivo_sscc_desempeno`,
+    `buscar_archivo_subastas`, `leer_cmg(ruta_cmg, registrar=print)` →
+    `df_cmg`; `construir_fd(ruta_sscc, registrar=print)` →
+    `(df_fd_csf, df_fd_cpf)`; `construir_subastas(ruta_subastas, registrar=print)`
+    → `df_subastas`.
+  - Calculo E Costos (etapa base): `_normaliza_cuarto(valor)` →
+    texto (replica `NormalizaCuarto`); `construir_dic_cmg(df_cmg)` →
+    `dict` clave `"BARRA|CUARTO"` → valor Q; `construir_mapa_barra(resumen_bess)`
+    → `dict` nombre de central normalizado → barra de inyección;
+    `construir_calculo_e_costos(df_medidores, mapa_barra, dic_cmg, registrar=print)`
+    → `df_ecostos`; `escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print)`.
   - `construir_medidores(df_sae, df_soc, anio, mes, ruta_ofertas, diccionario, registrar=print)`
-    → `(df_medidores, avisos, df_resumen_ofertas, df_wxy, df_resumen_ventana)`.
-  - `escribir_salida(df, ruta_salida, avisos, incidencias, df_resumen_ofertas=None, df_wxy=None, df_resumen_ventana=None)`.
+    → `(df_medidores, avisos, df_wxy, df_resumen_ventana)`.
+  - `escribir_salida(df, ruta_salida, avisos, incidencias, df_wxy=None, df_resumen_ventana=None, df_cmg=None, df_fd_csf=None, df_fd_cpf=None, df_subastas=None)`.
   - `ejecutar(carpeta_base, aamm, registrar=print, progreso=None)` —
-    orquesta el proceso completo de punta a punta.
+    orquesta el proceso completo de punta a punta (ambos archivos de
+    salida).
 - **Parámetros fijos:** `INICIO_VENTANA = 10`, `UMBRAL_SOC = 0.06` (ver plan
   de migración §8).
-- **Constantes de columnas:** `LETRA_A_CAMPO` (dict A→U, su orden de
-  inserción ES el orden final de columnas), `COLUMNAS_VACIAS`.
+- **Constantes de columnas:** `LETRA_A_CAMPO` (dict A→U de `Medidores`, su
+  orden de inserción ES el orden final de columnas), `COLUMNAS_VACIAS`.
 - **Depende de:** `pandas`, `openpyxl` (como engine de
   `pd.ExcelWriter`/`pd.read_excel`), `calendar` (stdlib, días del mes).
 

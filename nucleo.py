@@ -32,6 +32,9 @@ UMBRAL_SOC = 0.06
 CARPETA_MEDIDAS = "Medidas"
 CARPETA_AUXILIARES = "Auxiliares"
 CARPETA_OFERTAS = "Ofertas"
+CARPETA_CMG = "Cmg"
+CARPETA_SSCC_DESEMPENO = "SSCC_Desempeño"
+CARPETA_SUBASTAS = "Subastas"
 
 ARCHIVO_MEDIDAS_SAE = "Medidas_SAE.xlsx"
 HOJA_MEDIDAS_SAE = "Medidas"
@@ -40,7 +43,23 @@ ARCHIVO_CENTRALES = "Centrales.xlsx"
 HOJA_RESUMEN_BESS = "Resumen BESS"
 HOJA_DICCIONARIO = "Diccionario"
 
-ARCHIVO_SALIDA = "Hoja_Medidas.xlsx"
+# Nombre literal y fijo (a diferencia de SoC/Ofertas/SSCC_Desempeño/
+# Subastas): asi lo exige Cargar_CMg_Desde_Archivo.
+ARCHIVO_CMG = "cmg.xlsx"
+HOJA_CMG_ORIGEN = "CMg"
+
+HOJA_CPF_HORARIO = "CPF Horario"
+HOJA_CSF_HORARIO = "CSF Horario"
+
+HOJA_SUBASTAS_ORIGEN = "DB"
+
+ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
+
+# Etapa siguiente (Calculo E Costos / "Ecostos"): el usuario pidio que
+# viva en una planilla aparte de Consolidado_entradas.xlsx. Nombre
+# provisorio, puede cambiar.
+ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"
+HOJA_CALCULO_ECOSTOS = "Calculo E Costos"
 
 # El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
 # lo ingresa el usuario en la ventana. El archivo de SoC solo debe
@@ -48,12 +67,18 @@ ARCHIVO_SALIDA = "Hoja_Medidas.xlsx"
 # un nombre de archivo literal fijo.
 PATRON_AAMM = re.compile(r"^\d{4}$")
 
-# El archivo de OfertasSSCC tampoco tiene nombre fijo: basta con que
-# el nombre contenga "OfertasSSCC" (macro OSSCC_BuscarArchivoOfertas).
-# Se deriva con .lower() en vez de transcribir el literal a mano: con
-# tres "s" seguidas ("Ofertas" + "SSCC") es facil perder una al tipear.
-EXTENSIONES_OFERTAS = {".xlsx", ".xlsm", ".xlsb", ".xls"}
+# Extensiones de Excel aceptadas para los archivos que se buscan por
+# patron de nombre (OfertasSSCC, SSCC_Desempeño_*, 3_REMUNERACIÓN_
+# SUBASTAS_E_ID_*) - no para SoC (siempre .xlsx) ni para cmg.xlsx
+# (nombre literal fijo).
+EXTENSIONES_EXCEL = {".xlsx", ".xlsm", ".xlsb", ".xls"}
+
+# Se derivan con .lower() en vez de transcribir el literal a mano: con
+# letras dobles/triples seguidas ("Ofertas"+"SSCC") es facil perder una
+# al tipear (ya paso una vez, ver METODOLOGIA.md #7).
 PATRON_NOMBRE_OFERTAS = "OfertasSSCC".lower()
+PATRON_NOMBRE_SSCC_DESEMPENO = "SSCC_Desempeño_".lower()
+PATRON_NOMBRE_SUBASTAS = "3_REMUNERACIÓN_SUBASTAS_E_ID_".lower()
 
 
 # ============================================================
@@ -81,8 +106,8 @@ COLUMNAS_AI = [
 # son una columna por fila de Medidores, son tablas auxiliares de otro
 # largo (una fila por central x dia, o por central x ventana) que solo
 # viven en esas letras de columna porque ahi habia espacio libre. En
-# Python se escriben como hojas propias de Hoja_Medidas.xlsx en vez de
-# forzarlas a columnas del mismo largo que A:U (ver ejecutar()).
+# Python se escriben como hoja propia de Consolidado_entradas.xlsx en
+# vez de forzarlas a columnas del mismo largo que A:U (ver ejecutar()).
 LETRA_A_CAMPO = {
     "A": "Mes",
     "B": "Dia",
@@ -164,15 +189,23 @@ def resolver_rutas(carpeta_base):
     medidas_dir = base / CARPETA_MEDIDAS
     auxiliares_dir = base / CARPETA_AUXILIARES
     ofertas_dir = base / CARPETA_OFERTAS
+    cmg_dir = base / CARPETA_CMG
+    sscc_desempeno_dir = base / CARPETA_SSCC_DESEMPENO
+    subastas_dir = base / CARPETA_SUBASTAS
 
     return {
         "base": base,
         "medidas_dir": medidas_dir,
         "auxiliares_dir": auxiliares_dir,
         "ofertas_dir": ofertas_dir,
+        "cmg_dir": cmg_dir,
+        "sscc_desempeno_dir": sscc_desempeno_dir,
+        "subastas_dir": subastas_dir,
         "medidas_sae": medidas_dir / ARCHIVO_MEDIDAS_SAE,
         "centrales": auxiliares_dir / ARCHIVO_CENTRALES,
+        "cmg": cmg_dir / ARCHIVO_CMG,
         "salida": base / ARCHIVO_SALIDA,
+        "salida_pagos": base / ARCHIVO_SALIDA_PAGOS,
     }
 
 
@@ -250,36 +283,85 @@ def buscar_soc(medidas_dir, aamm):
     return candidatos[0]
 
 
-def buscar_archivo_ofertas(ofertas_dir):
+def _buscar_archivo_excel_mas_reciente(carpeta, patron, desde_inicio=False):
     """
-    Replica OSSCC_BuscarArchivoOfertas: busca dentro de Ofertas/
-    cualquier archivo Excel cuyo nombre contenga "OfertasSSCC".
+    Busca en 'carpeta' el archivo Excel (EXTENSIONES_EXCEL) mas
+    reciente por fecha de modificacion cuyo nombre (en minusculas)
+    contenga 'patron' (o empiece con el, si desde_inicio=True).
+    Ignora archivos temporales (~$). None si la carpeta no existe o no
+    hay ningun candidato.
 
-    A diferencia del SoC, si hay mas de uno SI se elige automaticamente
-    el mas reciente por fecha de modificacion - asi lo hace la macro
-    original (OSSCC_BuscarArchivoOfertas), no es una decision nueva.
-
-    Devuelve None si la carpeta no existe o no hay ningun candidato.
+    Comun a *OfertasSSCC*, SSCC_Desempeño_* y 3_REMUNERACIÓN_SUBASTAS_
+    E_ID_*: las tres macros originales, ante varios candidatos, SI
+    eligen automaticamente el mas reciente (a diferencia del SoC).
     """
 
-    ofertas_dir = Path(ofertas_dir)
+    carpeta = Path(carpeta)
 
-    if not ofertas_dir.is_dir():
+    if not carpeta.is_dir():
         return None
+
+    patron = patron.lower()
+
+    def coincide(nombre):
+        nombre = nombre.lower()
+        return nombre.startswith(patron) if desde_inicio else patron in nombre
 
     candidatos = [
         archivo
-        for archivo in ofertas_dir.iterdir()
+        for archivo in carpeta.iterdir()
         if archivo.is_file()
         and not archivo.name.startswith("~$")
-        and archivo.suffix.lower() in EXTENSIONES_OFERTAS
-        and PATRON_NOMBRE_OFERTAS in archivo.stem.lower()
+        and archivo.suffix.lower() in EXTENSIONES_EXCEL
+        and coincide(archivo.stem)
     ]
 
     if not candidatos:
         return None
 
     return max(candidatos, key=lambda a: a.stat().st_mtime)
+
+
+def buscar_archivo_ofertas(ofertas_dir):
+    """
+    Replica OSSCC_BuscarArchivoOfertas: busca dentro de Ofertas/
+    cualquier archivo Excel cuyo nombre contenga "OfertasSSCC".
+    """
+
+    return _buscar_archivo_excel_mas_reciente(
+        ofertas_dir, PATRON_NOMBRE_OFERTAS
+    )
+
+
+def buscar_archivo_sscc_desempeno(carpeta):
+    """
+    Replica BuscarArchivoSSCCMasReciente: busca dentro de
+    SSCC_Desempeño/ el archivo Excel mas reciente cuyo nombre empiece
+    con "SSCC_Desempeño_".
+    """
+
+    return _buscar_archivo_excel_mas_reciente(
+        carpeta, PATRON_NOMBRE_SSCC_DESEMPENO, desde_inicio=True
+    )
+
+
+def buscar_archivo_subastas(carpeta):
+    """
+    Replica BuscarArchivoSubastasMasRecienteRapido: busca dentro de
+    Subastas/ el archivo Excel mas reciente cuyo nombre empiece con
+    "3_REMUNERACIÓN_SUBASTAS_E_ID_".
+
+    Nota de arquitectura: la macro original buscaba este archivo
+    directamente en la carpeta del .xlsm (sin subcarpeta). Aca se le
+    da su propia carpeta (Subastas/) para ser consistente con el resto
+    de las entradas externas (Medidas/, Auxiliares/, Ofertas/, Cmg/,
+    SSCC_Desempeño/), cada una con su propia carpeta bajo la carpeta
+    base del caso.
+    """
+
+    return _buscar_archivo_excel_mas_reciente(
+        carpeta, PATRON_NOMBRE_SUBASTAS, desde_inicio=True
+    )
 
 
 def periodo_desde_aamm(aamm):
@@ -434,6 +516,66 @@ def revisar_estructura(carpeta_base, aamm=None):
                 "falta",
                 f"ningun archivo en {CARPETA_OFERTAS}/ contiene "
                 f"'OfertasSSCC' en el nombre",
+            )
+        )
+
+    # CMg: nombre de archivo literal fijo (Cargar_CMg_Desde_Archivo).
+    agregar(
+        f"{CARPETA_CMG}/",
+        rutas["cmg_dir"].is_dir(),
+    )
+    agregar(
+        ARCHIVO_CMG,
+        rutas["cmg"].is_file(),
+    )
+
+    # SSCC_Desempeño (alimenta la hoja FD): obligatorio, se toma el mas
+    # reciente si hay varios (Cargar_SSCC_Desempeno_En_FD).
+    agregar(
+        f"{CARPETA_SSCC_DESEMPENO}/",
+        rutas["sscc_desempeno_dir"].is_dir(),
+    )
+
+    archivo_sscc = buscar_archivo_sscc_desempeno(
+        rutas["sscc_desempeno_dir"]
+    )
+    rutas["sscc_desempeno"] = archivo_sscc
+
+    if archivo_sscc:
+        filas.append(
+            (archivo_sscc.name, "ok", f"en {CARPETA_SSCC_DESEMPENO}/")
+        )
+    else:
+        filas.append(
+            (
+                "Archivo SSCC_Desempeño_*",
+                "falta",
+                f"ningun archivo en {CARPETA_SSCC_DESEMPENO}/ empieza "
+                f"con 'SSCC_Desempeño_'",
+            )
+        )
+
+    # Subastas (alimenta la hoja Subastas): obligatorio, se toma el
+    # mas reciente si hay varios (Cargar_Remuneracion_Subastas_Rapido).
+    agregar(
+        f"{CARPETA_SUBASTAS}/",
+        rutas["subastas_dir"].is_dir(),
+    )
+
+    archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
+    rutas["subastas"] = archivo_subastas
+
+    if archivo_subastas:
+        filas.append(
+            (archivo_subastas.name, "ok", f"en {CARPETA_SUBASTAS}/")
+        )
+    else:
+        filas.append(
+            (
+                "Archivo 3_REMUNERACIÓN_SUBASTAS_E_ID_*",
+                "falta",
+                f"ningun archivo en {CARPETA_SUBASTAS}/ empieza con "
+                f"'3_REMUNERACIÓN_SUBASTAS_E_ID_'",
             )
         )
 
@@ -1451,6 +1593,639 @@ def calcular_t(clave, ventana, resumen_ventana_oferta):
 
 
 # ============================================================
+# CMg, FD, SUBASTAS
+#
+# Replican las macros de carga de esas tres hojas (no las macros que
+# las consumen despues, como Asignar_CMg_a_Calculos_Turbo o
+# Actualizar_Calculos_Columnas, que pertenecen a una etapa posterior
+# todavia no implementada):
+#   - Cargar_CMg_Desde_Archivo               -> leer_cmg
+#   - Cargar_SSCC_Desempeno_En_FD            -> construir_fd
+#   - Cargar_Remuneracion_Subastas_Rapido    -> construir_subastas
+#
+# Ninguna de las tres tiene una hoja de referencia de dominio tan
+# detallada como la de Medidores (Plan_Traspaso...): no se conocen
+# nombres de negocio para casi ninguna columna mas alla de lo que las
+# formulas de Excel revelan. Por eso las columnas que solo se copian
+# (no se calculan) se nombran con su letra de Excel tal cual, en vez
+# de inventarles un nombre que no esta documentado en ningun lado.
+# ============================================================
+
+def _contiene_bess_o_sae_sin_bat(texto):
+    """
+    Replica EsBESSoSAE (macros F_Leer_FD y G_Lee_Subastas): contiene
+    "BESS" o "SAE". A diferencia de OSSCC_ContieneBESSoSAE (Ofertas
+    SSCC), esta NO incluye "BAT" - son dos filtros distintos aunque se
+    parezcan, no simplificar a una sola funcion.
+    """
+
+    texto = texto.upper()
+    return "BESS" in texto or "SAE" in texto
+
+
+def _dia_hora_mes_fd(columna_fecha, columna_hora):
+    """
+    Replica la formula compartida de FD (B, M, R y AE):
+        =(DAY(fecha)-1)*24 + hora + 1 + IF(DAY(fecha)>100,1,0)
+
+    El termino IF(DAY(fecha)>100,...) nunca es verdadero para un dia
+    de calendario real (DAY() da 1..31): se conserva tal cual, tal
+    como esta en la formula original, en vez de "limpiarla".
+    """
+
+    fecha = pd.to_datetime(columna_fecha, errors="coerce")
+    dia = fecha.dt.day
+    hora = pd.to_numeric(columna_hora, errors="coerce")
+    ajuste_dia_mayor_100 = (dia > 100).astype("Int64")
+
+    return (dia - 1) * 24 + hora + 1 + ajuste_dia_mayor_100
+
+
+# --------------------------------------------------------------
+# CMg
+# --------------------------------------------------------------
+
+def leer_cmg(ruta_cmg, registrar=print):
+    """
+    Replica Cargar_CMg_Desde_Archivo: lee cmg.xlsx (hoja "CMg" si
+    existe, si no la primera hoja), columnas A:I desde la fila 2, y
+    las ordena por columna D ascendente y luego H ascendente - el
+    mismo orden que la macro aplica sobre el origen antes de pegarlo.
+
+    No se renombran las columnas: se preserva el encabezado real del
+    archivo (fila 1), igual que hace la macro al no tocarlo.
+    """
+
+    excel = pd.ExcelFile(ruta_cmg)
+
+    if not excel.sheet_names:
+        raise ErrorEntrada(
+            f"{Path(ruta_cmg).name} no contiene hojas."
+        )
+
+    nombre_hoja = (
+        HOJA_CMG_ORIGEN
+        if HOJA_CMG_ORIGEN in excel.sheet_names
+        else excel.sheet_names[0]
+    )
+
+    df = pd.read_excel(ruta_cmg, sheet_name=nombre_hoja)
+
+    if df.shape[1] < 9:
+        raise ErrorEntrada(
+            f"{Path(ruta_cmg).name} debe tener al menos 9 columnas "
+            f"(A:I) en la hoja '{nombre_hoja}'; tiene {df.shape[1]}."
+        )
+
+    df = df.iloc[:, :9].copy()
+
+    columna_d = df.columns[3]
+    columna_h = df.columns[7]
+
+    df = (
+        df
+        .sort_values(
+            by=[columna_d, columna_h],
+            kind="mergesort",
+            na_position="last",
+        )
+        .reset_index(drop=True)
+    )
+
+    registrar(
+        f"  CMg: {len(df):,} filas leidas de {Path(ruta_cmg).name} "
+        f"(hoja '{nombre_hoja}')"
+    )
+
+    return df
+
+
+# --------------------------------------------------------------
+# FD
+# --------------------------------------------------------------
+
+# Encabezados reales de FD (confirmados por el usuario contra un caso
+# real, no inventados). Se aplican al final de cada bloque, despues de
+# calcular todo con los nombres de letra (asi se evitan columnas
+# duplicadas en el DataFrame mientras se opera con el, ya que "Hora
+# Mes" se repite dos veces en cada bloque real - B y M en el CSF, R y
+# AE en el CPF - igual que en el archivo original).
+NOMBRES_FD_CSF = {
+    "A": "id",
+    "B": "Hora Mes",
+    "C": "Dia",
+    "D": "Fecha",
+    "E": "Hora",
+    "F": "Unidad",
+    "G": "Respuesta CSF\n (Fact_CSF)",
+    "H": "Disponibilidad\n(Fdis_CSF)",
+    "I": "Desempeño\n(DCSF)",
+    "J": "Factor de Desempeño\n (Fd_CSF)",
+    "K": "CSF(+)",
+    "L": "CSF(-)",
+    "M": "Hora Mes",
+}
+
+NOMBRES_FD_CPF = {
+    "Q": "id",
+    "R": "Hora Mes",
+    "S": "Dia",
+    "T": "Fecha",
+    "U": "Hora",
+    "V": "Unidad",
+    "W": "Respuesta CPF+\n(Fact_CPF+)",
+    "X": "Respuesta CPF-\n(Fact_CPF-)",
+    "Y": "Disponibilidad\n(Fdis_CPF)",
+    "Z": "Desempeño\n(DCPF)",
+    "AA": "Factor de Desempeño\n(Fd_CPF)",
+    "AB": "Cuenta con equipo\nregistrador validado",
+    "AC": "CPF(+)",
+    "AD": "CPF(-)",
+    "AE": "Hora Mes",
+}
+
+def _filtrar_bess_sae_posicional(df_bloque, indice_columna_filtro):
+    """
+    Replica FiltrarFilasBESSoSAE: conserva las filas donde la columna
+    dada (posicion 0-indexada dentro de df_bloque) contiene "BESS" o
+    "SAE".
+    """
+
+    textos = df_bloque.iloc[:, indice_columna_filtro].map(_texto_seguro)
+    mascara = textos.map(_contiene_bess_o_sae_sin_bat)
+
+    return df_bloque[mascara].reset_index(drop=True)
+
+
+def _construir_bloque_fd_csf(df_filtrado):
+    """
+    A partir del bloque ya filtrado (7 columnas, origen B:H de "CSF
+    Horario" en ese orden), arma las columnas A:M de FD tal como las
+    escribe Cargar_SSCC_Desempeno_En_FD + sus formulas (plan de
+    migracion, seccion de formulas de FD).
+    """
+
+    df = df_filtrado.iloc[:, :7].copy()
+    df.columns = ["D", "E", "F", "G", "H", "I", "J"]
+    df = df.reset_index(drop=True)
+
+    df["B"] = _dia_hora_mes_fd(df["D"], df["E"])
+    df["C"] = pd.to_datetime(df["D"], errors="coerce").dt.day
+    df["A"] = (
+        df["B"].astype("Int64").astype(str)
+        + df["F"].map(_texto_seguro)
+    )
+    df["K"] = df["J"]
+    df["L"] = df["K"]
+    df["M"] = df["B"]
+
+    df = df[list("ABCDEFGHIJKLM")]
+
+    # Los nombres reales duplican "Hora Mes" (B y M): se renombra al
+    # final, ya con las columnas en su posicion definitiva.
+    return df.set_axis(
+        [NOMBRES_FD_CSF[letra] for letra in df.columns], axis=1
+    )
+
+
+def _construir_bloque_fd_cpf(df_filtrado):
+    """
+    A partir del bloque ya filtrado (9 columnas, origen B:J de "CPF
+    Horario" en ese orden), arma las columnas Q:AE de FD tal como las
+    escribe Cargar_SSCC_Desempeno_En_FD + sus formulas.
+    """
+
+    df = df_filtrado.iloc[:, :9].copy()
+    df.columns = ["T", "U", "V", "W", "X", "Y", "Z", "AA", "AB"]
+    df = df.reset_index(drop=True)
+
+    df["R"] = _dia_hora_mes_fd(df["T"], df["U"])
+    df["S"] = pd.to_datetime(df["T"], errors="coerce").dt.day
+    df["Q"] = (
+        df["R"].astype("Int64").astype(str)
+        + df["V"].map(_texto_seguro)
+    )
+    df["AC"] = df["AA"]
+    df["AD"] = df["AC"]
+    df["AE"] = df["R"]
+
+    df = df[list("QRSTUVWXYZ") + ["AA", "AB", "AC", "AD", "AE"]]
+
+    # Los nombres reales duplican "Hora Mes" (R y AE): se renombra al
+    # final, ya con las columnas en su posicion definitiva.
+    return df.set_axis(
+        [NOMBRES_FD_CPF[letra] for letra in df.columns], axis=1
+    )
+
+
+def construir_fd(ruta_sscc, registrar=print):
+    """
+    Replica Cargar_SSCC_Desempeno_En_FD.
+
+    Lee, del archivo SSCC_Desempeño_*, las hojas "CPF Horario" y "CSF
+    Horario" desde la fila 12, filtra por BESS/SAE en la columna D de
+    cada una, y arma dos bloques independientes (distinto largo cada
+    uno, igual que en la planilla): A:M (desde CSF) y Q:AE (desde
+    CPF), con sus nombres de columna reales (NOMBRES_FD_CSF/
+    NOMBRES_FD_CPF, confirmados por el usuario). N:P quedan fuera de
+    alcance (la macro no las toca).
+
+    Devuelve (df_csf, df_cpf).
+    """
+
+    ruta_sscc = Path(ruta_sscc)
+
+    excel = pd.ExcelFile(ruta_sscc)
+
+    for hoja in (HOJA_CPF_HORARIO, HOJA_CSF_HORARIO):
+        if hoja not in excel.sheet_names:
+            raise ErrorEntrada(
+                f"No existe la hoja '{hoja}' en {ruta_sscc.name}."
+            )
+
+    df_cpf_crudo = pd.read_excel(
+        ruta_sscc, sheet_name=HOJA_CPF_HORARIO, header=None
+    )
+    df_csf_crudo = pd.read_excel(
+        ruta_sscc, sheet_name=HOJA_CSF_HORARIO, header=None
+    )
+
+    # Fila 12 de Excel (1-indexada) = indice 11 (0-indexado).
+    # CPF: columnas B:J (9); CSF: columnas B:H (7).
+    bloque_cpf = df_cpf_crudo.iloc[11:, 1:10]
+    bloque_csf = df_csf_crudo.iloc[11:, 1:8]
+
+    # D es la 3ra columna de cada bloque (B, C, D -> indice 2).
+    filtrado_cpf = _filtrar_bess_sae_posicional(bloque_cpf, 2)
+    filtrado_csf = _filtrar_bess_sae_posicional(bloque_csf, 2)
+
+    df_csf = _construir_bloque_fd_csf(filtrado_csf)
+    df_cpf = _construir_bloque_fd_cpf(filtrado_cpf)
+
+    registrar(
+        f"  FD: {len(df_csf):,} fila(s) CSF Horario, "
+        f"{len(df_cpf):,} fila(s) CPF Horario (filtro BESS/SAE)"
+    )
+
+    return df_csf, df_cpf
+
+
+# --------------------------------------------------------------
+# SUBASTAS
+# --------------------------------------------------------------
+
+# Encabezados reales de Subastas!B:Q (confirmados por el usuario). "A"
+# (Concepto) no esta: la macro Cargar_Remuneracion_Subastas_Rapido no
+# la toca. "Q" no tiene encabezado en el archivo real (queda como
+# columna sin nombre, no se le inventa uno).
+NOMBRES_SUBASTAS = {
+    "B": "Control",
+    "C": "Sub_Baj",
+    "D": "Fecha",
+    "E": "Año",
+    "F": "Mes",
+    "G": "Dia",
+    "H": "Hora_dia",
+    "I": "Hora_mes",
+    "J": "Configuración",
+    "K": "Propietario",
+    "L": "Clave horaria",
+    "M": "Ciclo",
+    "N": "Energía SSCC",
+    "O": "FD",
+    "P": "FMA",
+    "Q": "",
+}
+
+
+def construir_subastas(ruta_subastas, registrar=print):
+    """
+    Replica Cargar_Remuneracion_Subastas_Rapido.
+
+    La macro original consulta la hoja "DB" del archivo de origen por
+    ADO/SQL (equivalente a filtrar y seleccionar columnas de una
+    tabla); aca se lee directamente con pandas y se aplica el mismo
+    filtro y la misma seleccion de columnas.
+
+    Arma las columnas B:Q de Subastas (nombres reales en
+    NOMBRES_SUBASTAS, confirmados por el usuario):
+      - Control:Clave horaria (B:L): copia directa de DB!B:L
+        (filtrado por Propietario/DB!K contiene BESS/SAE).
+      - Ciclo (M, formula): = Propietario & Hora_dia & Hora_mes
+        (K&H&I).
+      - Energía SSCC (N): PENDIENTE - depende de la hoja "Calculo E
+        Costos", una etapa posterior que todavia no se implementa (no
+        se adivina).
+      - FD, FMA (O, P) y la columna sin nombre (Q): copias de DB!P,
+        DB!Y, DB!V respectivamente (asi lo indica la macro original).
+    """
+
+    ruta_subastas = Path(ruta_subastas)
+
+    excel = pd.ExcelFile(ruta_subastas)
+
+    if HOJA_SUBASTAS_ORIGEN not in excel.sheet_names:
+        raise ErrorEntrada(
+            f"No existe la hoja '{HOJA_SUBASTAS_ORIGEN}' en "
+            f"{ruta_subastas.name}."
+        )
+
+    df_crudo = pd.read_excel(
+        ruta_subastas, sheet_name=HOJA_SUBASTAS_ORIGEN, header=None
+    )
+
+    # Fila 3 de Excel (1-indexada) = indice 2. Columnas B:Y (24).
+    bloque = df_crudo.iloc[2:, 1:25]
+
+    # K es la 10ma columna del bloque B:Y (B=0 ... K=9).
+    filtrado = _filtrar_bess_sae_posicional(bloque, 9)
+
+    df = filtrado.iloc[:, 0:11].copy()
+    df.columns = list("BCDEFGHIJKL")
+    df = df.reset_index(drop=True)
+
+    df["M"] = (
+        df["K"].map(_texto_seguro)
+        + df["H"].map(_texto_seguro)
+        + df["I"].map(_texto_seguro)
+    )
+
+    df["N"] = pd.NA
+
+    # P, Y, V del bloque original (indices 14, 23, 20) -> O, P, Q.
+    df["O"] = filtrado.iloc[:, 14].reset_index(drop=True)
+    df["P"] = filtrado.iloc[:, 23].reset_index(drop=True)
+    df["Q"] = filtrado.iloc[:, 20].reset_index(drop=True)
+
+    df = df[list("BCDEFGHIJKLMNOPQ")]
+    df = df.rename(columns=NOMBRES_SUBASTAS)
+
+    registrar(
+        f"  Subastas: {len(df):,} fila(s) (filtro Propietario "
+        f"contiene BESS/SAE)"
+    )
+
+    return df
+
+
+# ============================================================
+# CALCULO E COSTOS (etapa base)
+#
+# El usuario pidio avanzar "por etapas: primero H + CMg + traspaso
+# de Medidores". Lo que sigue replica solo esa parte de dos macros:
+#
+#   - Traspasar_Medidores_A_Calculos_Rapido (modulo
+#     B_medidores_a_calculos): A:G (con D<->E invertidas), I/J
+#     (energia de Medidores!I separada por signo, solo si
+#     Ventana_No_Completa==1; si no, es de "Calculo RE545", fuera de
+#     alcance), Medidores!J -> K, Medidores!K -> P. H NO la toca esta
+#     macro (es formula, ver mas abajo).
+#   - Asignar_CMg_a_Calculos_Turbo (modulo A_Carga_Cmg_a_Destino):
+#     arma un diccionario CMg!D (Barra) + "|" + CMg!H (Cuarto de
+#     Hora, normalizado con NormalizaCuarto) -> CMg!F, y lo vuelca en
+#     la columna Q. Para "Calculo E Costos" la macro NO escribe R
+#     (escribirR=False): eso solo aplica a "Calculo RE545".
+#
+# H (Barra), en la planilla original, es formula:
+#     =VLOOKUP(G4, Resumen!B:G, 6, FALSE)
+# Se homologa por NOMBRE de columna ("Nombre activo" / "Barra
+# inyeccion" de Centrales.xlsx!Resumen BESS) en vez de por posicion,
+# porque Centrales.xlsx no reproduce el layout Resumen!B:G del libro
+# original.
+#
+# El resto de columnas de Actualizar_Calculos_Columnas (L, M, N, O,
+# R, S, T, U, W, X, Y, AB:AF, AG:AX, AZ) queda para una etapa
+# posterior (decision explicita del usuario).
+#
+# Nombres de columna: son PLACEHOLDERS derivados de los comentarios
+# de la macro. Todavia no se pudo confirmar contra un archivo real
+# con los encabezados de "Calculo E Costos" (las dos veces que el
+# usuario adjunto un archivo para esto, solo traia las hojas FD y
+# Subastas) -- se corrigen apenas se reciba ese archivo.
+# ============================================================
+
+def _normaliza_cuarto(valor):
+    """
+    Replica NormalizaCuarto:
+        Error       -> ""
+        Numerico    -> CStr(CLng(valor))  (texto del entero redondeado)
+        Otro        -> Trim(CStr(valor))
+    """
+
+    if valor is None:
+        return ""
+
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if texto == "":
+            return ""
+        try:
+            numero = float(texto.replace(",", "."))
+        except ValueError:
+            return texto
+        return str(round(numero))
+
+    if isinstance(valor, (int, float)):
+        return str(round(float(valor)))
+
+    return str(valor).strip()
+
+
+def construir_dic_cmg(df_cmg):
+    """
+    Replica el paso 1) de Asignar_CMg_a_Calculos_Turbo: arma un
+    diccionario clave -> valor a asignar en Q, a partir de la hoja
+    CMg (columnas por posicion, sin renombrar - ver leer_cmg):
+        D (indice 3) = Barra
+        F (indice 5) = valor a asignar en Q
+        H (indice 7) = Cuarto de Hora
+
+    Si una clave se repite, gana la primera fila (igual que
+    "If Not dictCMg.Exists(clave) Then Add" en VBA).
+    """
+
+    columna_d = df_cmg.columns[3]
+    columna_f = df_cmg.columns[5]
+    columna_h = df_cmg.columns[7]
+
+    diccionario = {}
+
+    for _, fila in df_cmg.iterrows():
+
+        barra = fila[columna_d]
+        barra = "" if pd.isna(barra) else str(barra).strip()
+
+        cuarto_hora = _normaliza_cuarto(fila[columna_h])
+
+        if barra == "" or cuarto_hora == "":
+            continue
+
+        clave = barra.upper() + "|" + cuarto_hora
+
+        if clave not in diccionario:
+            diccionario[clave] = fila[columna_f]
+
+    return diccionario
+
+
+def construir_mapa_barra(resumen_bess):
+    """
+    Arma nombre_central -> barra de inyeccion, a partir de la hoja
+    "Resumen BESS" de Centrales.xlsx (columnas "Nombre activo" y
+    "Barra inyeccion", confirmadas en el plan de traspaso, seccion
+    4.1). Se busca por nombre de columna normalizado, no por
+    posicion.
+    """
+
+    columna_nombre = None
+    columna_barra = None
+
+    for columna in resumen_bess.columns:
+        clave = normalizar(columna)
+        if columna_nombre is None and "nombre" in clave and "activ" in clave:
+            columna_nombre = columna
+        if columna_barra is None and "barra" in clave:
+            columna_barra = columna
+
+    if columna_nombre is None or columna_barra is None:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} debe "
+            f"tener una columna de nombre de central ('Nombre activo') y "
+            f"una de barra de inyeccion ('Barra inyección'). Columnas "
+            f"encontradas: {list(resumen_bess.columns)}"
+        )
+
+    mapa = {}
+
+    for _, fila in resumen_bess.iterrows():
+
+        nombre = fila[columna_nombre]
+        if pd.isna(nombre):
+            continue
+
+        barra = fila[columna_barra]
+        mapa[normalizar(nombre)] = "" if pd.isna(barra) else str(barra).strip()
+
+    return mapa
+
+
+def construir_calculo_e_costos(
+    df_medidores, mapa_barra, dic_cmg, registrar=print
+):
+    """
+    Etapa base de "Calculo E Costos": traspaso desde Medidores (A:G
+    con D<->E invertidas, I/J, K, P) + H (Barra, homologada por
+    nombre) + Q (CMg, homologado por Barra+Cuarto de Hora). Ver el
+    comentario de seccion mas arriba para el detalle de cada macro
+    replicada.
+
+    Solo cubre "Calculo E Costos" (Ventana_No_Completa == 1);
+    "Calculo RE545" (Ventana_No_Completa <> 1) queda fuera de esta
+    etapa.
+    """
+
+    n = len(df_medidores)
+    df_medidores = df_medidores.reset_index(drop=True)
+
+    df = pd.DataFrame(index=range(n))
+
+    df["Mes"] = df_medidores["Mes"]
+    df["Dia"] = df_medidores["Dia"]
+    df["Hora"] = df_medidores["Hora"]
+
+    # D <-> E invertidas: Destino D = Medidores E, Destino E = Medidores D.
+    df["Hora Mes"] = df_medidores["Hora Mes"]
+    df["Minutos"] = df_medidores["Minutos"]
+
+    df["Cuarto de Hora"] = df_medidores["Cuarto de Hora"]
+    df["clave"] = df_medidores["clave"]
+
+    df["Barra"] = df["clave"].map(
+        lambda valor: mapa_barra.get(normalizar(valor), "")
+    )
+
+    energia = pd.to_numeric(
+        df_medidores["Gen_Unidad"], errors="coerce"
+    ).fillna(0.0)
+
+    va_a_ecostos = pd.to_numeric(
+        df_medidores["Ventana_No_Completa"], errors="coerce"
+    ).eq(1)
+
+    energia_positiva = energia.where(energia > 0, 0.0).where(va_a_ecostos, 0.0)
+    energia_negativa = energia.where(energia < 0, 0.0).where(va_a_ecostos, 0.0)
+
+    df["Energia_Positiva"] = energia_positiva
+    df["Energia_Negativa"] = energia_negativa
+
+    # Medidores J (SoC) -> Destino K; Medidores K (Copia_Ventana) -> Destino P.
+    df["SoC"] = df_medidores["SoC"]
+    df["Copia_Ventana"] = df_medidores["Copia_Ventana"]
+
+    def _buscar_cmg(barra, cuarto_hora):
+        barra = "" if not barra else str(barra).strip()
+        cuarto = _normaliza_cuarto(cuarto_hora)
+        if barra == "" or cuarto == "":
+            return pd.NA
+        return dic_cmg.get(barra.upper() + "|" + cuarto, pd.NA)
+
+    df["CMg"] = [
+        _buscar_cmg(barra, cuarto_hora)
+        for barra, cuarto_hora in zip(df["Barra"], df["Cuarto de Hora"])
+    ]
+
+    sin_barra = int((df["Barra"] == "").sum())
+    sin_cmg = int(df["CMg"].isna().sum())
+
+    if sin_barra:
+        registrar(
+            f"  Calculo E Costos: {sin_barra:,} fila(s) sin barra de "
+            f"inyeccion (central no encontrada en '{HOJA_RESUMEN_BESS}')."
+        )
+
+    if sin_cmg:
+        registrar(
+            f"  Calculo E Costos: {sin_cmg:,} fila(s) sin CMg (sin match "
+            f"Barra+Cuarto de Hora en {ARCHIVO_CMG})."
+        )
+
+    registrar(
+        f"  Calculo E Costos: {n:,} fila(s) traspasadas desde Medidores."
+    )
+
+    return df
+
+
+def escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print):
+    """
+    Escribe Pagos_BESS.xlsx: por ahora solo la hoja "Calculo E
+    Costos" en su etapa base (ver comentario de construir_calculo_e_
+    costos). El usuario pidio explicitamente que esto viva en un
+    archivo separado de Consolidado_entradas.xlsx ("pagos_bess o algo
+    asi por ahora") -- nombre y alcance son provisorios.
+    """
+
+    ruta_salida = Path(ruta_salida)
+
+    with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
+        df_ecostos.to_excel(
+            writer,
+            sheet_name=HOJA_CALCULO_ECOSTOS,
+            index=False,
+        )
+
+    registrar(f"Archivo generado: {ruta_salida}")
+
+    return ruta_salida
+
+
+# ============================================================
 # COLUMNAS CALCULADAS
 # ============================================================
 
@@ -1558,10 +2333,13 @@ def construir_medidores(
     diccionario:  hoja Diccionario de Centrales.xlsx (header=None), la
                   misma que se usa para homologar el SoC.
 
-    Devuelve (df_medidores, avisos, df_resumen_ofertas, df_wxy,
-    df_resumen_ventana). Estas ultimas tres son las tablas auxiliares
-    equivalentes a la hoja "Resumen Ofertas SSCC", a Medidores!W:Y y a
-    Medidores!AB:AE respectivamente (ver comentario de LETRA_A_CAMPO).
+    Devuelve (df_medidores, avisos, df_wxy, df_resumen_ventana). Estas
+    ultimas dos son las tablas auxiliares equivalentes a Medidores!W:Y
+    y a Medidores!AB:AE respectivamente (ver comentario de
+    LETRA_A_CAMPO). El resumen intermedio equivalente a la hoja
+    "Resumen Ofertas SSCC" (Nombre/Año/Mes/Día/servicios/Oferta
+    completa) es puramente auxiliar para calcular df_wxy: no se
+    devuelve ni se persiste, solo sirve como paso intermedio.
     """
 
     avisos = []
@@ -1739,7 +2517,59 @@ def construir_medidores(
         f"{len(df.columns)} columnas"
     )
 
-    return df, avisos, df_resumen_ofertas, df_wxy, df_resumen_ventana
+    return df, avisos, df_wxy, df_resumen_ventana
+
+
+HOJA_OFERTAS_SSCC = "Ofertas SSCC"
+
+
+def _escribir_tabla_con_titulo(
+    writer, hoja, df, titulo, fila_inicio=0, columna_inicio=0
+):
+    """
+    Escribe 'titulo' en una fila y 'df' (con su propio encabezado)
+    justo debajo, dentro de la hoja 'hoja', empezando en fila_inicio y
+    columna_inicio.
+
+    Devuelve (fila_siguiente, columna_siguiente): donde empezaria el
+    proximo bloque si se apila debajo, o si se pone al lado,
+    respectivamente (cada llamada solo usa el que necesite).
+    """
+
+    pd.DataFrame([[titulo]]).to_excel(
+        writer,
+        sheet_name=hoja,
+        index=False,
+        header=False,
+        startrow=fila_inicio,
+        startcol=columna_inicio,
+    )
+
+    df.to_excel(
+        writer,
+        sheet_name=hoja,
+        index=False,
+        startrow=fila_inicio + 1,
+        startcol=columna_inicio,
+    )
+
+    celda_titulo = writer.sheets[hoja].cell(
+        row=fila_inicio + 1, column=columna_inicio + 1
+    )
+    celda_titulo.font = celda_titulo.font.copy(bold=True)
+
+    # Debajo: +1 titulo, +1 encabezado de df, +len(df) filas, +2 de separacion.
+    fila_siguiente = fila_inicio + len(df) + 4
+
+    # Al lado: +len(df.columns) del bloque, +2 columnas de separacion.
+    columna_siguiente = columna_inicio + len(df.columns) + 2
+
+    return fila_siguiente, columna_siguiente
+
+
+# Columna Q en indice 0 (A=0): usada para ubicar el bloque CPF de FD
+# a la derecha del bloque CSF, en la misma hoja.
+_COLUMNA_Q_INDICE = 16
 
 
 def escribir_salida(
@@ -1747,15 +2577,20 @@ def escribir_salida(
     ruta_salida,
     avisos,
     incidencias,
-    df_resumen_ofertas=None,
     df_wxy=None,
     df_resumen_ventana=None,
+    df_cmg=None,
+    df_fd_csf=None,
+    df_fd_cpf=None,
+    df_subastas=None,
 ):
     """
-    Escribe Hoja_Medidas.xlsx: la tabla Medidores (A:U, una fila por
-    registro), las tablas auxiliares de Ofertas SSCC -de otro largo,
-    ver comentario de LETRA_A_CAMPO- cada una en su propia hoja, y un
-    Log.
+    Escribe Consolidado_entradas.xlsx: la tabla Medidores (A:U, una
+    fila por registro), las tablas auxiliares de Ofertas SSCC -de
+    otro largo, ver comentario de LETRA_A_CAMPO- juntas en una misma
+    hoja (HOJA_OFERTAS_SSCC, una debajo de la otra), CMg, FD (el
+    bloque CSF y el bloque CPF lado a lado, de distinto largo cada
+    uno - ver construir_fd), Subastas, y un Log.
     """
 
     ruta_salida = Path(ruta_salida)
@@ -1778,24 +2613,55 @@ def escribir_salida(
             index=False,
         )
 
-        if df_resumen_ofertas is not None:
-            df_resumen_ofertas.to_excel(
-                writer,
-                sheet_name="Resumen Ofertas SSCC",
-                index=False,
-            )
+        columna = 0
 
         if df_wxy is not None:
-            df_wxy.to_excel(
+            _, columna = _escribir_tabla_con_titulo(
                 writer,
-                sheet_name="Ofertas SSCC por Dia",
-                index=False,
+                HOJA_OFERTAS_SSCC,
+                df_wxy,
+                "Ofertas SSCC por dia (equivalente a Medidores!W:Y)",
+                columna_inicio=columna,
             )
 
         if df_resumen_ventana is not None:
-            df_resumen_ventana.to_excel(
+            _escribir_tabla_con_titulo(
                 writer,
-                sheet_name="Resumen Ventana Oferta",
+                HOJA_OFERTAS_SSCC,
+                df_resumen_ventana,
+                "Resumen ventana oferta (equivalente a Medidores!AB:AE)",
+                columna_inicio=columna,
+            )
+
+        if df_cmg is not None:
+            df_cmg.to_excel(
+                writer,
+                sheet_name="CMg",
+                index=False,
+            )
+
+        if df_fd_csf is not None or df_fd_cpf is not None:
+
+            if df_fd_csf is not None:
+                df_fd_csf.to_excel(
+                    writer,
+                    sheet_name="FD",
+                    index=False,
+                    startcol=0,
+                )
+
+            if df_fd_cpf is not None:
+                df_fd_cpf.to_excel(
+                    writer,
+                    sheet_name="FD",
+                    index=False,
+                    startcol=_COLUMNA_Q_INDICE,
+                )
+
+        if df_subastas is not None:
+            df_subastas.to_excel(
+                writer,
+                sheet_name="Subastas",
                 index=False,
             )
 
@@ -1847,6 +2713,28 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
             f"{rutas['ofertas_dir']}"
         )
 
+    if not rutas["cmg"].is_file():
+        raise ErrorEntrada(
+            f"No se encontro {rutas['cmg']}"
+        )
+
+    archivo_sscc = buscar_archivo_sscc_desempeno(
+        rutas["sscc_desempeno_dir"]
+    )
+    if not archivo_sscc:
+        raise ErrorEntrada(
+            f"No se encontro ningun archivo SSCC_Desempeño_* en "
+            f"{rutas['sscc_desempeno_dir']}"
+        )
+
+    archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
+    if not archivo_subastas:
+        raise ErrorEntrada(
+            f"No se encontro ningun archivo "
+            f"3_REMUNERACIÓN_SUBASTAS_E_ID_* en "
+            f"{rutas['subastas_dir']}"
+        )
+
     archivo_soc = buscar_soc(rutas["medidas_dir"], aamm)
     anio, mes = periodo_desde_aamm(aamm)
 
@@ -1854,7 +2742,7 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
     avanzar(5)
 
     registrar("Leyendo Centrales.xlsx...")
-    _, diccionario = leer_centrales(rutas["centrales"])
+    resumen, diccionario = leer_centrales(rutas["centrales"])
     mapa = construir_homologacion(diccionario)
     registrar(f"  homologaciones cargadas: {len(mapa):,}")
     avanzar(20)
@@ -1881,7 +2769,6 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
     (
         df_medidores,
         avisos,
-        df_resumen_ofertas,
         df_wxy,
         df_resumen_ventana,
     ) = construir_medidores(
@@ -1897,7 +2784,19 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
     for aviso in avisos:
         registrar(f"  [AVISO] {aviso}")
 
+    avanzar(80)
+
+    registrar(f"Leyendo {ARCHIVO_CMG}...")
+    df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
+    avanzar(85)
+
+    registrar(f"Leyendo {archivo_sscc.name}...")
+    df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
     avanzar(90)
+
+    registrar(f"Leyendo {archivo_subastas.name}...")
+    df_subastas = construir_subastas(archivo_subastas, registrar=registrar)
+    avanzar(95)
 
     registrar(f"Escribiendo {rutas['salida'].name}...")
     escribir_salida(
@@ -1905,12 +2804,28 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
         rutas["salida"],
         avisos,
         incidencias,
-        df_resumen_ofertas,
         df_wxy,
         df_resumen_ventana,
+        df_cmg,
+        df_fd_csf,
+        df_fd_cpf,
+        df_subastas,
     )
+    avanzar(97)
+
+    registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
+               "traspaso de Medidores)...")
+    mapa_barra = construir_mapa_barra(resumen)
+    dic_cmg = construir_dic_cmg(df_cmg)
+    df_ecostos = construir_calculo_e_costos(
+        df_medidores, mapa_barra, dic_cmg, registrar=registrar
+    )
+
+    registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
+    escribir_pagos_bess(rutas["salida_pagos"], df_ecostos, registrar=registrar)
 
     avanzar(100)
     registrar(f"Listo: {rutas['salida']}")
+    registrar(f"Listo: {rutas['salida_pagos']}")
 
     return df_medidores, avisos, incidencias

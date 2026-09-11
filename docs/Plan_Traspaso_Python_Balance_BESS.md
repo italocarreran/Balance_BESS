@@ -1381,3 +1381,326 @@ de bloques horizontales por central — eso no cambió, solo el contenedor sí v
 únicamente Excel). Ver `METODOLOGIA.md` §7 (trampas conocidas) para la regla que evita repetir
 esta confusión: un archivo que matchea el patrón de nombre pero no tiene la estructura de
 bloques esperada no es el archivo de SoC, aunque comparta "SOC"+AAMM en el nombre.
+
+---
+
+# 22. Ajuste de las hojas auxiliares de Ofertas SSCC
+
+Tras usar `Hoja_Medidas.xlsx` en la práctica, se ajustó cómo se exponen las tablas auxiliares
+descritas en la sección 20.1:
+
+- **"Resumen Ofertas SSCC"** (salida de `Generar_Resumen_Ofertas_SSCC`: Nombre, Año, Mes, Día,
+  una columna por servicio `_RS`, Oferta completa) deja de escribirse como hoja. Es puramente
+  auxiliar — solo existe para construir la tabla equivalente a `Medidores!W:Y` — y no aporta
+  valor de validación por sí sola. Sigue calculándose en memoria dentro de
+  `construir_medidores()` (función `construir_resumen_ofertas_sscc()`, sin cambios), solo que ya
+  no se persiste ni se devuelve fuera de esa función.
+- **"Ofertas SSCC por Dia"** (equivalente a `Medidores!W:Y`) y **"Resumen Ventana Oferta"**
+  (equivalente a `Medidores!AB:AE`) se unen en una sola hoja, `"Ofertas SSCC"`
+  (`nucleo.HOJA_OFERTAS_SSCC`), una tabla debajo de la otra, cada una con un título en negrita
+  arriba (`_escribir_tabla_con_titulo()`) para distinguirlas al abrir el archivo.
+
+`Hoja_Medidas.xlsx` queda entonces con tres hojas: `Medidores`, `Ofertas SSCC`, `Log`.
+
+---
+
+# 23. Nuevas hojas: CMg, FD, Subastas — y cambio de nombre del archivo de salida
+
+El archivo de salida deja de llamarse `Hoja_Medidas.xlsx` y pasa a llamarse
+**`Consolidado_entradas.xlsx`**, reflejando que ya no es solo la etapa Medidores: reúne varias
+entradas materializadas (Medidores, CMg, FD, Subastas) que las siguientes etapas del balance
+(`Calculo E Costos`, `Calculo RE545`) van a consumir.
+
+Se agregan tres hojas, replicando las macros de carga (no las que las consumen después, como
+`Asignar_CMg_a_Calculos_Turbo` o `Actualizar_Calculos_Columnas`, que pertenecen a una etapa
+posterior todavía sin implementar):
+
+## 23.1. `CMg` — replica `Cargar_CMg_Desde_Archivo`
+
+- **Entrada:** `<CARPETA_BASE>/Cmg/cmg.xlsx` — a diferencia de todos los demás archivos
+  externos de este proyecto, el nombre es **literal y fijo** (así lo exige la macro original;
+  no sigue un patrón con AAMM).
+- **Lectura:** hoja `CMg` si existe, si no la primera hoja del archivo; columnas A:I completas,
+  con su encabezado real (no se le inventa nombre).
+- **Transformación:** se ordena por columna D ascendente y luego por columna H ascendente —
+  igual que hace la macro sobre el origen antes de pegarlo en la hoja `CMg` del balance.
+- **No implementado (fuera de alcance de esta sesión):** `Asignar_CMg_a_Calculos_Turbo`, que
+  cruza esta hoja contra `Calculo E Costos`/`Calculo RE545` (columnas D, F, H, I) — pertenece a
+  una etapa posterior.
+
+## 23.2. `FD` — replica `Cargar_SSCC_Desempeno_En_FD`
+
+- **Entrada:** `<CARPETA_BASE>/SSCC_Desempeño/SSCC_Desempeño_*.xlsx` (o `.xlsm`/`.xlsb`/`.xls`) —
+  el más reciente por fecha de modificación si hay varios, igual que la macro original
+  (`BuscarArchivoSSCCMasReciente`).
+- **Lectura:** hojas `CPF Horario` y `CSF Horario` del archivo, datos desde la fila 12,
+  filtrando las filas cuya columna D (dentro de cada bloque) contenga "BESS" o "SAE" — **sin**
+  "BAT" (a diferencia del filtro de Ofertas SSCC; son dos filtros distintos aunque se parezcan).
+- **Estructura resultante — hallazgo clave:** igual que con V/W/X/Y/AB/AC/AD/AE de `Medidores`,
+  los bloques CSF y CPF de `FD` son **dos tablas independientes de distinto largo** que
+  comparten la misma hoja en rangos de columnas distintos (A:M para CSF, Q:AE para CPF; N:P
+  quedan vacías/fuera de alcance porque la macro no las toca). Se escriben lado a lado en la
+  hoja `FD`, cada una con su propio largo de filas.
+- **Fórmulas replicadas** (columnas calculadas, exactas según la sección de fórmulas del
+  libro): para el bloque CSF (destino D:J = copia directa de `CSF Horario!B:H` filtrado):
+  - `A = str(B) & F`
+  - `B = (DAY(D)-1)*24 + E + 1 + IF(DAY(D)>100,1,0)` (fórmula "Hora Mes"; el término
+    `DAY(D)>100` nunca es cierto para un día real, se conserva tal cual sin "corregirlo")
+  - `C = DAY(D)`
+  - `K = J`, `L = K`, `M = B`
+
+  Para el bloque CPF (destino T:AB = copia directa de `CPF Horario!B:J` filtrado):
+  - `Q = str(R) & V`
+  - `R = (DAY(T)-1)*24 + U + 1 + IF(DAY(T)>100,1,0)`
+  - `S = DAY(T)`
+  - `AC = AA`, `AD = AC`, `AE = R`
+- **Columnas sin nombre de negocio documentado:** ni el plan ni la trazabilidad dan nombres
+  reales para las columnas puramente copiadas (D:J, T:AB) más allá de lo que las fórmulas
+  revelan (D/T = fecha, E/U = hora). Se dejaron con su letra de Excel tal cual, en vez de
+  inventarles un nombre — igual criterio que "no adivinar" ya aplicado en otras partes de este
+  documento.
+
+## 23.3. `Subastas` — replica `Cargar_Remuneracion_Subastas_Rapido`
+
+- **Entrada:** `<CARPETA_BASE>/Subastas/3_REMUNERACIÓN_SUBASTAS_E_ID_*.xlsx` (o
+  `.xlsm`/`.xlsb`/`.xls`) — el más reciente si hay varios.
+
+  **Nota de arquitectura:** la macro original buscaba este archivo directamente en la carpeta
+  del `.xlsm` (sin subcarpeta). Se le dio una carpeta propia (`Subastas/`) para ser consistente
+  con el resto de las entradas externas de este proyecto (`Medidas/`, `Auxiliares/`, `Ofertas/`,
+  `Cmg/`, `SSCC_Desempeño/`), cada una con su propia carpeta bajo la carpeta base del caso. Es
+  una decisión de estructura de carpetas, no de contenido.
+- **Lectura:** la macro original consulta la hoja `DB` por ADO/SQL (equivalente a filtrar y
+  seleccionar columnas de una tabla); en Python se lee directamente con pandas aplicando el
+  mismo filtro y la misma selección de columnas, sin necesidad de ADO. Datos desde la fila 3,
+  columnas B:Y, filtrando donde la columna K (10ª del bloque B:Y) contenga "BESS" o "SAE".
+- **Columnas resultantes (B:Q):**
+  - `B:L`: copia directa de `DB!B:L` (11 columnas, filtradas).
+  - `M` (fórmula): `= K & H & I`.
+  - `N`: **pendiente** — la fórmula real (`N3:N6997` en la sección de fórmulas del libro) hace
+    referencia a `'Calculo E Costos'!D:D`, `G:G` y `P:P`, una hoja de una etapa posterior que
+    todavía no está implementada. Se deja como columna vacía documentada, no se adivina.
+  - `O, P, Q`: copias directas de `DB!P`, `DB!Y`, `DB!V` respectivamente (así lo indica la
+    macro original).
+- **Fuera de alcance de esta sesión:** las columnas `U:W` de `Subastas` (resumen que depende de
+  `N` y de otras hojas) y el formato del encabezado `B1` (fórmula puramente decorativa que arma
+  una etiqueta de texto, no un dato por fila).
+
+## 23.4. Hojas resultantes de `Consolidado_entradas.xlsx`
+
+`Medidores`, `Ofertas SSCC`, `CMg`, `FD`, `Subastas`, `Log`.
+
+---
+
+# 24. Encabezados reales de FD y Subastas, y ajuste de la hoja Ofertas SSCC
+
+El usuario entregó un Excel con los encabezados reales de `FD` y `Subastas`, confirmando (y
+corrigiendo el nombre genérico por letra que se había usado en la sección 23) las columnas que
+solo se copian:
+
+## 24.1. `FD` — encabezados confirmados
+
+Bloque CSF (A:M):
+
+| Letra | Nombre |
+|---|---|
+| A | `id` |
+| B | `Hora Mes` |
+| C | `Dia` |
+| D | `Fecha` |
+| E | `Hora` |
+| F | `Unidad` |
+| G | `Respuesta CSF (Fact_CSF)` |
+| H | `Disponibilidad (Fdis_CSF)` |
+| I | `Desempeño (DCSF)` |
+| J | `Factor de Desempeño (Fd_CSF)` |
+| K | `CSF(+)` |
+| L | `CSF(-)` |
+| M | `Hora Mes` (repite el nombre de B; también repite su valor — `M = B`, confirmado antes) |
+
+Bloque CPF (Q:AE), mismo patrón:
+
+| Letra | Nombre |
+|---|---|
+| Q | `id` |
+| R | `Hora Mes` |
+| S | `Dia` |
+| T | `Fecha` |
+| U | `Hora` |
+| V | `Unidad` |
+| W | `Respuesta CPF+ (Fact_CPF+)` |
+| X | `Respuesta CPF- (Fact_CPF-)` |
+| Y | `Disponibilidad (Fdis_CPF)` |
+| Z | `Desempeño (DCPF)` |
+| AA | `Factor de Desempeño (Fd_CPF)` |
+| AB | `Cuenta con equipo registrador validado` |
+| AC | `CPF(+)` |
+| AD | `CPF(-)` |
+| AE | `Hora Mes` (repite el nombre de R; repite su valor — `AE = R`) |
+
+N:P siguen vacías/fuera de alcance (el archivo de ejemplo tampoco tiene encabezado ahí).
+
+Confirma, de paso, todas las fórmulas ya implementadas en la sesión anterior: `K = J` con
+`K="CSF(+)"`, `J="Factor de Desempeño (Fd_CSF)"` — es decir, la columna "positiva" simplemente
+copia el factor de desempeño sin condición de signo (y `L="CSF(-)"` copia a su vez el valor de
+`K`). Aunque el nombre sugiera una lógica de signo, la fórmula extraída del `.xlsm` real es una
+copia directa; no se "corrige" para que tenga más sentido semántico — replicar primero.
+
+## 24.2. `Subastas` — encabezados confirmados
+
+| Letra | Nombre | Origen |
+|---|---|---|
+| B | `Control` | copiado de `DB!B` |
+| C | `Sub_Baj` | copiado de `DB!C` |
+| D | `Fecha` | copiado de `DB!D` |
+| E | `Año` | copiado de `DB!E` |
+| F | `Mes` | copiado de `DB!F` |
+| G | `Dia` | copiado de `DB!G` |
+| H | `Hora_dia` | copiado de `DB!H` |
+| I | `Hora_mes` | copiado de `DB!I` |
+| J | `Configuración` | copiado de `DB!J` |
+| K | `Propietario` | copiado de `DB!K` — **esta es la columna que se filtra por BESS/SAE** |
+| L | `Clave horaria` | copiado de `DB!L` |
+| M | `Ciclo` | fórmula: `= Propietario & Hora_dia & Hora_mes` (`K&H&I`) |
+| N | `Energía SSCC` | **pendiente** — depende de `'Calculo E Costos'`, etapa sin implementar |
+| O | `FD` | copiado de `DB!P` |
+| P | `FMA` | copiado de `DB!Y` |
+| Q | *(sin nombre en el archivo real)* | copiado de `DB!V` |
+
+`A` (`Concepto`) no forma parte de lo que escribe `Cargar_Remuneracion_Subastas_Rapido`, y
+`R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`, `BAJADA`) tampoco: son columnas de otra
+lógica (probablemente relacionada con las fórmulas `U:W` ya descartadas como fuera de alcance
+en la sección 23.3).
+
+## 24.3. Hoja "Ofertas SSCC": las dos tablas van lado a lado, no una debajo de la otra
+
+Ajuste pedido por el usuario: "Ofertas SSCC por dia" y "Resumen ventana oferta" (sección 22)
+pasan de estar apiladas verticalmente a estar **una al lado de la otra**, con una separación de
+2 columnas en blanco entre ambas. `_escribir_tabla_con_titulo()` ahora acepta `columna_inicio`
+además de `fila_inicio`, y devuelve tanto la fila como la columna donde podría continuar el
+siguiente bloque (cada llamada usa el dato que corresponda a cómo se estén acomodando los
+bloques en ese momento).
+
+---
+
+# 25. `Calculo E Costos` — etapa base (H + CMg + traspaso de Medidores)
+
+El usuario pidió crear la hoja `Calculo E Costos` ("Ecostos"), cuya lógica de cálculo vive en la
+macro `Actualizar_Calculos_Columnas` (módulo `J_Calculo_Ecostos`), con la barra (columna H)
+resuelta por fórmula y el CMg asignado por la macro `Asignar_CMg_a_Calculos_Turbo` (módulo
+`A_Carga_Cmg_a_Destino`). También pidió explícitamente que esta hoja viva en un **archivo
+separado** de `Consolidado_entradas.xlsx` ("esto que esté en otra planilla que se llame
+pagos_bess o algo así por ahora").
+
+`Actualizar_Calculos_Columnas` es una macro muy extensa (~1500 líneas) con dependencias
+profundas (Subastas, Resumen, una "Prorrata SSCC" que resultó ser una tabla dinámica derivable
+de Subastas, Diccionario, FD). Frente a esa escala, se preguntó al usuario cómo priorizar y
+eligió explícitamente: **"por etapas: primero H + CMg + traspaso de Medidores"**. Esta sección
+documenta esa primera etapa; el resto queda pendiente (ver 25.4).
+
+## 25.1. `Traspasar_Medidores_A_Calculos_Rapido` (módulo `B_medidores_a_calculos`)
+
+Traspasa, para cada fila de `Medidores`, hacia **ambas** hojas `Calculo E Costos` y `Calculo
+RE545` (esta última fuera de alcance por ahora):
+
+- **A:G**, con **D y E invertidas** respecto a `Medidores` (`Destino!D = Medidores!E`,
+  `Destino!E = Medidores!D`). El resto de A:G se copia tal cual.
+- **H no se toca** — es fórmula (`=VLOOKUP(G4,Resumen!B:G,6,FALSE)`), ver 25.2.
+- **I/J**: la energía de `Medidores!I` (`Gen_Unidad`) se separa por signo (positivo → I,
+  negativo → J, cero → ambas 0) y se enruta según `Medidores!T` (`Ventana_No_Completa`):
+  `T = 1` → la energía va a `Calculo E Costos!I/J`; `T <> 1` o vacío → va a `Calculo
+  RE545!I/J` (y en `Calculo E Costos` queda 0/0 esa fila).
+- **`Medidores!J` (`SoC`) → `Destino!K`.**
+- **`Medidores!K` (`Copia_Ventana`) → `Destino!P`.**
+- `Medidores!L` (`Ventana`) → `Calculo RE545!T` únicamente (no aplica a `Calculo E Costos`).
+
+Todas las filas de `Medidores` se traspasan a ambas hojas destino (no se filtran): lo que
+cambia según `T` es si la energía I/J queda con valor real o en 0 en cada una.
+
+## 25.2. `H` (Barra) — antes fórmula `VLOOKUP`
+
+En el `.xlsm` original, `Calculo E Costos!H4:H26787` es la fórmula:
+
+```
+=VLOOKUP(G4,Resumen!B:G,6,FALSE)
+```
+
+Busca el valor de `G` (la central, columna `clave` en nuestro `Medidores`) en la columna `B` de
+la hoja `Resumen` del libro original, y devuelve la 6ª columna del rango `B:G` (es decir, la
+columna `G` de esa hoja) — la barra de inyección de esa central.
+
+**No se replica por posición** (`Resumen!B:G` del `.xlsm` original) sino **por nombre de
+columna**, homologando `Medidores!clave` contra `Resumen BESS!Nombre activo` y devolviendo
+`Resumen BESS!Barra inyección` (`construir_mapa_barra()`). Motivo: `Centrales.xlsx` (nuestro
+maestro, sección 4) no reproduce el layout `Resumen!B:G` del libro original — homologar por
+nombre es más fiel a la intención de la fórmula (encontrar la barra de la central) que asumir
+una posición de columna no confirmada.
+
+## 25.3. `Asignar_CMg_a_Calculos_Turbo` (módulo `A_Carga_Cmg_a_Destino`) — solo Q
+
+La macro arma un diccionario a partir de la hoja `CMg` (columnas por posición: `D` = Barra, `F`
+= valor a asignar en `Q`, `H` = Cuarto de Hora, `I` = valor a asignar en `R`, este último solo
+para `Calculo RE545`):
+
+```
+clave = UCase(Trim(CMg!D)) & "|" & NormalizaCuarto(CMg!H)
+```
+
+Si la clave se repite, gana la **primera** fila (`If Not dictCMg.Exists(clave) Then Add`).
+
+`NormalizaCuarto` (replicada en `_normaliza_cuarto()`):
+
+```
+Error     -> ""
+Numérico  -> CStr(CLng(valor))   ' texto del entero redondeado
+Otro      -> Trim(CStr(valor))
+```
+
+Para completar el destino (`CompletarDestinoTurbo`), la clave de búsqueda en cada fila de
+destino es `UCase(Trim(Destino!H)) & "|" & NormalizaCuarto(Destino!F)` (`H` = Barra, `F` =
+Cuarto de Hora) y solo se asigna `Q = CMg!F` — para `Calculo E Costos` la macro llama con
+`escribirR:=False`, así que `R` (que en `Calculo E Costos` ni siquiera existe como columna
+usada) nunca se toca. `R` sólo aplica a `Calculo RE545`, fuera de alcance.
+
+`construir_dic_cmg(df_cmg)` arma ese diccionario a partir del `df_cmg` que ya lee `leer_cmg()`
+(columnas por posición, sin renombrar — `D` = `df_cmg.columns[3]`, `F` = `columns[5]`, `H` =
+`columns[7]`).
+
+## 25.4. Alcance de esta etapa y lo que queda pendiente
+
+`construir_calculo_e_costos()` arma únicamente:
+
+| Columna (nombre placeholder) | Origen |
+|---|---|
+| `Mes`, `Dia`, `Hora`, `clave` | copia directa de `Medidores` |
+| `Hora Mes`, `Minutos` | copia de `Medidores` (D↔E invertidas, ver 25.1) |
+| `Cuarto de Hora` | copia directa de `Medidores` |
+| `Barra` (H) | homologada por nombre contra `Resumen BESS` (ver 25.2) |
+| `Energia_Positiva`, `Energia_Negativa` (I/J) | `Medidores!Gen_Unidad` separada por signo, solo si `Ventana_No_Completa = 1` |
+| `SoC` (K) | copia de `Medidores!SoC` |
+| `Copia_Ventana` (P) | copia de `Medidores!Copia_Ventana` |
+| `CMg` (Q) | homologado por `Barra` + `Cuarto de Hora` contra `cmg.xlsx` (ver 25.3) |
+
+Los nombres de columna son **placeholders** derivados de los comentarios de la macro: el
+usuario adjuntó dos veces un archivo pensado para traer los encabezados reales de `Ecostos`,
+pero ambas veces solo incluía las hojas `FD`/`Subastas` (ya confirmadas en la sección 24). Se
+corrigen los nombres apenas se reciba el archivo correcto, sin reinterpretar el resto de la
+lógica ya implementada.
+
+Explícitamente **fuera de alcance** de esta etapa (decisión del usuario, "por etapas"):
+
+- El resto de columnas de `Actualizar_Calculos_Columnas`: `L`, `M`, `N`, `O`, `R`, `S`, `T`,
+  `U`, `W`, `X`, `Y`, `AB:AF`, `AG:AX`, `AZ`. Incluye la lógica de grupos por `G+P`
+  (`CrearClave2`), rankings por `Q`/`F` dentro de cada grupo, y la "Prorrata SSCC" — que el
+  usuario confirmó que **no** es un archivo externo sino una tabla dinámica derivable de
+  `Subastas` (`Filas: Configuración, Hora_mes` / `Columnas: Control` / `Valores: Cuenta de
+  Sub_Baj`), por lo que no es un bloqueador real para una futura etapa.
+- Toda la hoja `Calculo RE545` (la misma macro de traspaso la alimenta, pero con las columnas
+  I/J invertidas por la condición de `T`, y `R`/`T` propios que no aplican a `Calculo E
+  Costos`).
+
+## 25.5. `Pagos_BESS.xlsx`
+
+Salida nueva y separada de `Consolidado_entradas.xlsx`, a pedido explícito del usuario. Nombre
+y alcance provisorios (`ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"`). Por ahora tiene una sola
+hoja, `Calculo E Costos` (`HOJA_CALCULO_ECOSTOS`), con las columnas descritas en 25.4.

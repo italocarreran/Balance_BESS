@@ -23,7 +23,7 @@ resto (regla de expansión de contexto, convenciones, trampas conocidas).
    prueba disponible (una carpeta con la estructura de
    `docs/Plan_Traspaso_Python_Balance_BESS.md` §3.3), ejecutar
    `nucleo.ejecutar(carpeta)` sobre ella y revisar la hoja `Log` de
-   `Hoja_Medidas.xlsx`. No existe todavía un script de verificación
+   `Consolidado_entradas.xlsx`. No existe todavía un script de verificación
    automatizado (`scripts/verificar.sh`); si se crea uno, esta regla debe
    apuntar a él.
 6. Nunca reescribir el historial compartido (`push --force`,

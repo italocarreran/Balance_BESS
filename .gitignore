@@ -9,5 +9,5 @@ venv/
 *.egg-info/
 
 # Salidas y archivos de debug generados por caso (no son parte del repo)
-Hoja_Medidas.xlsx
+Consolidado_entradas.xlsx
 debug_*.xlsx
