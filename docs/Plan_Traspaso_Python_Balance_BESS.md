@@ -2101,6 +2101,57 @@ bloque principal. Son columnas de **control**, no entran en ningún cálculo pos
 
 ## 26.5. Lo que sigue pendiente de `Calculo RE545`
 
-- **`BI:CE`** — Componente 1 (`BI:BO`) y Componente 2 (`BQ:CE`), incluidas las fórmulas
-  matriciales `LARGE(IF(...))` de `BM` y `INDEX/MATCH` de `BS`, y el `Monto a compensar` final
-  (`CE`). Varias de estas dependen de `AW:BG`, así que van después.
+Nada: la hoja quedó completa. Lo único que **no** se replica son las columnas vacías del original
+(`W:AB`, `AV`, `BH`, `BP`, `BR` duplicada, `CB`, `CD`) y las celdas de totales de la fila 1-2
+(`H1`, `J1`, `R1`, `BL2`, `BT2`), que son sumas de control de la propia hoja, no datos por fila.
+
+## 26.6. Etapa 4: `BI:CE` (Componente 1 y Componente 2)
+
+| Columna | Nombre real | Lógica |
+|---|---|---|
+| `BI` | `Orden` | 1 en las 4 primeras filas; después `IF(T(i)=T(i-4), BI(i-4)+1, 1)` — **salto de 4 filas** (los 4 bloques de 15 minutos de cada hora). |
+| `BJ` | `Periodo` | `0, 15, 30, 45` en las 4 primeras; después `BJ(i-4)`. |
+| `BK` | `Curva Cmg Decendente promedio horario` | `SUMIFS(R, G=G, S=BI, T=T, E=BJ)`. |
+| `BL` | *(sin nombre)* | Ídem sobre `Q` (`CMg`). |
+| `BM` | `Curva Cmg Decendente` | `LARGE(IF(BK_todas = BK(i), BL_todas), BJ/15 + 1)` — el k-ésimo `BL` más grande entre **todas** las filas de la hoja con el mismo `BK`. Matricial. |
+| `BN` | `Edisp_Asig` | `MAX(0, MIN(MAX(0, Pmax*1000/4 - BS), BC(central,ventana) - suma de los BN anteriores del grupo))`. **`VLOOKUP` con índice 2 = `Pmax (MW)`**, distinto del índice 4 de `U`/`BC`. |
+| `BO` | `Total  C1_545` | `BN * BM`. |
+| `BQ` | `Energia Total` | `BS + BN`. |
+| `BR` | `Ventana de Valorizacion` | `= T`. |
+| `BS` | `inyeccion en el periodo del Cmg Descendente` | `I` de la **primera** fila con `BR`, `S=BI`, `G`, `E=BJ` iguales (`INDEX/MATCH` matricial). |
+| `BT` | `Energía ya Asignada` | Suma de los `BU` **posteriores** del mismo grupo. |
+| `BU` | `Asignacion Edisponible` | `IF(BS=0, 0, MAX(0, MIN(BQ, BC - BT - suma de BV del grupo)))`. |
+| `BV` | `SSCC ultima hora` | Ver 26.4 (ya se usaba para `BF`). |
+| `BW` | `inyeccion orden cronologico` | `I + J`. |
+| `BX` | `Energia Ultima hora` | El `BF` del resumen para esa central+ventana. |
+| `BY` | `Energía ya Asignada ultima hora` | `IF(BW<0, BX, suma de los BZ anteriores del grupo)`. |
+| `BZ` | `Energia Asignada Ultima hora` | `IF(BW<0, 0, 8) * BG(central,ventana)`. |
+| `CA` | `Asignacion Edisponible+SSCC ultima hora` | `BU + BZ`. |
+| `CC` | `Total C2_545` | `CA * BM`. |
+| `CE` | `Monto a compensar` | `MAX(suma(BO del grupo) - suma(CC del grupo), 0) * AU / suma(AU del grupo)`; si la suma de `AU` es 0, el `IFERROR` original devuelve 0. |
+
+**Las dos recursiones** (lo único que no se puede vectorizar de una): `BN` necesita los `BN`
+anteriores de su grupo → se recorre de arriba hacia abajo; `BU` necesita los `BU` **posteriores**
+→ se recorre de abajo hacia arriba. `BY` necesita los `BZ` anteriores, pero `BZ` no depende de
+`BY`, así que ahí alcanza con calcular `BZ` primero.
+
+Con esto se completan también `BD` (`check 1`) y `BE` (`check 2`) del resumen `AW:BG`, que
+dependían de `BN` y `BU` (`completar_checks_resumen_re545()`).
+
+## 26.7. Corrección importante: el `VLOOKUP` con índice 4 **no** es `Pmax`
+
+Al implementar `U` y `BC` se había usado `Pmax (MW)` para
+`VLOOKUP(G, Resumen!$B$8:$J$26, 4, 0)`. Es **Capacidad (MWh)**: el orden real de las 9 columnas de
+`Resumen BESS` es `Nombre activo`, `Pmax (MW)`, `Horas para descarga forzada`, `Capacidad (MWh)`,
+`Energía mínima`, `Barra inyección`, `% Energía sobre mínima`, `Ciclos max diarios`, `Eficiencia`
+— y es consistente con que `H` use el índice 6 para `Barra inyección`. Se corrigió en la misma
+sesión (`construir_dic_resumen_capacidad()`).
+
+Queda claro entonces qué índice usa cada columna:
+
+| Índice | Columna de `Resumen BESS` | La usan |
+|---|---|---|
+| 2 | `Pmax (MW)` | `AE`/`AF` de E Costos (`construir_dic_resumen_factor`), `BN` de RE545 |
+| 4 | `Capacidad (MWh)` | `U` y `BC` de RE545, `BC` de E Costos |
+| 6 | `Barra inyección` | `H` de las dos hojas |
+| 9 | `Eficiencia` | `V` de RE545 |

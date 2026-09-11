@@ -30,13 +30,12 @@ estado, no un historial.
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
   inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
   `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
-- Terminar `Calculo RE545`: falta `BI:CE` (Componentes 1 y 2, con
-  fórmulas matriciales `LARGE(IF(...))` e `INDEX/MATCH`, y el `Monto a
-  compensar` final) y, con eso, `BD`/`BE` del resumen (dependen de
-  `BN`/`BU`; son columnas de control, no alimentan nada). Ya están la
-  etapa base (`A:V`), las reservas por subasta (`AC:AU`) y el resumen
-  por central+ventana (`AW:BG`) — ver plan §26. `Calculo E Costos` está
-  completa.
+- `Calculo E Costos` y `Calculo RE545` están **completas** (ver plan §25
+  y §26). Lo que sigue son las hojas de salida que las consumen:
+  `PRORRATA_RETIROS`, `Compensacion total`, `Resumen` y el CSV
+  (`Verificacion_CSV`) — ninguna analizada todavía. El documento de
+  trazabilidad las marca como "capa de cálculo masiva, necesita rastreo
+  aguas arriba dedicado" (§7 de ese documento).
 - Confirmar contra un caso real cuál de las columnas de `Subastas` suma
   cada bloque de reservas de `Calculo RE545` (`AC:AH`, `AI:AN`, `AO:AT`).
   Se siguió la fórmula (posición `O`/`P`/`Q`), pero los nombres reales de
@@ -1007,3 +1006,45 @@ a lado con una columna en blanco entre medio. Regresión de E Costos y de las et
 pasan.
 
 **Pendiente:** `BI:CE` (Componentes 1 y 2) y, con eso, `BD`/`BE` del resumen.
+
+---
+
+## 2026-09-11 (11) — `Calculo RE545`, etapa 4: `BI:CE` — hoja completa
+
+Última etapa de RE545 en la misma sesión. Con esto quedan **completas las dos hojas de cálculo**
+del libro (`Calculo E Costos` y `Calculo RE545`).
+
+**Corrección de un error propio de las etapas anteriores de esta misma sesión** (queda anotado
+porque cambia valores ya commiteados): `VLOOKUP(G, Resumen!$B$8:$J$26, 4, 0)` **no es `Pmax
+(MW)`**, es **`Capacidad (MWh)`**. El orden real de las 9 columnas de `Resumen BESS` es `Nombre
+activo`, `Pmax (MW)`, `Horas para descarga forzada`, `Capacidad (MWh)`, `Energía mínima`, `Barra
+inyección`, `% Energía sobre mínima`, `Ciclos max diarios`, `Eficiencia` — y es consistente con
+que `H` use el índice 6 para `Barra inyección`. Afectaba a `U` (`EiniT`) y a `BC` (`Edisp_T`), que
+se habían implementado con `Pmax`. Se agregó `construir_dic_resumen_capacidad()` y se corrigieron
+las dos. Tabla de referencia de qué índice usa cada columna, en el plan §26.7. **`AE`/`AF` de
+E Costos siguen bien con `Pmax`** (ahí el VBA usa `Resumen!B:C`, o sea el índice 2), igual que `BN`
+de RE545.
+
+**Implementado (`calcular_componentes_re545()` + `completar_checks_resumen_re545()`):** `BI`
+(`Orden`, con el salto de 4 filas del original), `BJ` (`Periodo`), `BK`/`BL` (sumas por
+central+orden+ventana+periodo), `BM` (`LARGE(IF(...))` matricial: el k-ésimo `CMg` más grande
+entre todas las filas con el mismo `BK`, con `k = Periodo/15 + 1`), `BN` (`Edisp_Asig`), `BO`,
+`BQ`, `BR`, `BS` (`INDEX/MATCH` matricial), `BT`, `BU`, `BV`, `BW`, `BX`, `BY`, `BZ`, `CA`, `CC` y
+`CE` (`Monto a compensar`). Y con eso, `BD`/`BE` del resumen `AW:BG`.
+
+**Las dos recursiones, que es lo único que no se puede vectorizar:** `BN` necesita los `BN`
+anteriores de su grupo (se recorre de arriba hacia abajo) y `BU` necesita los `BU` **posteriores**
+(se recorre de abajo hacia arriba, porque `BT` mira las filas siguientes). `BY` necesita los `BZ`
+anteriores, pero `BZ` no depende de `BY`, así que ahí alcanza con calcular `BZ` primero.
+
+**Verificación:** un caso sintético de 8 filas (2 horas × 4 bloques) con todos los valores
+elegidos para poder calcular a mano: `BI` = 1,1,1,1,2,2,2,2; `BM` = 80,70,60,50 repetido; `BN`
+cortándose al llegar al `Edisp_T` del grupo (150, 150, 100, 0, ...); `BT`/`BU` con la recursión
+hacia arriba (400,400,400,400,300,200,100,0 y 0,0,0,0,100,100,100,100); `BY` como acumulado de
+`BZ`; y `CE` en sus dos ramas — la de `MAX(...,0)` (da 0) y una positiva calculada a mano
+(`(28.500 - 26.000)/8 = 312,5` por fila). Más el caso de inyección negativa (`BZ = 0`, `BY = BX`,
+`BU = 0` por `BS = 0`) y los dos checks del resumen. Regresión de E Costos (etapas 2-4) y de las
+etapas 1-3 de RE545: pasan.
+
+**Lo que sigue** (nuevo frente, ninguna analizada todavía): las hojas de salida que consumen estas
+dos — `PRORRATA_RETIROS`, `Compensacion total`, `Resumen` y el CSV.
