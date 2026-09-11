@@ -1746,20 +1746,20 @@ sugería el propio nombre de esa columna. Con esa confirmación, la clave equiva
 reconstruyó **por nombre de columna real**, no por posición:
 
 - tipo → `Subastas!Sub_Baj` (confirmado por el usuario)
-- central → `Subastas!Configuración` (**inferido**, no confirmado letra por letra: es el mismo
-  campo que usa la tabla dinámica Prorrata SSCC como identificador de central, y el que produce
-  una alineación semántica limpia con `Mes`/`Dia`/`Hora_dia` de Subastas contra `Mes`/`Dia`/
-  `Hora` de `Calculo E Costos` — `Propietario`, la otra columna candidata, se descartó porque es
-  el campo que se usa para filtrar por BESS/SAE, no para identificar una central puntual)
+- central → `Subastas!Configuración` (**confirmado por el usuario, sesión del 2026-09-11**:
+  "si se usa configuración" — no `Propietario`, que es el campo que se usa para filtrar por
+  BESS/SAE, no para identificar una central puntual). Hasta esa confirmación era una inferencia
+  razonada: mismo campo que usa la tabla dinámica Prorrata SSCC como identificador de central, y
+  el que produce una alineación semántica limpia con `Mes`/`Dia`/`Hora_dia` de Subastas contra
+  `Mes`/`Dia`/`Hora` de `Calculo E Costos`; también coincidía con que `Calculo E Costos!G` se
+  llama literalmente `Configuracion` — el mismo nombre de campo. Esta misma elección la reusan
+  `AG:AL`/`AM:AR` (Prorratas/FD homologado, plan §25.10), `AW` (tabla de umbrales, §25.11), y
+  las reservas por subasta de `Calculo RE545` (`AC:AU`, §26.3).
 - mes/día/hora → `Subastas!Mes`, `Subastas!Dia`, `Subastas!Hora_dia`
 
-**Pendiente de validar contra un caso real**: si al correr esto la cantidad de filas con `L=1`
-sale sospechosamente baja o en cero, la primera sospechosa es esta inferencia (`Configuración`
-en vez de `Propietario`). Dicho esto, el archivo de encabezados reales que confirmó los nombres
-de `Calculo E Costos` (25.8) subió bastante la confianza en esta elección: la columna `G` de
-`Calculo E Costos` se llama literalmente **`Configuracion`** — el mismo nombre de campo que
-`Subastas!Configuración` — lo que es un indicio fuerte (aunque no una prueba fila por fila) de
-que es el campo correcto para homologar centrales entre las dos hojas.
+**Sigue pendiente** (no es lo mismo que la homologación en sí, que ya está confirmada): validar
+fila por fila contra un caso real que la cantidad de filas con `L=1` sea razonable — eso confirma
+que el cruce funciona bien con datos reales.
 
 ## 25.7. Detalle columna por columna de la etapa 2
 

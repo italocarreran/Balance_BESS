@@ -16,15 +16,6 @@ estado, no un historial.
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
-- Validar contra un caso real la homologación de la columna `L` (y de
-  `AG:AL`/`AM:AR`, que dependen del mismo campo `Configuración`) de
-  `Calculo E Costos`. Ya no es una inferencia a ciegas — el archivo de
-  encabezados reales confirmó que `Calculo E Costos!G` se llama
-  literalmente `Configuracion` (mismo nombre de campo en `Subastas`) — y
-  el usuario confirmó por separado que el archivo de Subastas usado tiene
-  un corrimiento de columna respecto del original, lo que explica la
-  discrepancia que había con el VBA. Pero sigue sin confirmarse fila por
-  fila con datos reales.
 - Validar contra un caso real que `Subastas!Control` tenga exactamente los
   valores `CPF`/`CSF` (usado para separar la tabla dinámica Prorrata SSCC
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
@@ -1097,3 +1088,22 @@ que "solo RE545" no pide `SSCC_Desempeño_*` y que "solo E Costos" sí, y que un
 a mitad de camino (por archivo faltante) no toca el `Pagos_BESS.xlsx` ya existente. Regresión
 completa de las sesiones anteriores (Calculo E Costos etapas 2-4, Calculo RE545 etapas 1-4):
 pasa. No se probó la ventana tkinter en sí (sin entorno gráfico en esta sesión, como siempre).
+
+---
+
+## 2026-09-11 (13) — Confirmado: `Configuración` (no `Propietario`) para homologar centrales
+
+El usuario confirmó explícitamente: **"si se usa configuración"**. Cierra la última inferencia
+sin confirmar de las que quedaban documentadas — la homologación de central en `calcular_l()`
+(y, por extensión, en todo lo que reusa el mismo criterio: `AG:AL`/`AM:AR` de Prorratas/FD
+homologado, `AW` con la tabla de umbrales, `calcular_reservas_re545()` de `Calculo RE545`, y
+`calcular_subastas_energia_sscc()`) usa `Subastas!Configuración`, **no** `Subastas!Propietario`.
+No se tocó código: la implementación ya usaba `Configuración` desde que se resolvió por
+inferencia razonada (mismo nombre de campo que `Calculo E Costos!G`, alineación semántica con
+Mes/Dia/Hora_dia); esta sesión solo pasa esa elección de "inferida, pendiente de confirmar" a
+"confirmada por el usuario" en toda la documentación (`docs/Plan_Traspaso_Python_Balance_BESS.md`
+§25.6, `METODOLOGIA.md` §7, `BITACORA.md`).
+
+**Sigue pendiente** (no es lo mismo que la homologación en sí): validar fila por fila contra un
+caso real que la cantidad de filas con `L=1` sea razonable — eso confirma que el CRUCE funciona
+bien con datos reales, más allá de que ya esté confirmado qué columna usar.
