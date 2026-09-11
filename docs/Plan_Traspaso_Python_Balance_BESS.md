@@ -1705,24 +1705,22 @@ Salida nueva y separada de `Consolidado_entradas.xlsx`, a pedido explícito del 
 y alcance provisorios (`ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"`). Por ahora tiene una sola
 hoja, `Calculo E Costos` (`HOJA_CALCULO_ECOSTOS`), con las columnas descritas en 25.4 y 25.7.
 
-## 25.6. Etapa 2: `L, N, O, R, S, T, U, W, X, Y, AB, AC, AD` — y lo que sigue bloqueado
+## 25.6. Etapa 2: `L, N, O, R, S, T, U, W, X, Y, AB, AC, AD` — y lo que en su momento quedó bloqueado
 
 Segunda etapa de `Actualizar_Calculos_Columnas`, implementada después de que el usuario pidiera
 explícitamente continuar ("necesito que termines con el calculo de Ecostos"). Antes de
-implementar se encontró un problema real: buena parte de las columnas restantes dependen de
-datos que **no existen en ningún archivo ya mapeado** en la migración:
+implementar se encontró un problema real: buena parte de las columnas restantes dependían de
+datos que en ese momento **no existían en ningún archivo ya mapeado** en la migración:
 
-- Una hoja `Resumen` del libro original — **distinta** de `Centrales.xlsx!Resumen BESS` — con
-  una tabla central→factor (columnas B:C desde la fila 8) y un umbral único en `H8`. La usan
-  `M` (umbral) y `AE`/`AF` (factor), y por lo tanto todo lo que depende de `AE`/`AF`: `AS`, `AT`
-  y toda la cadena `AG:AX`/`AZ`.
-- Un umbral de subida/bajada por `Configuración+P` (`Subastas!U:W` en el código VBA), usado
-  solo en `AU`/`AV`/`AW`/`AZ`.
+- Una hoja `Resumen` del libro original con una tabla central→factor (columnas B:C desde la
+  fila 8) y un umbral único en `H8`, usada por `M` (umbral) y `AE`/`AF` (factor). **Resuelto en
+  25.8**: es la misma tabla que `Centrales.xlsx!Resumen BESS`, no una hoja aparte.
+- Un umbral de subida/bajada por `Configuración+P`, usado en `AU`/`AV`/`AW`/`AZ`. **Sigue sin
+  resolverse** (ver 25.8 y "Pendientes abiertos" en `BITACORA.md`).
 
-Estas dos cosas **siguen sin resolverse** (ver "Pendientes abiertos" en `BITACORA.md`): no se
-adivinan. Por eso esta etapa cubre únicamente lo que **no** depende de la hoja `Resumen`: `L`,
-`N`, `O`, `R`, `S`, `T`, `U`, `W`, `X`, `Y`, `AB`, `AC`, `AD`. Quedan explícitamente pendientes:
-`M`, `AE`, `AF` y todo `AG:AZ`.
+En ese momento se implementó únicamente lo que no dependía de la hoja `Resumen`: `L`, `N`, `O`,
+`R`, `S`, `T`, `U`, `W`, `X`, `Y`, `AB`, `AC`, `AD`. `M`, `AE` y `AF` se agregaron después (25.8);
+`AG:AZ` sigue pendiente.
 
 ### El problema de la columna `L` y cómo se resolvió
 
@@ -1757,7 +1755,11 @@ reconstruyó **por nombre de columna real**, no por posición:
 
 **Pendiente de validar contra un caso real**: si al correr esto la cantidad de filas con `L=1`
 sale sospechosamente baja o en cero, la primera sospechosa es esta inferencia (`Configuración`
-en vez de `Propietario`).
+en vez de `Propietario`). Dicho esto, el archivo de encabezados reales que confirmó los nombres
+de `Calculo E Costos` (25.8) subió bastante la confianza en esta elección: la columna `G` de
+`Calculo E Costos` se llama literalmente **`Configuracion`** — el mismo nombre de campo que
+`Subastas!Configuración` — lo que es un indicio fuerte (aunque no una prueba fila por fila) de
+que es el campo correcto para homologar centrales entre las dos hojas.
 
 ## 25.7. Detalle columna por columna de la etapa 2
 
@@ -1773,7 +1775,75 @@ Implementadas en `nucleo.py` (`completar_calculo_e_costos_grupos()` y sus funcio
 | `Y`, `AB` | Por grupo: de las filas con `L=1` y `Energia_Positiva≠0`, ordenadas por `CMg` descendente, la fila en la posición `j` (dentro del orden ORIGINAL del grupo) recibe el `Cuarto de Hora` (`Y`) y el `CMg` (`AB`) de la `j`-ésima fila calificada; si el grupo tiene menos filas calificadas que filas totales, las posiciones sobrantes toman el `Cuarto de Hora` de las filas NO calificadas en su orden original (y `AB` queda vacío). |
 | `AC`, `AD` | Igual que `Y`/`AB` pero para `Energia_Negativa≠0`, ordenadas por `CMg` **ascendente**. |
 
-Bloqueadas (ver 25.6): `M`, `AE`, `AF`, `AG:AX`, `AZ`.
+En su momento bloqueadas, resueltas en 25.8: `M`, `AE`, `AF`. Todavía pendiente: `AG:AX`, `AZ`
+(ver 25.9).
 
 `generar_pagos_bess()` ahora exige también la hoja `Subastas` de `Consolidado_entradas.xlsx`
 (además de `Medidores`) para poder calcular `L`.
+
+## 25.8. `M`, `AE`, `AF` — la hoja "Resumen" resultó ser `Resumen BESS`
+
+El usuario adjuntó `Centrales.xlsx` (real) y un `Libro1.xlsx` con 4 hojas: `FD`, `subastas`,
+`E COSTOS` y — la pieza que faltaba — **`Resumen`**. Comparando esa hoja `Resumen` del libro
+original contra `Centrales.xlsx!Resumen BESS`, resultaron ser **la misma tabla**: mismos 9
+encabezados en el mismo orden (`Nombre activo`, `Pmax (MW)`, `Horas para descarga forzada`,
+`Capacidad (MWh)`, `Energía mínima`, `Barra inyección`, `% Energía sobre mínima (indicador
+nuevo ciclo)`, `Ciclos max diarios`, `Eficiencia`). No hacía falta una hoja nueva ni un archivo
+aparte — la sección 25.2 ya venía usando esta misma tabla para `H`/`Barra`.
+
+Con eso, `Resumen!B:C` (factor, `AE`/`AF`) y `Resumen!H8` (umbral, `M`) se resuelven así:
+
+- **Factor** (`AE`/`AF`): columna `Pmax (MW)` de `Resumen BESS`, homologada por `Nombre activo`
+  igual que `Barra inyección` (`construir_dic_resumen_factor()`).
+- **Umbral** (`M`): en el archivo real, la celda `H8` cae justo en la primera fila de datos
+  (fila de encabezados = 7, primera central = fila 8), columna `% Energía sobre mínima
+  (indicador nuevo ciclo)`. Se toma igual acá: el valor de esa columna en la **primera fila con
+  nombre de central** de `Resumen BESS` (no una fila fija — el encabezado de `Centrales.xlsx`
+  no siempre cae en la misma posición, ver `_leer_resumen_bess()`).
+
+Columnas agregadas en `nucleo.py` (`calcular_m()`, `_calcular_asignacion_energia()`,
+`calcular_ae_af()`):
+
+| Columna | Lógica |
+|---|---|
+| `M` | `1` si `SoC > umbral`, si no `0`. |
+| `AE`, `AF` | Por grupo (central+ventana): reparte el máximo de `N` (para `AE`) / `O` (para `AF`) del grupo en bloques de 15 minutos según el `Bloque ordenado` (`W`) de cada fila y el factor (`Pmax`) de la central — replica `CalcularAsignacionEnergia`: el bloque recibe el 100% del factor si cae dentro de la cantidad de bloques llenos, una fracción en el bloque siguiente si sobra un resto, y 0 en el resto. `AF` lleva el signo cambiado. Si la central no tiene factor, o el factor es 0, `AE`/`AF` quedan en blanco (`pd.NA`) — equivalente a los `#N/A`/`#DIV/0!` del original, sin fabricar un tipo de error de Excel en Python. |
+
+## 25.9. Encabezados reales de `Calculo E Costos` — y lo que queda pendiente
+
+El mismo `Libro1.xlsx` trae la hoja `E COSTOS` con los encabezados reales de **toda** la hoja
+(fila 3 tiene el nombre de cada columna; filas 1-2 son títulos de grupo). Se aplicaron a todas
+las columnas ya implementadas (`NOMBRES_CALCULO_E_COSTOS` en `nucleo.py`, mismo patrón que
+`NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`: se calcula todo con los nombres/letras internos usados
+hasta acá y se renombra recién al final, en `completar_calculo_e_costos_grupos()`):
+
+| Interno | Real | Interno | Real |
+|---|---|---|---|
+| `Mes` | `Mes` | `S` | `Valorizacion Descarga` |
+| `Dia` | `Dia` | `T` | `Valorizacion Carga` |
+| `Hora` | `Hora` | `U` | `Total` |
+| `Hora Mes` | `Hora mes` | `W` | `Bloque ordenado` |
+| `Minutos` | `Minuto` | `X` | `Ciclo` |
+| `Cuarto de Hora` | `Bloque horario` | `Y` | `Bloque Mes Descarga` |
+| `clave` | `Configuracion` | `AB` | `Curva monotona CMg Descarga` |
+| `Barra` | `Barra` | `AC` | `Bloque Mes  Carga` (dos espacios, tal cual el archivo) |
+| `Energia_Positiva` | `Descarga kWh` | `AD` | `Curva monotona CMg Carga` |
+| `Energia_Negativa` | `Carga kWh` | `AE` | `Energía descargada` |
+| `SoC` | `SoC %` | `AF` | `Energía cargada` |
+| `Copia_Ventana` | `Ciclo de Carga del mes` | `L` | `Adj SSCC` |
+| `CMg` | `CMg` | `M` | `SoC sobre el minimo` |
+| `N` | `Energía SSCC (-) por remunerar` | `O` | `Energía SSCC (+) por remunerar` |
+| `R` | `ranking cmg` | | |
+
+Lo que queda pendiente (`AG:AZ`) según esta misma hoja:
+
+| Real | Rol |
+|---|---|
+| `CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)` (`AG:AL`, grupo "Prorratas") | Necesitan la tabla dinámica **Prorrata SSCC** (`Filas: Configuración, Hora_mes` / `Columnas: Control` / `Valores: Cuenta de Sub_Baj`, confirmada por el usuario pero todavía no construida en Python). |
+| `CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)` (`AM:AR`, grupo "FD") | Necesitan `FD!CSF(±)`/`CPF(±)` (ya los tenemos) **más una categoría `CTF`** que no existe en nuestra hoja `FD` (solo tiene bloques CSF y CPF) — origen todavía sin identificar. |
+| `Energía descarga/carga con FD` (`AS`, `AT`) | Combinan lo de arriba con `AE`/`AF`. |
+| `Ingreso descarga`, `Costo carga`, `Descuento FD`, `Total` (`AU:AX`, grupo "Componente 1") | `AW` (Descuento FD) necesita el umbral de subida/bajada por central+ventana — en el `.xlsm` original la referencia lleva a `Subastas!U:W`, pero el archivo de encabezados reales muestra en cambio `Subastas!R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`, `BAJADA`) como una tabla de resumen aparte, sin filas de datos de ejemplo — la posición exacta de esa tabla **sigue sin confirmarse**. |
+| `Monto a compensar` (`AZ`) | Depende de todo lo anterior. |
+
+No se implementa nada de esto todavía: falta resolver la Prorrata SSCC (pivot), encontrar el
+origen de `CTF`, y confirmar la posición real de la tabla de umbrales de Subastas.

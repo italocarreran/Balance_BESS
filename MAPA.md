@@ -101,25 +101,25 @@ de.
   alcance), K/`SoC` (copia de `Medidores!SoC`), P/`Copia_Ventana` (copia de
   `Medidores!Copia_Ventana`) y Q/`CMg` (homologado por `Barra` + `Cuarto de
   Hora` normalizado, vía `NormalizaCuarto`). Va a un archivo **separado**
-  (`Pagos_BESS.xlsx`, nombre provisorio) a pedido explícito del usuario. Los
-  nombres de columna son placeholders derivados de los comentarios de la
-  macro — todavía no confirmados contra un archivo real (pendiente: el
-  usuario adjuntó dos veces un archivo de encabezados que no traía la hoja
-  `Ecostos`).
+  (`Pagos_BESS.xlsx`, nombre provisorio) a pedido explícito del usuario.
 
-  **Calculo E Costos, etapa 2** (plan §25.6/25.7): agrega `L, N, O, R, S, T,
-  U, W, X, Y, AB, AC, AD`. `L` (¿participó en una subasta?) homologa contra
-  `Subastas!Sub_Baj` (confirmado por el usuario) + `Configuración`+`Mes`+
-  `Dia`+`Hora_dia` (la central-clave es **inferida**, no confirmada letra
-  por letra — ver plan §25.6, puede estar mal si `L` da sospechosamente
-  bajo). `N/O/R/Y/AB/AC/AD` se calculan por grupo (central=`clave` +
+  **Calculo E Costos, etapa 2** (plan §25.6-25.9): agrega `L, M, N, O, R, S,
+  T, U, W, X, Y, AB, AC, AD, AE, AF`. `L` (¿participó en una subasta?)
+  homologa contra `Subastas!Sub_Baj` (confirmado por el usuario) +
+  `Configuración`+`Mes`+`Dia`+`Hora_dia`; `M` (¿SoC sobre el mínimo?) y
+  `AE`/`AF` (energía asignada por bloques) usan la hoja `Resumen BESS` de
+  `Centrales.xlsx` — resultó ser la MISMA tabla que la hoja `Resumen` del
+  libro original (no hacía falta una hoja nueva, ver plan §25.8).
+  `N/O/R/Y/AB/AC/AD/AE/AF` se calculan por grupo (central=`clave` +
   ventana=`Copia_Ventana`); `S/T/U` no agrupan; `W/X` son **globales** (no
-  por grupo). Bloqueadas: `M`, `AE`, `AF`, `AG:AX`, `AZ` — dependen de una
-  hoja `Resumen` del libro original (tabla central→factor + un umbral
-  único en `H8`) **distinta** de `Centrales.xlsx!Resumen BESS`, que
-  todavía no está mapeada en la migración; tampoco el umbral de subida/
-  bajada que usan `AU/AV/AW/AZ`. Toda la hoja `Calculo RE545` también
-  queda fuera.
+  por grupo). **Nombres de columna reales, confirmados contra un archivo
+  real** (`NOMBRES_CALCULO_E_COSTOS`, plan §25.9) — ya no son placeholders.
+  Bloqueadas: `AG:AX`, `AZ` — dependen de la tabla dinámica Prorrata SSCC
+  (confirmada pero todavía no construida en Python), de una categoría
+  `CTF` en `FD` que no existe en nuestra hoja `FD`, y de un umbral de
+  subida/bajada por central+ventana cuya posición real en `Subastas`
+  todavía no está clara. Toda la hoja `Calculo RE545` también queda
+  fuera.
 - **Consume:**
   - `<CARPETA_BASE>/Medidas/Medidas_SAE.xlsx` (hoja `Medidas`)
   - Un archivo `.xlsx` dentro de `<CARPETA_BASE>/Medidas/` cuyo nombre
@@ -162,15 +162,22 @@ de.
     texto (replica `NormalizaCuarto`); `construir_dic_cmg(df_cmg)` →
     `dict` clave `"BARRA|CUARTO"` → valor Q; `construir_mapa_barra(resumen_bess)`
     → `dict` nombre de central normalizado → barra de inyección;
+    `construir_dic_resumen_factor(resumen_bess)` → `(dict` nombre de central
+    normalizado → `Pmax (MW), umbral_soc_minimo)` (misma hoja `Resumen BESS`
+    que `construir_mapa_barra`, ver plan §25.8);
     `construir_calculo_e_costos(df_medidores, mapa_barra, dic_cmg, registrar=print)`
     → `df_ecostos`; `escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print)`.
   - Calculo E Costos (etapa 2): `calcular_l(df_ecostos, df_subastas)`,
-    `calcular_n_o(df_ecostos)`, `calcular_r_ecostos(df_ecostos)` (sufijo
-    `_ecostos` a propósito: Medidores ya tiene su propia `calcular_r()`,
-    lógica no relacionada — no fusionarlas), `calcular_s_t_u(df_ecostos)`,
-    `calcular_w_x(df_ecostos)`, `calcular_y_ab_ac_ad(df_ecostos)`, todas
-    combinadas por `completar_calculo_e_costos_grupos(df_ecostos, df_subastas, registrar=print)`
-    → `df_ecostos` con L/N/O/R/S/T/U/W/X/Y/AB/AC/AD agregadas.
+    `calcular_m(df_ecostos, umbral_soc_minimo)`, `calcular_n_o(df_ecostos)`,
+    `calcular_r_ecostos(df_ecostos)` (sufijo `_ecostos` a propósito:
+    Medidores ya tiene su propia `calcular_r()`, lógica no relacionada — no
+    fusionarlas), `calcular_s_t_u(df_ecostos)`, `calcular_w_x(df_ecostos)`,
+    `calcular_y_ab_ac_ad(df_ecostos)`, `calcular_ae_af(df_ecostos, dic_factor)`
+    (usa `_calcular_asignacion_energia()`), todas combinadas por
+    `completar_calculo_e_costos_grupos(df_ecostos, df_subastas, dic_factor, umbral_soc_minimo, registrar=print)`
+    → `df_ecostos` con L/M/N/O/R/S/T/U/W/X/Y/AB/AC/AD/AE/AF agregadas Y
+    renombrada a nombres reales (`NOMBRES_CALCULO_E_COSTOS`, plan §25.9) —
+    mismo patrón que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`.
   - `construir_medidores(df_sae, df_soc, anio, mes, ruta_ofertas, diccionario, registrar=print)`
     → `(df_medidores, avisos, df_wxy, df_resumen_ventana)`.
   - `escribir_salida(df, ruta_salida, avisos, incidencias, df_wxy=None, df_resumen_ventana=None, df_cmg=None, df_fd_csf=None, df_fd_cpf=None, df_subastas=None, ruta_existente=None, hojas_regenerar=None, registrar=print)`

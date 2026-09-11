@@ -16,35 +16,30 @@ estado, no un historial.
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
-- Obtener del usuario los encabezados reales de la hoja `Calculo E Costos`
-  ("Ecostos"): las dos veces que adjuntó un archivo pensado para esto solo
-  traía las hojas `FD`/`Subastas` (ya confirmadas). Mientras tanto,
-  `construir_calculo_e_costos()` usa nombres placeholder derivados de los
-  comentarios de la macro (ver plan §25.4, `METODOLOGIA.md` §7).
-- **Bloqueante para terminar `Calculo E Costos`**: ubicar la hoja `Resumen`
-  del libro original (tabla central→factor en B:C desde la fila 8, y un
-  umbral único en `H8`) — es **distinta** de `Centrales.xlsx!Resumen BESS`
-  y todavía no está mapeada en la migración. La usan `M`, `AE`, `AF` y por
-  lo tanto todo `AS`, `AT`, `AG:AX`, `AZ`. También falta el umbral de
-  subida/bajada por central+ventana que usan `AU/AV/AW/AZ` (en el `.xlsm`
-  original vive en `Subastas!U:W`, calculado con fórmulas propias de esa
-  hoja — no se encontró evidencia de que sea un archivo externo, pero
-  tampoco está confirmado). No adivinar: preguntarle al usuario dónde vive
-  cada uno antes de implementar `M`, `AE`, `AF` y todo `AG:AZ`.
+- **Bloqueante para terminar `Calculo E Costos` (`AG:AZ`)**: construir la
+  "Prorrata SSCC" como tabla dinámica derivada de `Subastas` (confirmado
+  por el usuario que no es un archivo externo: `Filas: Configuración,
+  Hora_mes` / `Columnas: Control` / `Valores: Cuenta de Sub_Baj`) —
+  necesaria para `AG:AL`. Encontrar el origen de una categoría `CTF` que
+  usa `AM:AR` y no existe en nuestra hoja `FD` (que solo tiene bloques
+  CSF/CPF). Confirmar la posición real de la tabla de umbrales de subida/
+  bajada en `Subastas` — el archivo de encabezados reales muestra
+  `Subastas!R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`, `BAJADA`)
+  sin filas de datos de ejemplo, pero el código VBA hacía referencia a
+  `Subastas!U:W`; no coinciden y ninguna de las dos está confirmada contra
+  datos reales (usada en `AW`/`AZ`). Ver plan §25.9.
 - Validar contra un caso real la homologación de la columna `L` de
-  `Calculo E Costos`: usa `Subastas!Configuración` como campo de central
-  (inferido, no confirmado letra por letra — ver plan §25.6). Si al correr
-  con datos reales la cantidad de filas con `L=1` sale sospechosamente
-  baja o en cero, revisar si debería ser `Subastas!Propietario` en su
-  lugar.
-- Completar `M, AE, AF, AG:AX, AZ` de `Calculo E Costos` (bloqueados, ver
-  arriba) y toda la hoja `Calculo RE545` — la etapa base (H, CMg, traspaso
-  de Medidores) y la etapa 2 (L, N, O, R, S, T, U, W, X, Y, AB, AC, AD) ya
-  están implementadas (ver entradas de esta sesión y la anterior). Incluye
-  construir la "Prorrata SSCC" como tabla dinámica derivada de `Subastas`
-  (confirmado por el usuario que no es un archivo externo: `Filas:
-  Configuración, Hora_mes` / `Columnas: Control` / `Valores: Cuenta de
-  Sub_Baj`) — necesaria para `AG/AH/AJ/AK`.
+  `Calculo E Costos`: usa `Subastas!Configuración` como campo de central.
+  Ya no es una inferencia a ciegas — el archivo de encabezados reales
+  confirmó que `Calculo E Costos!G` se llama literalmente `Configuracion`
+  (mismo nombre de campo en ambas hojas) — pero sigue sin confirmarse
+  fila por fila. Si al correr con datos reales la cantidad de filas con
+  `L=1` sale sospechosamente baja o en cero, revisar si debería ser
+  `Subastas!Propietario` en su lugar.
+- Completar `AG:AX, AZ` de `Calculo E Costos` (bloqueados, ver arriba) y
+  toda la hoja `Calculo RE545` — la etapa base, la etapa 2 (L, N, O, R, S,
+  T, U, W, X, Y, AB, AC, AD) y M/AE/AF ya están implementadas (ver
+  entradas de esta sesión y las dos anteriores).
 - Una vez completo `Calculo E Costos`, resolver `Subastas!N` ("Energía
   SSCC"), que depende de columnas de esa hoja.
 - Confirmar si la carpeta `Subastas/` (creada esta sesión, no existe en
@@ -658,3 +653,65 @@ grupo) — todas las columnas coincidieron con el cálculo a mano. Un segundo te
 `Pagos_BESS.xlsx` con los tipos y valores esperados. Sin persistir en el repo (convención de
 pruebas). No se probó contra un caso real ni contra la planilla 11 — sigue pendiente, y ahora es
 más urgente por la inferencia de `L` sin confirmar.
+
+---
+
+## 2026-09-11 (5) — `Calculo E Costos`: M, AE, AF + nombres reales de toda la hoja
+
+El usuario adjuntó `Centrales.xlsx` (real) y un `Libro1.xlsx` con 4 hojas: `FD`, `subastas`,
+`E COSTOS` y `Resumen` — respondiendo al bloqueo de la sesión anterior ("Que necesitas de la
+hoja original de resumen porque eso es todo lo que hay... puede que los indices esten
+diferente").
+
+**Hallazgo clave**: la hoja `Resumen` del libro original y `Centrales.xlsx!Resumen BESS` son
+**la misma tabla** — mismos 9 encabezados en el mismo orden (`Nombre activo`, `Pmax (MW)`,
+`Horas para descarga forzada`, `Capacidad (MWh)`, `Energía mínima`, `Barra inyección`, `%
+Energía sobre mínima (indicador nuevo ciclo)`, `Ciclos max diarios`, `Eficiencia`). No hacía
+falta una hoja nueva: el "factor" de `AE`/`AF` es la columna `Pmax (MW)`, y el "umbral" de `M`
+es el valor de `% Energía sobre mínima...` en la primera fila de datos (que en el archivo real
+cae justo en `H8`, de ahí la referencia fija del VBA original).
+
+**Implementado en `nucleo.py`:**
+
+- `construir_dic_resumen_factor(resumen_bess)`: arma central→`Pmax (MW)` y el umbral de SoC
+  mínimo, a partir de la MISMA hoja que ya usa `construir_mapa_barra()` (misma búsqueda por
+  nombre de columna normalizado, no por posición).
+- `calcular_m(df_ecostos, umbral_soc_minimo)`: `1` si `SoC > umbral`, si no `0`.
+- `_calcular_asignacion_energia(bloque, energia_maxima, factor)` + `calcular_ae_af(df_ecostos, dic_factor)`:
+  replica `CalcularAsignacionEnergia` — reparte el máximo de `N`/`O` del grupo en bloques de 15
+  minutos según el orden `W` y el factor de la central; sin factor o factor=0, queda en blanco
+  (`pd.NA`) en vez de fabricar un error de Excel. `Int()` de VBA se replica con `math.floor`
+  (redondea hacia abajo incluso en negativos, distinto de truncar hacia cero).
+- `completar_calculo_e_costos_grupos()` ahora también agrega `M`, `AE`, `AF`, y al final
+  renombra TODAS las columnas con `NOMBRES_CALCULO_E_COSTOS` (nombres reales, de la hoja
+  `E COSTOS` de `Libro1.xlsx` — fila 3 tiene el encabezado real de cada columna). Mismo patrón
+  que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`: todo el cálculo interno sigue usando los nombres/
+  letras de siempre, el rename es el último paso antes de escribir.
+- `generar_pagos_bess()` ahora también arma `dic_factor`/`umbral_soc_minimo` (de la misma
+  lectura de `Centrales.xlsx` que ya hacía para `mapa_barra`) y se los pasa a
+  `completar_calculo_e_costos_grupos()`.
+
+**Confirmación indirecta de la columna `L`**: el archivo de encabezados reales muestra que
+`Calculo E Costos!G` se llama literalmente `Configuracion` — el mismo nombre de campo que
+`Subastas!Configuración`, que es lo que se venía usando (inferido) para homologar centrales en
+`calcular_l()`. Sube la confianza en esa elección, aunque sigue sin confirmarse fila por fila.
+
+**Lo que sigue pendiente (`AG:AZ`)**, según la misma hoja `E COSTOS`:
+- `AG:AL` ("Prorratas") necesitan la tabla dinámica Prorrata SSCC, todavía no construida.
+- `AM:AR` ("FD") necesitan una categoría `CTF` que no existe en nuestra hoja `FD` (solo tiene
+  CSF/CPF) — origen sin identificar.
+- `AW` (Descuento FD) necesita el umbral de subida/bajada de Subastas: el archivo de
+  encabezados reales muestra `Subastas!R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`,
+  `BAJADA`) como una tabla de resumen aparte, pero sin filas de datos de ejemplo, y no coincide
+  con `Subastas!U:W` que usaba el código VBA — la posición real sigue sin confirmarse.
+
+**Verificación:** tests sintéticos (sin persistir en el repo) para `construir_dic_resumen_factor`
+(incluye el caso "primera fila con nombre válido" cuando hay filas sin central), `calcular_m`,
+`_calcular_asignacion_energia` (bloque completo y bloque parcial con fracción), `calcular_ae_af`
+(incluye el caso "central sin factor -> NA"), y que `completar_calculo_e_costos_grupos()`
+devuelve exactamente las columnas de `NOMBRES_CALCULO_E_COSTOS` en ese orden. Se repitió también
+el test de regresión completo de la etapa 2 (2 grupos, empates en ranking, etc. de la sesión
+anterior) contra los nombres reales, sin cambios en los valores esperados. Un test de punta a
+punta corrió `generar_pagos_bess()` completo con archivos reales de `Centrales.xlsx`/`cmg.xlsx`/
+`Consolidado_entradas.xlsx`, confirmando que las 28 columnas de `Pagos_BESS.xlsx` salen con los
+nombres reales y los tipos esperados. No se probó contra un caso real ni contra la planilla 11.

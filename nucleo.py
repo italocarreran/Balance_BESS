@@ -7,6 +7,7 @@ testear sin abrir la ventana.
 """
 
 import calendar
+import math
 import re
 import unicodedata
 from pathlib import Path
@@ -2152,6 +2153,75 @@ def construir_mapa_barra(resumen_bess):
     return mapa
 
 
+def construir_dic_resumen_factor(resumen_bess):
+    """
+    Arma nombre_central -> factor (columna "Pmax (MW)") y el umbral
+    global de SoC minimo, a partir de la MISMA hoja "Resumen BESS" de
+    Centrales.xlsx que ya usa construir_mapa_barra().
+
+    Replica Resumen!B:C (factor, usado en AE/AF) y Resumen!H8
+    (umbral, usado en M) de Actualizar_Calculos_Columnas. El usuario
+    confirmo con un archivo real que la hoja "Resumen" del libro
+    original es la MISMA tabla que "Resumen BESS" (los mismos 9
+    encabezados: Nombre activo...Eficiencia) -- no hace falta una
+    hoja nueva ni un archivo aparte.
+
+    El umbral (celda fija H8 en el original) es, en la practica, el
+    valor de "% Energia sobre minima" de la PRIMERA fila de datos de
+    la tabla -- aca se toma igual (primera fila con nombre de
+    central, no una fila fija: el encabezado de Centrales.xlsx no
+    esta siempre en la misma posicion, ver _leer_resumen_bess()).
+    """
+
+    columna_nombre = None
+    columna_factor = None
+    columna_umbral = None
+
+    for columna in resumen_bess.columns:
+        clave = normalizar(columna)
+        if columna_nombre is None and "nombre" in clave and "activ" in clave:
+            columna_nombre = columna
+        if columna_factor is None and "pmax" in clave:
+            columna_factor = columna
+        if columna_umbral is None and "energia sobre" in clave:
+            columna_umbral = columna
+
+    if columna_nombre is None or columna_factor is None or columna_umbral is None:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} debe "
+            f"tener columnas de nombre de central ('Nombre activo'), "
+            f"factor ('Pmax (MW)') y umbral ('% Energía sobre mínima "
+            f"(indicador nuevo ciclo)'). Columnas encontradas: "
+            f"{list(resumen_bess.columns)}"
+        )
+
+    dic_factor = {}
+
+    for _, fila in resumen_bess.iterrows():
+
+        nombre = fila[columna_nombre]
+        if pd.isna(nombre):
+            continue
+
+        factor = fila[columna_factor]
+        dic_factor[normalizar(nombre)] = (
+            pd.NA if pd.isna(factor) else float(factor)
+        )
+
+    filas_con_nombre = resumen_bess[columna_nombre].notna()
+
+    if not filas_con_nombre.any():
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} no "
+            f"tiene filas de datos para sacar el umbral de SoC minimo."
+        )
+
+    primer_indice = resumen_bess.index[filas_con_nombre][0]
+    umbral_soc_minimo = float(resumen_bess.loc[primer_indice, columna_umbral])
+
+    return dic_factor, umbral_soc_minimo
+
+
 def construir_calculo_e_costos(
     df_medidores, mapa_barra, dic_cmg, registrar=print
 ):
@@ -2263,26 +2333,39 @@ def escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print):
 
 
 # ============================================================
-# CALCULO E COSTOS (etapa 2): L, N, O, R, S, T, U, W, X, Y, AB, AC, AD
+# CALCULO E COSTOS (etapa 2): L, M, N, O, R, S, T, U, W, X, Y, AB,
+# AC, AD, AE, AF
 #
 # Replica esa parte de Actualizar_Calculos_Columnas (modulo
-# J_Calculo_Ecostos, ver plan seccion 25.6/25.7). Quedan FUERA de
-# esta etapa (bloqueados): M, AE, AF y todo AG:AZ -- dependen de una
-# hoja "Resumen" del libro original (con una tabla central->factor y
-# un umbral unico en H8) que es DISTINTA de Centrales.xlsx!Resumen
-# BESS y todavia no esta mapeada en la migracion. No se adivina esa
-# tabla: falta que el usuario diga donde vive.
+# J_Calculo_Ecostos, ver plan seccion 25.6/25.7). El usuario confirmo
+# con un archivo real que la hoja "Resumen" del libro original (que
+# M usa para el umbral, y AE/AF para el factor por central) es la
+# MISMA tabla que Centrales.xlsx!Resumen BESS -- no hacia falta una
+# hoja nueva. Ver construir_dic_resumen_factor().
 #
-# ADVERTENCIA sobre L (ver BITACORA): el VBA original arma la clave
-# de match contra Subastas usando columnas por posicion que, en el
-# archivo de trazabilidad, no coinciden con los encabezados reales
-# confirmados contra un caso real. El usuario confirmo que el "tipo"
-# (BAJADA/SUBIDA) esta en Subastas!Sub_Baj. La central equivalente se
-# infirio como Subastas!Configuración (mismo campo que usa la tabla
-# dinamica Prorrata SSCC como identificador de central) -- TODAVIA NO
-# validado contra un caso real. Si al correr esto la cantidad de
-# filas con L=1 sale sospechosamente baja o en cero, es la primera
-# sospechosa a revisar.
+# Quedan FUERA de esta etapa (bloqueados): AG:AZ -- dependen de la
+# tabla dinamica "Prorrata SSCC" (todavia no se construye en Python,
+# aunque el usuario ya confirmo su estructura: Filas: Configuración,
+# Hora_mes / Columnas: Control / Valores: Cuenta de Sub_Baj) y de un
+# umbral de subida/bajada por central+ventana (en el .xlsm original
+# vive en Subastas!R:V o U:W segun la fuente -- la posicion exacta
+# todavia no esta clara ni siquiera con el archivo de encabezados
+# real, ver BITACORA) y de una categoria "CTF" en FD que no existe en
+# nuestra hoja FD (que solo tiene CSF/CPF).
+#
+# ADVERTENCIA sobre L (parcialmente resuelta, ver BITACORA): el VBA
+# original arma la clave de match contra Subastas usando columnas por
+# posicion que, en el archivo de trazabilidad, no coincidian con los
+# encabezados reales. El usuario confirmo que el "tipo" (BAJADA/
+# SUBIDA) esta en Subastas!Sub_Baj. La central equivalente se uso
+# como Subastas!Configuración, y un archivo real posterior confirmo
+# que "Calculo E Costos"!G se llama literalmente "Configuracion" --
+# el mismo campo en ambas hojas, lo que da bastante mas confianza en
+# esta homologacion (aunque no es una confirmacion letra por letra
+# del match, solo de que el NOMBRE del campo coincide en las dos
+# hojas). Si al correr esto la cantidad de filas con L=1 sale
+# sospechosamente baja o en cero, sigue siendo la primera sospechosa
+# a revisar.
 # ============================================================
 
 def _normaliza_valor_vba(valor):
@@ -2548,17 +2631,140 @@ def calcular_y_ab_ac_ad(df_ecostos):
     return resultado["Y"], resultado["AB"], resultado["AC"], resultado["AD"]
 
 
-def completar_calculo_e_costos_grupos(df_ecostos, df_subastas, registrar=print):
+def calcular_m(df_ecostos, umbral_soc_minimo):
     """
-    Etapa 2 de "Calculo E Costos": agrega L, N, O, R, S, T, U, W, X,
-    Y, AB, AC, AD a df_ecostos (ya con la etapa base de
-    construir_calculo_e_costos). Ver el comentario de seccion mas
-    arriba para el detalle y las advertencias de cada columna.
+    Replica M ("SoC sobre el minimo"): 1 si SoC > umbral_soc_minimo
+    (ver construir_dic_resumen_factor), si no 0.
+    """
+
+    soc = pd.to_numeric(df_ecostos["SoC"], errors="coerce").fillna(0.0)
+
+    return (soc > umbral_soc_minimo).astype("int64")
+
+
+def _calcular_asignacion_energia(bloque, energia_maxima, factor):
+    """
+    Replica CalcularAsignacionEnergia (AE/AF): distribuye
+    energia_maxima en bloques de 15 minutos segun 'factor' (Pmax de
+    la central) -- el bloque asigna 1 (completo) si cae dentro de la
+    cantidad de bloques llenos, una fraccion al siguiente bloque si
+    sobra un resto, y 0 al resto. Int() de VBA redondea hacia abajo
+    incluso con numeros negativos, igual que math.floor.
+    """
+
+    cantidad_bloques = 4.0 * energia_maxima / factor / 1000.0
+    parte_entera = math.floor(cantidad_bloques)
+    fraccion = cantidad_bloques - parte_entera
+
+    if bloque <= cantidad_bloques:
+        proporcion = 1.0
+    elif fraccion != 0 and bloque == parte_entera + 1.0:
+        proporcion = fraccion
+    else:
+        proporcion = 0.0
+
+    return proporcion * factor / 4.0 * 1000.0
+
+
+def calcular_ae_af(df_ecostos, dic_factor):
+    """
+    Replica AE ("Energía descargada") y AF ("Energía cargada"):
+    asigna, dentro de cada grupo (central+ventana), la energia
+    maxima acumulada (N para AE, O para AF) en bloques segun el
+    orden W de cada fila y un 'factor' por central (Resumen BESS!
+    Pmax (MW), ver construir_dic_resumen_factor). Requiere que N, O
+    y W ya esten calculados en df_ecostos.
+
+    Si no hay factor para la central (no encontrada) o el factor es
+    0 o no numerico, AE/AF quedan en blanco (pd.NA) -- equivalente a
+    los #N/A / #VALOR! / #DIV/0! del original, sin fabricar un tipo
+    de error de Excel en Python.
+    """
+
+    maximo_n = (
+        df_ecostos.groupby(["clave", "Copia_Ventana"])["N"].transform("max")
+    )
+    maximo_o = (
+        df_ecostos.groupby(["clave", "Copia_Ventana"])["O"].transform("max")
+    )
+
+    factor = df_ecostos["clave"].map(
+        lambda valor: dic_factor.get(normalizar(valor), pd.NA)
+    )
+
+    ae, af = [], []
+
+    for w, mn, mo, f in zip(df_ecostos["W"], maximo_n, maximo_o, factor):
+
+        if pd.isna(f) or not isinstance(f, (int, float)) or f == 0:
+            ae.append(pd.NA)
+            af.append(pd.NA)
+            continue
+
+        ae.append(_calcular_asignacion_energia(w, mn, f))
+        af.append(-_calcular_asignacion_energia(w, mo, f))
+
+    return (
+        pd.Series(ae, index=df_ecostos.index),
+        pd.Series(af, index=df_ecostos.index),
+    )
+
+
+# Nombres reales de columna de "Calculo E Costos" (confirmados por el
+# usuario contra un archivo real, hoja "E COSTOS"). Se calcula todo
+# con los nombres/letras internos usados hasta aca y se renombra
+# recien al final, mismo criterio que NOMBRES_FD_CSF/NOMBRES_SUBASTAS.
+NOMBRES_CALCULO_E_COSTOS = {
+    "Mes": "Mes",
+    "Dia": "Dia",
+    "Hora": "Hora",
+    "Hora Mes": "Hora mes",
+    "Minutos": "Minuto",
+    "Cuarto de Hora": "Bloque horario",
+    "clave": "Configuracion",
+    "Barra": "Barra",
+    "Energia_Positiva": "Descarga kWh",
+    "Energia_Negativa": "Carga kWh",
+    "SoC": "SoC %",
+    "Copia_Ventana": "Ciclo de Carga del mes",
+    "CMg": "CMg",
+    "L": "Adj SSCC",
+    "M": "SoC sobre el minimo",
+    "N": "Energía SSCC (-) por remunerar",
+    "O": "Energía SSCC (+) por remunerar",
+    "R": "ranking cmg",
+    "S": "Valorizacion Descarga",
+    "T": "Valorizacion Carga",
+    "U": "Total",
+    "W": "Bloque ordenado",
+    "X": "Ciclo",
+    "Y": "Bloque Mes Descarga",
+    "AB": "Curva monotona CMg Descarga",
+    "AC": "Bloque Mes  Carga",
+    "AD": "Curva monotona CMg Carga",
+    "AE": "Energía descargada",
+    "AF": "Energía cargada",
+}
+
+
+def completar_calculo_e_costos_grupos(
+    df_ecostos, df_subastas, dic_factor, umbral_soc_minimo, registrar=print
+):
+    """
+    Etapa 2 de "Calculo E Costos": agrega L, M, N, O, R, S, T, U, W,
+    X, Y, AB, AC, AD, AE, AF a df_ecostos (ya con la etapa base de
+    construir_calculo_e_costos), y renombra todas las columnas a sus
+    nombres reales (NOMBRES_CALCULO_E_COSTOS) antes de devolver. Ver
+    el comentario de seccion mas arriba para el detalle y las
+    advertencias de cada columna.
+
+    dic_factor, umbral_soc_minimo: de construir_dic_resumen_factor().
     """
 
     df = df_ecostos.reset_index(drop=True).copy()
 
     df["L"] = calcular_l(df, df_subastas)
+    df["M"] = calcular_m(df, umbral_soc_minimo)
 
     n, o = calcular_n_o(df)
     df["N"] = n.reset_index(drop=True)
@@ -2581,13 +2787,17 @@ def completar_calculo_e_costos_grupos(df_ecostos, df_subastas, registrar=print):
     df["AC"] = ac.reset_index(drop=True)
     df["AD"] = ad.reset_index(drop=True)
 
+    ae, af = calcular_ae_af(df, dic_factor)
+    df["AE"] = ae
+    df["AF"] = af
+
     participa = int(df["L"].sum())
     registrar(
         f"  Calculo E Costos: {participa:,} de {len(df):,} fila(s) "
         f"marcadas como 'participa en subasta' (L=1)."
     )
 
-    return df
+    return df.rename(columns=NOMBRES_CALCULO_E_COSTOS)
 
 
 # ============================================================
@@ -3410,6 +3620,7 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
     registrar("Leyendo Centrales.xlsx...")
     resumen, _ = leer_centrales(rutas["centrales"])
     mapa_barra = construir_mapa_barra(resumen)
+    dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
     avanzar(45)
 
     if not rutas["cmg"].is_file():
@@ -3446,11 +3657,12 @@ def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
         )
 
     registrar(
-        "Completando L, N, O, R, S, T, U, W, X, Y, AB, AC, AD "
-        "(M, AE, AF y AG:AZ quedan pendientes, ver plan seccion 25.6)..."
+        "Completando L, M, N, O, R, S, T, U, W, X, Y, AB, AC, AD, AE, AF "
+        "(AG:AZ quedan pendientes, ver plan seccion 25.6)..."
     )
     df_ecostos = completar_calculo_e_costos_grupos(
-        df_ecostos, df_subastas, registrar=registrar
+        df_ecostos, df_subastas, dic_factor, umbral_soc_minimo,
+        registrar=registrar,
     )
     avanzar(90)
 

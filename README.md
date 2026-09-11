@@ -112,21 +112,19 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 `Pagos_BESS.xlsx` (nombre y alcance provisorios, a pedido del usuario) tiene
 por ahora una sola hoja:
 
-- `Calculo E Costos` — primera etapa (base) del traspaso desde `Medidores` y
-  la asignación de CMg, replicando parcialmente `Traspasar_Medidores_A_
-  Calculos_Rapido` y `Asignar_CMg_a_Calculos_Turbo`: columnas A:G (con D y E
-  invertidas, igual que la macro), `Barra` (H, antes fórmula
-  `=VLOOKUP(G,Resumen!B:G,6,FALSE)`, acá homologada por nombre contra
-  `Resumen BESS`), `Energia_Positiva`/`Energia_Negativa` (I/J, la energía de
-  `Medidores!Gen_Unidad` separada por signo, solo para filas con
-  `Ventana_No_Completa = 1`), `SoC` (K, copia de `Medidores!SoC`),
-  `Copia_Ventana` (P, copia de `Medidores!Copia_Ventana`) y `CMg` (Q,
-  homologado por `Barra` + `Cuarto de Hora`). Los nombres de columna son
-  placeholders derivados de los comentarios de la macro: todavía no se pudo
-  confirmar contra un archivo real con los encabezados de `Calculo E
-  Costos`. El resto de `Actualizar_Calculos_Columnas` (L, M, N, O, R, S, T,
-  U, W, X, Y, AB:AF, AG:AX, AZ) y toda la hoja `Calculo RE545` quedan para
-  una etapa posterior (decisión explícita del usuario: avanzar por etapas).
+- `Calculo E Costos` — traspaso desde `Medidores`, asignación de CMg y buena
+  parte de `Actualizar_Calculos_Columnas` (`L, M, N, O, R, S, T, U, W, X, Y,
+  AB, AC, AD, AE, AF`), con **nombres reales de columna** (confirmados
+  contra un archivo real, hoja "E COSTOS"): `Configuracion`, `Barra`,
+  `Descarga kWh`/`Carga kWh`, `SoC %`, `CMg`, `Adj SSCC`, `SoC sobre el
+  minimo`, `Energía SSCC (-) por remunerar` / `(+) por remunerar`,
+  `ranking cmg`, `Valorizacion Descarga`/`Carga`, `Bloque ordenado`, `Ciclo`, `Curva
+  monotona CMg Descarga`/`Carga`, `Energía descargada`/`cargada`, entre
+  otros. `AG:AX` y `AZ` quedan pendientes: dependen de la tabla dinámica
+  Prorrata SSCC (confirmada pero no construida todavía), de una categoría
+  `CTF` que no existe en nuestra hoja `FD`, y de un umbral de subida/bajada
+  en `Subastas` cuya posición real todavía no está clara. Toda la hoja
+  `Calculo RE545` también queda para una etapa posterior.
 
 Las macros de Ofertas SSCC, CMg, FD y Subastas replicadas son solo las de
 **carga** de esas hojas.
