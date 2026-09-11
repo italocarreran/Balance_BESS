@@ -3051,6 +3051,19 @@ def calcular_reservas_re545(df_re545, dics_reservas):
 
     o sea, la suma de los 6 productos "reserva x FD x FMA", dividida
     por 4 y por mil.
+
+    TRAMPA REAL (encontrada comparando fila a fila contra "Pagos_BESS
+    real" -- planilla 11 -- que el usuario pego en la hoja "RE545 P11":
+    a diferencia de los otros 15 valores de los tres bloques, las
+    columnas CPF(+)/CSF(+)/CTF(+) del bloque "FMA" (el tercero, AR:AT
+    en el archivo real) NO son un SUMIFS -- son la CONSTANTE 1 en TODAS
+    las filas. Confirmado contra las formulas guardadas del archivo
+    real (docs/Calculo_RE545_reducido_para_IA.xlsx, hoja
+    Mapa_Formulas): AO/AP/AQ (CPF(-)/CSF(-)/CTF(-) del mismo bloque)
+    son SUMIFS igual que los otros dos bloques, pero AR/AS/AT aparecen
+    como valor literal "1", sin formula. Antes de esta correccion se
+    les aplicaba el mismo SUMIFS (que da 0 casi siempre), lo que
+    tambien arrastraba un error a AU (el SUMPRODUCT las multiplica).
     """
 
     df = df_re545
@@ -3060,9 +3073,23 @@ def calcular_reservas_re545(df_re545, dics_reservas):
 
     columnas = {}
 
-    for bloque, dic in zip(_BLOQUES_RESERVA_RE545, dics_reservas):
+    indice_bloque_fma = 2
+    posiciones_constante_uno = (3, 4, 5)
 
-        for interno, tipo in zip(bloque, TIPOS_RESERVA_RE545):
+    for indice_bloque, (bloque, dic) in enumerate(
+        zip(_BLOQUES_RESERVA_RE545, dics_reservas)
+    ):
+
+        for posicion, (interno, tipo) in enumerate(
+            zip(bloque, TIPOS_RESERVA_RE545)
+        ):
+
+            if (
+                indice_bloque == indice_bloque_fma
+                and posicion in posiciones_constante_uno
+            ):
+                columnas[interno] = pd.Series(1.0, index=df.index)
+                continue
 
             tipo_normalizado = _normaliza_valor_vba(tipo)
 
