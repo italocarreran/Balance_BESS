@@ -16,18 +16,32 @@ estado, no un historial.
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
-- Obtener del usuario los encabezados reales de la hoja `Calculo E Costos`
-  ("Ecostos"): las dos veces que adjuntó un archivo pensado para esto solo
-  traía las hojas `FD`/`Subastas` (ya confirmadas). Mientras tanto,
-  `construir_calculo_e_costos()` usa nombres placeholder derivados de los
-  comentarios de la macro (ver plan §25.4, `METODOLOGIA.md` §7).
-- Completar el resto de `Actualizar_Calculos_Columnas` (L, M, N, O, R, S,
-  T, U, W, X, Y, AB:AF, AG:AX, AZ) y toda la hoja `Calculo RE545` — la
-  etapa base (H, CMg, traspaso de Medidores) ya está implementada (ver
-  entrada de esta sesión). Incluye construir la "Prorrata SSCC" como tabla
-  dinámica derivada de `Subastas` (confirmado por el usuario que no es un
-  archivo externo: `Filas: Configuración, Hora_mes` / `Columnas: Control` /
-  `Valores: Cuenta de Sub_Baj`).
+- **Bloqueante para terminar `Calculo E Costos` (`AW`, `AX`, `AZ`)**:
+  confirmar la posición real de la tabla de umbrales de subida/bajada por
+  central+ciclo en `Subastas`. Aplicando el mismo corrimiento de columna
+  que el usuario confirmó para `L` (ver entrada de esta sesión), la tabla
+  parecería estar en `Subastas!S:W`, pero involucra una fórmula `COUNTIFS`
+  que depende de `Subastas!N` ("Energía SSCC"), que a su vez depende de
+  `Calculo E Costos!P` — una dependencia circular con nuestro propio
+  cálculo que todavía no se terminó de decantar. Ver plan §25.10.
+- Validar contra un caso real la homologación de la columna `L` (y de
+  `AG:AL`/`AM:AR`, que dependen del mismo campo `Configuración`) de
+  `Calculo E Costos`. Ya no es una inferencia a ciegas — el archivo de
+  encabezados reales confirmó que `Calculo E Costos!G` se llama
+  literalmente `Configuracion` (mismo nombre de campo en `Subastas`) — y
+  el usuario confirmó por separado que el archivo de Subastas usado tiene
+  un corrimiento de columna respecto del original, lo que explica la
+  discrepancia que había con el VBA. Pero sigue sin confirmarse fila por
+  fila con datos reales.
+- Validar contra un caso real que `Subastas!Control` tenga exactamente los
+  valores `CPF`/`CSF` (usado para separar la tabla dinámica Prorrata SSCC
+  en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
+  inferencia razonada (coincide con los nombres reales de `AG`/`AH`,
+  `CPF(-)`/`CSF(-)`) pero no confirmada letra por letra.
+- Completar `AW, AX, AZ` de `Calculo E Costos` (bloqueados, ver arriba) y
+  toda la hoja `Calculo RE545` — la etapa base, la etapa 2 y la etapa 3
+  (`AG:AV`) ya están implementadas (ver entradas de esta sesión y las
+  anteriores).
 - Una vez completo `Calculo E Costos`, resolver `Subastas!N` ("Energía
   SSCC"), que depende de columnas de esa hoja.
 - Confirmar si la carpeta `Subastas/` (creada esta sesión, no existe en
@@ -36,6 +50,14 @@ estado, no un historial.
   hacía la macro original (ver plan §23.3).
 - Confirmar el nombre definitivo de `Pagos_BESS.xlsx` (provisorio, elegido
   por el usuario como "pagos_bess o algo así por ahora").
+- Agregar casillas por sección a la ventana "Generar" de `Pagos_BESS.xlsx`
+  (hoy es todo o nada, una sola hoja) — "ajustamos detalles después"
+  (pedido explícito del usuario, ver entrada de esta sesión).
+- Probar la ventana nueva (diagrama + botones "Generar") con una carpeta
+  base real: solo se probó por ahora con `python -m py_compile` (no hay
+  entorno grafico en esta sesión para abrir la ventana) y con pruebas
+  sintéticas de la lógica de árbol (`_prefijos_arbol`) y de generación
+  parcial (`generar_consolidado`, `generar_pagos_bess`) por separado.
 - Evaluar si `guardar_config()` necesita escritura atómica (ver
   `METODOLOGIA.md` §7).
 
@@ -433,3 +455,333 @@ pasando por un `.xlsx` real (vía `leer_centrales()`/`leer_cmg()`) para confirma
 que devuelve `pandas`/`openpyxl` al leer un archivo real (no un `DataFrame` construido a mano)
 no rompen `_normaliza_cuarto()` ni la homologación por nombre. Todos los casos coincidieron con
 lo esperado a mano. No se probó contra un caso real ni contra la planilla 11.
+
+---
+
+## 2026-09-11 (2) — Fix: `Resumen BESS` con título arriba de los encabezados
+
+Al correr contra un `Centrales.xlsx` real (primera vez que el usuario probó la etapa `Calculo
+E Costos` fuera de un caso sintético) salió:
+
+```
+La hoja 'Resumen BESS' de Centrales.xlsx debe tener una columna de nombre de central
+('Nombre activo') y una de barra de inyeccion ('Barra inyección'). Columnas encontradas:
+['Cuadro N° 1: Resumen BESS', 'Unnamed: 1', ..., 'Unnamed: 8']
+```
+
+Causa: `leer_centrales()` leía `Resumen BESS` con `pd.read_excel(header=0)`, asumiendo que la
+fila 1 ya traía los encabezados. El archivo real trae un título fusionado
+("`Cuadro N° 1: Resumen BESS`") en esa fila, y los encabezados reales van una fila más abajo —
+mismo problema que ya se había resuelto para el SoC (`detectar_fila_nombres()`), pero acá
+todavía no se había aplicado el mismo criterio.
+
+**Fix:** nueva función `_leer_resumen_bess(ruta, nombre_hoja)` que lee la hoja cruda
+(`header=None`) y busca, en las primeras 15 filas, la que contiene textos que matchean
+`'nombre'+'activ'` y `'barra'` (normalizados) — nunca una posición fija. `leer_centrales()` la
+usa para `Resumen BESS`; `Diccionario` no se toca porque ya se leía con `header=None` sin
+asumir fila fija. `construir_mapa_barra()` no necesitó cambios: ya buscaba por nombre de
+columna, no por posición.
+
+**Verificación:** test sintético con una hoja de 4 filas (título fusionado, encabezados,
+2 centrales) reproduciendo exactamente la estructura del error real; `leer_centrales()` +
+`construir_mapa_barra()` devolvieron el mapa esperado. Sin persistir en el repo (convención de
+pruebas).
+
+---
+
+## 2026-09-11 (3) — Ventana nueva: diagrama de carpetas + "Generar" por salida
+
+El usuario adjuntó `Revisor_Reliquidacion.py` (otro proyecto suyo) como referencia de cómo
+quiere que se vea la ventana: un diagrama de texto de la estructura de carpetas/archivos
+(prefijos `├──`/`└──`/`│`, monoespaciada) con un botón por fila cuando corresponde, en vez del
+checklist plano que había hasta ahora. Pedido concreto: al lado de `Consolidado_entradas.xlsx`
+un botón "Generar" que abra una ventana con una casilla por entrada (Medidas, CMg, Ofertas,
+etc.) para elegir qué recalcular, y lo mismo para `Pagos_BESS.xlsx` ("ajustamos detalles
+después").
+
+Antes de tocar código se preguntó al usuario (`AskUserQuestion`) el punto más consecuente: qué
+pasa con una entrada destildada al apretar Actualizar. Eligió explícitamente **"se preserva lo
+que ya había"** (frente a "se regenera todo igual" o "queda vacío"), y confirmó el layout
+general (carpeta+AAMM igual que hoy, árbol debajo — reemplazando al checklist plano, ya que el
+árbol muestra el mismo estado OK/FALTA/PENDIENTE).
+
+**`nucleo.py` — regeneración parcial (cambio de arquitectura, no solo de UI):**
+
+- `_copiar_hoja_existente(wb_origen, nombre_hoja, wb_destino)`: copia una hoja completa (solo
+  valores, sin fórmulas ni formato) de un workbook `openpyxl` a otro. Es el mecanismo real de
+  "preservar": nunca se intenta reconstruir `Ofertas SSCC` o `FD` (bloques de distinto largo,
+  con títulos y `startcol`) a partir de un DataFrame leído de vuelta — se copia la hoja física
+  tal cual, evitando reinventar su estructura.
+- `escribir_salida()` gana `ruta_existente` y `hojas_regenerar` (`None` = comportamiento
+  clásico, regenera las 5 hojas). Cuando `hojas_regenerar` es un set, las hojas fuera de ese set
+  se preservan vía `_copiar_hoja_existente()`; si no existían antes, quedan vacías y se registra
+  un aviso (log de la corrida + fila del `Log`) en vez de fallar en silencio.
+- `SECCIONES_CONSOLIDADO`: agrupa las 4 casillas de la ventana con las hojas que produce cada
+  una. Decisión de diseño: **no hay una casilla por archivo de entrada**, sino una casilla
+  `"medidores"` que junta Medidas_SAE + SoC + Centrales(Diccionario) + OfertasSSCC, porque
+  `construir_medidores()` los necesita siempre los 4 juntos — tildar solo "Ofertas" y dejar
+  "Medidas" destildada no permitiría recalcular nada coherente. `"cmg"`, `"fd"`, `"subastas"`
+  quedan independientes porque cada uno sale de una sola función/archivo.
+- `generar_consolidado(carpeta_base, aamm, secciones_activas, registrar, progreso)`: reemplaza
+  a la vieja `ejecutar()`. Valida (y exige) los archivos de entrada **solo para las secciones
+  tildadas** — si `"medidores"` no está tildada, no hace falta tener Medidas_SAE/SoC/Centrales/
+  Ofertas presentes ni siquiera un AAMM válido.
+- `generar_pagos_bess(carpeta_base, registrar, progreso)`: separado de `generar_consolidado()`
+  (ya no hace todo un `ejecutar()` monolítico). Lee `Medidores` de `Consolidado_entradas.xlsx`
+  ya generado (`pd.read_excel`, no se recalcula) en vez de recibir `df_medidores` en memoria
+  como antes — refleja que ahora son dos flujos independientes disparados por botones distintos.
+  Perdió el parámetro `aamm` (no lo usaba: todo sale de `Medidores`, que ya trae Mes/Dia/Hora).
+- La vieja `ejecutar(carpeta_base, aamm, ...)` se **eliminó** (no solo se dejó como wrapper):
+  nada la llama ya que la ventana dispara `generar_consolidado`/`generar_pagos_bess` por
+  separado, y mantenerla como código muerto no aportaba nada.
+
+**`Balance_BESS.py` — reescritura de la ventana:**
+
+- `_profundidad_fila()`, `_es_ultimo_en_su_nivel()`, `_prefijos_arbol()`: arman los prefijos
+  tipo árbol a partir de la lista plana `(etiqueta, estado, detalle)` que ya devolvía
+  `revisar_estructura()`, sin pedirle a `nucleo.py` que sepa de árboles/interfaz. La profundidad
+  se deduce del TEXTO de la etiqueta (`"algo/"` = carpeta de primer nivel, `"  hoja ..."` =
+  nieto, el resto = archivo hijo de la carpeta anterior) en vez de que `nucleo.py` devuelva un
+  campo de profundidad — mantiene a `nucleo.py` sin conceptos de UI.
+- El panel "Entradas detectadas" (`pintar_checklist`, filas planas) se reemplaza por "Estructura
+  del caso" (`pintar_arbol`, con los prefijos de arriba). Al final del árbol se agregan a mano
+  las dos filas de salida (`Consolidado_entradas.xlsx`, `Pagos_BESS.xlsx`), cada una con su
+  botón "Generar...".
+- Se eliminó el botón único "Ejecutar": cada salida se dispara desde su propia ventana
+  (`abrir_ventana_generar_consolidado`, `abrir_ventana_generar_pagos`), con casillas (la primera)
+  o solo una explicación (la segunda, sin casillas todavía). `lanzar_generacion()` es el helper
+  compartido: corre la función de `nucleo` en un hilo, y hace que `registrar`/`progreso` escriban
+  en el log/barra de la ventana PRINCIPAL (no hay log propio por ventana secundaria), para no
+  duplicar esos widgets.
+- Al terminar una generación se vuelve a llamar `revisar()` para refrescar el árbol (por si el
+  archivo de salida cambió de OK/FALTA), y se cierra la ventana "Generar" correspondiente.
+
+**Verificación:** sin entorno gráfico disponible en esta sesión (no hay `tkinter` instalado acá,
+solo se pudo correr `python -m py_compile` sobre `Balance_BESS.py`/`nucleo.py`). Se probó por
+separado, con scripts sintéticos borrados al cerrar la sesión:
+- La lógica de árbol (`_profundidad_fila`/`_prefijos_arbol`, copiadas fuera de `Balance_BESS.py`
+  para poder importarlas sin `tkinter`) contra la lista real que devuelve
+  `revisar_estructura()` en una carpeta de prueba: el árbol impreso en consola tiene la forma
+  esperada.
+- `escribir_salida()` con `hojas_regenerar`: preserva hojas no tildadas desde `ruta_existente`,
+  regenera las tildadas, y avisa (sin fallar) cuando una hoja a preservar no existía todavía.
+- `generar_consolidado()`: no exige Medidas/Ofertas/Centrales si `"medidores"` no está tildada;
+  corre de punta a punta con solo `"cmg"` tildada; rechaza secciones desconocidas y el caso de no
+  tildar nada.
+- `generar_pagos_bess()`: exige `Consolidado_entradas.xlsx` con `Medidores` antes de correr, y
+  de punta a punta con datos reales (vía `Centrales.xlsx`/`cmg.xlsx` reales) da los mismos
+  resultados que la implementación anterior.
+
+**No probado:** la ventana real (no hay `tkinter` en este entorno) — falta que el usuario la
+abra y confirme que el diagrama se ve como esperaba y que los botones "Generar" funcionan en la
+práctica.
+
+---
+
+## 2026-09-11 (4) — `Calculo E Costos`, etapa 2: L, N, O, R, S, T, U, W, X, Y, AB, AC, AD
+
+El usuario pidió terminar el cálculo de Ecostos ("necesito que termines con el calculo de
+Ecostos"). Antes de implementar se leyó completa la macro `Actualizar_Calculos_Columnas`
+(módulo `J_Calculo_Ecostos`, ~1500 líneas) y sus funciones auxiliares (`CrearDiccionarioSubastas`,
+`CrearDiccionarioProrrata`, las funciones de ordenamiento por bloques, `CalcularAsignacionEnergia`,
+etc.), y se encontró un problema real: buena parte de las columnas restantes (`M`, `AE`, `AF` y
+todo `AG:AZ`) depende de una hoja `Resumen` del libro original — **distinta** de
+`Centrales.xlsx!Resumen BESS` — con una tabla central→factor y un umbral único (`H8`), y de un
+umbral de subida/bajada por central+ventana. Ninguna de las dos cosas está mapeada en la
+migración. Se le preguntó al usuario 3 veces con distinto nivel de detalle técnico (la primera
+con letras de columna VBA, que no se entendió — "no t entendí" / "no entiendo dime el valoer");
+la pregunta se simplificó a lenguaje llano y tampoco se resolvió del todo, pero el usuario dio
+una pista concreta que sí resolvió una pieza clave (ver abajo). **Las otras dos (hoja `Resumen`
+y umbral de subida/bajada) siguen abiertas** — ver "Pendientes abiertos".
+
+**El problema de `L` y cómo se resolvió:** la fórmula real de `L` compara
+central+mes+día+hora de `Calculo E Costos` contra `Subastas`, filtrando por un "tipo"
+BAJADA/SUBIDA. El código VBA documentaba esa clave por posición (`Subastas!D` = tipo,
+`G,H,I,K` = el resto de la clave), pero esas letras no coinciden con los encabezados reales de
+`Subastas` ya confirmados (`D` es `Fecha`, no un texto BAJADA/SUBIDA) — se le pidió al usuario
+que revisara la macro `Traspasar_Medidores_A_Calculos_Rapido` por si la respuesta estaba ahí (no
+estaba: se confirmó con `grep` que esa macro no menciona nada de Subastas/BAJADA/SUBIDA/Resumen).
+El usuario confirmó directamente: **"Es la columna C de la hoja subastas que ya generamos"** —
+`Subastas!Sub_Baj`, tal como sugería el propio nombre de la columna. Con eso se reconstruyó la
+clave equivalente por NOMBRE de columna real (no por posición): tipo=`Sub_Baj`,
+central=`Configuración` (esta última **inferida**, no confirmada letra por letra: es el mismo
+campo que usa la tabla dinámica Prorrata SSCC como identificador de central, y da una
+alineación semántica limpia con Mes/Dia/Hora_dia; se descartó `Propietario` porque es el campo
+que se usa para filtrar por BESS/SAE, no para identificar una central puntual). Queda como
+pendiente validar esto contra un caso real (ver "Pendientes abiertos").
+
+**Implementado en `nucleo.py`** (todo lo que NO depende de la hoja `Resumen`):
+
+- `_normaliza_valor_vba(valor)`: replica `NormalizarValor` (mayúsculas+recorte; números sin
+  decimales de más, igual que `CStr` en VBA) para armar claves compuestas comparables entre
+  `Calculo E Costos` y `Subastas`.
+- `calcular_l(df_ecostos, df_subastas)`: ver arriba.
+- `calcular_n_o(df_ecostos)`: por grupo (central+ventana), suma acumulada de energía positiva/
+  negativa (solo filas `L=1`) ordenando por `Cuarto de Hora` descendente, repartida a todas las
+  filas que comparten ese `Cuarto de Hora`.
+- `calcular_r_ecostos(df_ecostos)`: ranking por grupo, `CMg` descendente + `Cuarto de Hora`
+  descendente, con empates compartiendo el ranking de inicio del bloque ("competition
+  ranking"). **Nombre con sufijo `_ecostos` a propósito** — ver el error de abajo.
+- `calcular_s_t_u`, `calcular_w_x`, `calcular_y_ab_ac_ad`: ver plan §25.7 para el detalle de
+  cada una (`W` tiene una excepción fiel al original: la primera fila de todo el archivo no
+  reinicia a 1, toma el valor de `Hora`).
+- `completar_calculo_e_costos_grupos(df_ecostos, df_subastas, registrar=print)`: combina todas
+  las anteriores. `generar_pagos_bess()` ahora también lee la hoja `Subastas` de
+  `Consolidado_entradas.xlsx` (además de `Medidores`) y la llama después de
+  `construir_calculo_e_costos()`.
+
+**Error encontrado y corregido durante esta sesión (antes de comitear):** la primera versión de
+`calcular_r_ecostos` se llamaba simplemente `calcular_r()`, pisando en silencio a la función que
+YA existía con ese nombre para Medidores (`Oferta_Completa_Dia`, lógica no relacionada). Python
+no avisa de la redefinición; recién se manifestó como un `TypeError` de argumentos al correr el
+test de punta a punta (`construir_medidores()` llama a `calcular_r()` en tiempo de ejecución, y
+para ese momento el nombre ya apuntaba a la versión nueva de 1 argumento). Se corrigió
+renombrando a `calcular_r_ecostos` y se agregó una trampa en `METODOLOGIA.md` §7: antes de
+agregar una función nueva, `grep` para confirmar que el nombre no existe ya.
+
+También se corrigió, en el mismo pase de pruebas, un bug real en `calcular_w_x`: la primera
+versión calculaba `W` como "posición dentro del bloque" en vez de "contador que suma 1 desde el
+valor de la fila anterior", así que la excepción de la primera fila (`W` = `Hora` en vez de 1)
+no se arrastraba al resto de su bloque. Se corrigió sumando el offset (`Hora - 1`) a todas las
+filas del primer bloque.
+
+**Verificación:** un test sintético con 2 grupos (central+ventana) y valores elegidos a mano
+para poder calcular cada columna manualmente de antemano (incluye empates en `CMg`+`Cuarto de
+Hora` para `R`, una fila con `Energia_Positiva=0` para probar el "no calificaI" de `Y`/`AB`, y
+un cambio de `Copia_Ventana` a mitad de archivo para probar que `W` es realmente global y no por
+grupo) — todas las columnas coincidieron con el cálculo a mano. Un segundo test corrió
+`generar_pagos_bess()` de punta a punta con `Centrales.xlsx`/`cmg.xlsx`/`Consolidado_entradas.xlsx`
+(con hojas `Medidores` y `Subastas`) reales, confirmando que las 13 columnas nuevas aparecen en
+`Pagos_BESS.xlsx` con los tipos y valores esperados. Sin persistir en el repo (convención de
+pruebas). No se probó contra un caso real ni contra la planilla 11 — sigue pendiente, y ahora es
+más urgente por la inferencia de `L` sin confirmar.
+
+---
+
+## 2026-09-11 (5) — `Calculo E Costos`: M, AE, AF + nombres reales de toda la hoja
+
+El usuario adjuntó `Centrales.xlsx` (real) y un `Libro1.xlsx` con 4 hojas: `FD`, `subastas`,
+`E COSTOS` y `Resumen` — respondiendo al bloqueo de la sesión anterior ("Que necesitas de la
+hoja original de resumen porque eso es todo lo que hay... puede que los indices esten
+diferente").
+
+**Hallazgo clave**: la hoja `Resumen` del libro original y `Centrales.xlsx!Resumen BESS` son
+**la misma tabla** — mismos 9 encabezados en el mismo orden (`Nombre activo`, `Pmax (MW)`,
+`Horas para descarga forzada`, `Capacidad (MWh)`, `Energía mínima`, `Barra inyección`, `%
+Energía sobre mínima (indicador nuevo ciclo)`, `Ciclos max diarios`, `Eficiencia`). No hacía
+falta una hoja nueva: el "factor" de `AE`/`AF` es la columna `Pmax (MW)`, y el "umbral" de `M`
+es el valor de `% Energía sobre mínima...` en la primera fila de datos (que en el archivo real
+cae justo en `H8`, de ahí la referencia fija del VBA original).
+
+**Implementado en `nucleo.py`:**
+
+- `construir_dic_resumen_factor(resumen_bess)`: arma central→`Pmax (MW)` y el umbral de SoC
+  mínimo, a partir de la MISMA hoja que ya usa `construir_mapa_barra()` (misma búsqueda por
+  nombre de columna normalizado, no por posición).
+- `calcular_m(df_ecostos, umbral_soc_minimo)`: `1` si `SoC > umbral`, si no `0`.
+- `_calcular_asignacion_energia(bloque, energia_maxima, factor)` + `calcular_ae_af(df_ecostos, dic_factor)`:
+  replica `CalcularAsignacionEnergia` — reparte el máximo de `N`/`O` del grupo en bloques de 15
+  minutos según el orden `W` y el factor de la central; sin factor o factor=0, queda en blanco
+  (`pd.NA`) en vez de fabricar un error de Excel. `Int()` de VBA se replica con `math.floor`
+  (redondea hacia abajo incluso en negativos, distinto de truncar hacia cero).
+- `completar_calculo_e_costos_grupos()` ahora también agrega `M`, `AE`, `AF`, y al final
+  renombra TODAS las columnas con `NOMBRES_CALCULO_E_COSTOS` (nombres reales, de la hoja
+  `E COSTOS` de `Libro1.xlsx` — fila 3 tiene el encabezado real de cada columna). Mismo patrón
+  que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`: todo el cálculo interno sigue usando los nombres/
+  letras de siempre, el rename es el último paso antes de escribir.
+- `generar_pagos_bess()` ahora también arma `dic_factor`/`umbral_soc_minimo` (de la misma
+  lectura de `Centrales.xlsx` que ya hacía para `mapa_barra`) y se los pasa a
+  `completar_calculo_e_costos_grupos()`.
+
+**Confirmación indirecta de la columna `L`**: el archivo de encabezados reales muestra que
+`Calculo E Costos!G` se llama literalmente `Configuracion` — el mismo nombre de campo que
+`Subastas!Configuración`, que es lo que se venía usando (inferido) para homologar centrales en
+`calcular_l()`. Sube la confianza en esa elección, aunque sigue sin confirmarse fila por fila.
+
+**Lo que sigue pendiente (`AG:AZ`)**, según la misma hoja `E COSTOS`:
+- `AG:AL` ("Prorratas") necesitan la tabla dinámica Prorrata SSCC, todavía no construida.
+- `AM:AR` ("FD") necesitan una categoría `CTF` que no existe en nuestra hoja `FD` (solo tiene
+  CSF/CPF) — origen sin identificar.
+- `AW` (Descuento FD) necesita el umbral de subida/bajada de Subastas: el archivo de
+  encabezados reales muestra `Subastas!R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`,
+  `BAJADA`) como una tabla de resumen aparte, pero sin filas de datos de ejemplo, y no coincide
+  con `Subastas!U:W` que usaba el código VBA — la posición real sigue sin confirmarse.
+
+**Verificación:** tests sintéticos (sin persistir en el repo) para `construir_dic_resumen_factor`
+(incluye el caso "primera fila con nombre válido" cuando hay filas sin central), `calcular_m`,
+`_calcular_asignacion_energia` (bloque completo y bloque parcial con fracción), `calcular_ae_af`
+(incluye el caso "central sin factor -> NA"), y que `completar_calculo_e_costos_grupos()`
+devuelve exactamente las columnas de `NOMBRES_CALCULO_E_COSTOS` en ese orden. Se repitió también
+el test de regresión completo de la etapa 2 (2 grupos, empates en ranking, etc. de la sesión
+anterior) contra los nombres reales, sin cambios en los valores esperados. Un test de punta a
+punta corrió `generar_pagos_bess()` completo con archivos reales de `Centrales.xlsx`/`cmg.xlsx`/
+`Consolidado_entradas.xlsx`, confirmando que las 28 columnas de `Pagos_BESS.xlsx` salen con los
+nombres reales y los tipos esperados. No se probó contra un caso real ni contra la planilla 11.
+
+---
+
+## 2026-09-11 (6) — `Calculo E Costos`, etapa 3: `AG:AV` (Prorratas, FD homologado, costo ponderado)
+
+El usuario aportó dos confirmaciones cortas que destrabaron esta etapa: **"creo que no tiene
+ctf no está en los FD y en la hoja de los ecostos sale con 0"** y **"Las subastas que te mande
+vs las del original están corridas una columna, la primera en el original está vacía"**.
+
+La segunda explica retroactivamente la discrepancia de letras encontrada la sesión anterior
+para la columna `L`: aplicando ese corrimiento de una columna a lo que documentaba el VBA
+(`Subastas!D`=tipo, `G,H,I,K`=clave), se obtiene exactamente `Sub_Baj` + `Configuración+Mes+
+Dia+Hora_dia` — lo mismo que ya se había implementado por inferencia, ahora con una explicación
+clara. La primera confirma que `CTF` (columnas `AI`, `AL`, `AO`, `AR`) no necesita ningún
+origen: en el VBA original están hardcodeadas en 0 (`salidaAGAX(i,3)=0`, etc.), nunca dependen
+de un diccionario — coincide exactamente con lo que el usuario reportó ver en el archivo real.
+
+**Implementado en `nucleo.py`** (todo lo que no depende del umbral de subida/bajada, que sigue
+sin resolverse — ver "Pendientes abiertos"):
+
+- `construir_prorrata_sscc(df_subastas)`: arma la tabla dinámica Prorrata SSCC con
+  `pandas.pivot_table` directamente desde `Subastas` (`index=[Configuración, Hora_mes],
+  columns=Control, values=Sub_Baj, aggfunc=count`) — confirmado hace varias sesiones que NO es
+  un archivo externo, pero recién ahora se construye en Python.
+- `construir_dic_prorrata()`: busca entre las columnas que deja el pivot la que contenga "cpf"
+  y la que contenga "csf" en el nombre (inferido, no confirmado que `Control` tenga esos dos
+  valores exactos — avisa si no las encuentra, no falla).
+- `calcular_prorratas()`: homologa por central+`Hora Mes` → `(AG, AH)`. `AJ=AG`, `AK=AH`
+  (duplicados a propósito, así lo hace el VBA original: `salidaAGAX(i,4)=valorAG`). `AI=AL=0`.
+- `construir_dic_mapeo_diccionario()`: TERCERA lectura de la hoja `Diccionario` (columna A→B,
+  primera coincidencia gana) — distinta de `construir_homologacion()` y de
+  `_mapas_homologacion_fge()`, documentado como trampa nueva en `METODOLOGIA.md` §7.
+- `_calcular_bloque()` + `construir_dic_fd_bloque()` + `calcular_fd_prorrateado()`: homologan la
+  central contra `Diccionario`, arman una clave "bloque de 4 + central homologada" (uno para
+  descarga usando `Y`, otro para carga usando `AC`) y buscan esa clave en `FD!CSF(±)`/`CPF(±)`
+  → `(AM, AN, AP, AQ)`. Central no encontrada en `Diccionario` → blanco (`pd.NA`); central
+  encontrada pero sin match en `FD` → 0 (fiel al original, que solo registra un aviso). `AO=AR=0`.
+- `_calcular_costo_ponderado()` + `calcular_as_at()`: replica `CalcularCostoPonderado` → `(AS,
+  AT)`, combinando las Prorratas, el FD homologado y `AE`/`AF`.
+- `calcular_au_av()`: promedio de `AB`/`AD` por grupo (central+ventana), activado solo si la
+  suma GLOBAL de energía por ventana (TODAS las centrales que comparten esa `Copia_Ventana`, sin
+  agrupar por central — una agrupación distinta de la de `N/O/R/Y/AB/AC/AD`) supera ±10 → `(AU,
+  AV)`.
+- `completar_calculo_e_costos_grupos()` ahora recibe también `diccionario`, `df_fd_csf` y
+  `df_fd_cpf`, y agrega las 16 columnas nuevas antes del rename final.
+- `generar_pagos_bess()` ahora también busca y lee el archivo `SSCC_Desempeño_*` (con
+  `buscar_archivo_sscc_desempeno()` + `construir_fd()`, igual que ya hacía `generar_consolidado()`
+  para la sección `"fd"`) y mantiene `diccionario` de `leer_centrales()` en vez de descartarlo.
+
+**`NOMBRES_CALCULO_E_COSTOS` gana valores DUPLICADOS a propósito**: `AG:AL` ("Prorratas") y
+`AM:AR` ("FD") comparten los mismos 6 nombres cortos (`CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`,
+`CSF(+)`, `CTF(+)`) porque así están en el archivo real (se distinguen por un encabezado de
+grupo en las filas 1-2 que no se replica en nuestro esquema de una sola fila de encabezado) —
+mismo criterio que el `"Hora Mes"` duplicado de `FD`. Documentado como trampa en
+`METODOLOGIA.md` §7 (indexar por ese nombre después del rename da una `Series` ambigua).
+
+**Verificación:** tests sintéticos (sin persistir en el repo) para cada función nueva por
+separado con valores calculados a mano (incluye el caso "central sin match en Diccionario ->
+blanco", "central con match pero sin FD -> 0", `CalcularCostoPonderado` con energía/precio en
+blanco, y `AU`/`AV` con una tercera central en el mismo `Copia_Ventana` para probar que la suma
+global cruza centrales). Un test llamó a `completar_calculo_e_costos_grupos()` completo y
+confirmó que el orden final de columnas coincide exactamente con `NOMBRES_CALCULO_E_COSTOS`. Un
+test de punta a punta corrió `generar_pagos_bess()` con un archivo `SSCC_Desempeño_*` sintético
+pero con la estructura real que espera `construir_fd()` (datos desde la fila 12, filtro BESS/SAE
+en columna D) — corrió sin errores; la única discrepancia fue que `pd.read_excel` renombra
+columnas duplicadas al releer (`"CPF(-)"` → `"CPF(-).1"`), un comportamiento conocido de pandas
+al leer, no un problema de lo que se escribió (confirmado escribiendo y releyendo un `DataFrame`
+con columnas duplicadas de prueba). No se probó contra un caso real ni contra la planilla 11.

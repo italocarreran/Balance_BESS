@@ -124,19 +124,34 @@ alguno autentica con el nombre de otra persona).
 No hay todavía scripts de apoyo (`scripts/sincronizar.sh`,
 `scripts/verificar.sh`). Mientras no existan, la verificación antes de
 cerrar una sesión es manual: correr `python -m py_compile Balance_BESS.py
-nucleo.py` y, si hay un caso de prueba disponible, `nucleo.ejecutar(...)`
-contra él.
+nucleo.py` y, si hay un caso de prueba disponible, `nucleo.generar_
+consolidado(...)`/`nucleo.generar_pagos_bess(...)` contra él.
 
 ---
 
 ## 5. Convenciones de código establecidas
 
 - **Interfaz de usuario:** una única ventana tkinter (patrón "carpeta base +
-  Examinar + checklist de entradas + Ejecutar + log + barra de progreso +
-  contador de tiempo"). Los estados del checklist son exactamente tres:
-  `ok` (verde), `falta` (rojo, bloquea Ejecutar) y `pendiente` (ámbar, no
-  bloquea). No agregar un cuarto estado sin actualizar `SIMBOLO` y
-  `COLOR_ESTADO` en `Balance_BESS.py` a la vez.
+  Examinar + periodo AAMM + diagrama de la estructura del caso + log +
+  barra de progreso + contador de tiempo"). El diagrama es un árbol de
+  texto tipo consola (prefijos `├──`/`└──`/`│`, patrón tomado de un
+  `Revisor_Reliquidacion.py` que el usuario dio como referencia): cada
+  fila de `nucleo.revisar_estructura()` se pinta con su profundidad
+  deducida del texto (`_profundidad_fila()` en `Balance_BESS.py` — nucleo
+  no conoce conceptos de árbol/interfaz). Los estados son exactamente
+  tres: `ok` (verde), `falta` (rojo) y `pendiente` (ámbar). No agregar un
+  cuarto estado sin actualizar `SIMBOLO` y `COLOR_ESTADO` en
+  `Balance_BESS.py` a la vez.
+  Las dos salidas (`Consolidado_entradas.xlsx`, `Pagos_BESS.xlsx`) son las
+  últimas dos filas de ese mismo diagrama, cada una con un botón
+  **Generar...** que abre su propia ventana — no hay un botón "Ejecutar"
+  único para todo el proceso. La ventana de `Consolidado_entradas.xlsx`
+  tiene una casilla por sección de `nucleo.SECCIONES_CONSOLIDADO`; lo que
+  el usuario destilda se **conserva** tal cual estaba (no se recalcula ni
+  se borra, ver `escribir_salida()`/`hojas_regenerar`). Ambas ventanas
+  corren su función de `nucleo` en un hilo aparte y reportan al log/barra
+  de progreso de la ventana PRINCIPAL (helper `lanzar_generacion()`), no a
+  widgets propios.
 - **Persistencia de configuración:** `config.json` junto al `.py`, con una
   clave por PC/usuario (`get_usuario()` = `hostname_usuario`), para que
   varias personas puedan compartir la misma copia del script sin pisarse la
@@ -287,8 +302,12 @@ causa raíz deje de existir en el código.
 | La fórmula de `Medidores!V` usa `Diccionario!F` y `Diccionario!G` como alias hacia `Diccionario!E` (columnas 5,6,7 del sheet, índices 4,5,6 en el DataFrame `header=None`) — un mapeo posicional específico, distinto de `construir_homologacion()` (que usa toda la fila, sin posición fija). | No usar `construir_homologacion()` para resolver Ofertas SSCC ni `_mapas_homologacion_fge()` para el SoC: son dos bloques distintos de la misma hoja `Diccionario`, con reglas de lectura distintas. |
 | `calcular_s()` no se reinicia por central: sigue siendo "igual a la fila anterior mientras `Ventana` no cambie" incluso cruzando de una central a otra. | Es fiel a la fórmula de Excel (`IF(L3=L2,S2,...)`, sin comparar `G`). Si dos centrales consecutivas terminan/empiezan con la misma `Ventana`, `S` no se reinicia — así es también en la planilla original, no es un bug a corregir. |
 | Que un archivo se llame `SOC_2607.csv` (o cualquier nombre que contenga "SOC"+AAMM) no garantiza que sea el archivo de SoC de la etapa Medidores. Ya apareció un CSV con ese patrón de nombre que en realidad era un archivo de pagos/liquidación (columnas `Fecha_Hora, CONFIGURACION, Central, Pago, Tipo_pago, Bloque_15min`, sin ninguna columna de SoC), sin relación con `Medidores!J`. | El archivo de SoC real siempre es `.xlsx`, con la estructura de bloques horizontales `Status/Questionable/Time Stamp/Value` (ver `extraer_soc()`). Si un archivo que matchea el patrón de nombre no tiene esa estructura, **no asumir que el formato cambió**: es señal de que no es el archivo correcto. Preguntar antes de adaptar el parser a una estructura nueva. |
-| Los nombres de columna de `Calculo E Costos` (`nucleo.construir_calculo_e_costos`) son placeholders (`Mes`, `Dia`, `Hora`, `Hora Mes`, `Minutos`, `Cuarto de Hora`, `clave`, `Barra`, `Energia_Positiva`, `Energia_Negativa`, `SoC`, `Copia_Ventana`, `CMg`) derivados de los comentarios de la macro, no confirmados. El usuario adjuntó dos veces un archivo pensado para traer los encabezados reales de "Ecostos" y ambas veces solo traía las hojas `FD`/`Subastas` (ya confirmadas). | No dar estos nombres por definitivos ni usarlos como referencia para otra hoja. Corregirlos apenas llegue el archivo correcto, sin tocar la lógica de cálculo ya implementada (plan §25.4). |
+| El `Centrales.xlsx` real trae, en la hoja `Resumen BESS`, un título fusionado en la primera fila (`"Cuadro N° 1: Resumen BESS"`) **antes** de la fila de encabezados reales. Un primer intento leyó la hoja con `pd.read_excel(header=0)` (posición fija) y `construir_mapa_barra()` fallaba: no encontraba `'Nombre activo'`/`'Barra inyección'` porque esas columnas venían como `Unnamed: N`. | `leer_centrales()` ahora usa `_leer_resumen_bess()`, que detecta la fila de encabezados buscando los textos esperados (mismo criterio que `detectar_fila_nombres()` para el SoC), nunca por posición fija. Si en el futuro aparece otra hoja de `Centrales.xlsx` con un título similar, aplicar el mismo patrón, no asumir `header=0`. |
+| **(Resuelto)** `nucleo.construir_calculo_e_costos()`/`completar_calculo_e_costos_grupos()` calculan TODO con nombres internos tipo letra/placeholder (`Mes`, `clave`, `Energia_Positiva`, `L`, `N`, `AB`...) y recién renombran a los nombres reales (`NOMBRES_CALCULO_E_COSTOS`) al final de `completar_calculo_e_costos_grupos()` — mismo patrón que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`. El usuario tardó 3 intentos en mandar el archivo correcto con la hoja "E COSTOS" (las dos primeras veces solo traía `FD`/`Subastas`). | Si se agrega una columna nueva a `Calculo E Costos`, calcularla con un nombre interno letra/placeholder y agregarla a `NOMBRES_CALCULO_E_COSTOS` al final, **nunca** usar el nombre real directamente en medio del cálculo (mismo motivo que FD: si dos columnas terminan compartiendo un nombre real, indexar por ese nombre a mitad de cálculo sería ambiguo). |
 | `"OfertasSSCC"` tiene **tres** "s" seguidas al pasarlo a minúsculas (`"Ofertas"` termina en "s" + `"SSCC"` empieza con dos "s" más = `"...tas" + "sscc"` = `"...tasssc c"`). Un primer intento transcribió el literal a mano con solo dos "s" (`"ofertasscc"`) y `buscar_archivo_ofertas()` nunca encontraba ningún archivo real. | No transcribir a mano un literal derivado de un nombre con letras dobles/triples repetidas: calcularlo en tiempo de ejecución (`"OfertasSSCC".lower()`, constante `PATRON_NOMBRE_OFERTAS` en `nucleo.py`) y comparar contra eso. Se detectó con un test sintético antes de llegar a producción; si vuelve a fallar la detección del archivo de Ofertas, este es el primer sospechoso a descartar. |
+| Al agregar `calcular_r()` para la etapa 2 de `Calculo E Costos`, se redefinió sin querer una función que YA existía con ese nombre (`calcular_r()` de Medidores, para `Oferta_Completa_Dia`) — Python no avisa: la segunda definición pisa a la primera en silencio, y como `construir_medidores()` llama a `calcular_r()` en tiempo de ejecución (no al definirse), el error solo aparece al correr esa parte, con un `TypeError` de argumentos que no dice nada sobre la causa real. Se detectó por un test sintético que corrió `generar_pagos_bess()` de punta a punta. | Antes de agregar una función nueva a `nucleo.py`, buscar (`grep -n "^def <nombre>("`) si el nombre ya existe. Si dos hojas distintas tienen una columna con la misma letra pero lógica distinta (como el `R` de Medidores y el `R` de Calculo E Costos), usar un sufijo que distinga la hoja (`calcular_r_ecostos`, no `calcular_r`) en vez de reutilizar el nombre corto. |
+| La hoja `Diccionario` de `Centrales.xlsx` se lee de **tres** formas distintas según qué la consume: `construir_homologacion()` (toda la fila como equivalencias simétricas, para el SoC), `_mapas_homologacion_fge()` (columnas E/F/G→E, para Ofertas SSCC) y `construir_dic_mapeo_diccionario()` (columna A→B, primera coincidencia gana, para `Calculo E Costos!AM:AR`). | No fusionar estas tres lecturas ni reusar una para lo que hace otra: son reglas de negocio distintas sobre la misma hoja, confirmadas en momentos distintos de la migración. Si aparece una CUARTA necesidad de homologación, no asumir que es igual a alguna de las tres — preguntar. |
+| `NOMBRES_CALCULO_E_COSTOS` tiene valores DUPLICADOS a propósito: `AG:AL` ("Prorratas") y `AM:AR` ("FD") comparten los mismos 6 nombres cortos (`CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)`) porque así está en el archivo real (se distinguen por un encabezado de grupo en las filas 1-2 que no se replica en nuestro esquema de una sola fila). Indexar el DataFrame final por uno de esos nombres (`df["CPF(-)"]`) después de renombrar devuelve un DataFrame de 2 columnas, no una Series — un test que no lo espera falla con `ValueError: truth value of a Series is ambiguous`. | No es un bug: es el mismo patrón que el `"Hora Mes"` duplicado de `FD`. Si hay que acceder a una de las dos columnas después del rename (normalmente no hace falta, el rename es el último paso antes de escribir a Excel), usar posición (`df.columns.get_loc`/`.iloc`), nunca el nombre solo. |
 
 ---
 
@@ -341,5 +360,36 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   traspaso base desde Medidores (elegido explícitamente por el usuario
   frente a la alternativa de traducir de una sola vez toda
   `Actualizar_Calculos_Columnas`, ~1500 líneas con dependencias profundas);
-  el resto de columnas y `Calculo RE545` quedan para una etapa posterior
-  (plan §25).
+  después una etapa 2 con todo lo que NO dependía de la hoja `Resumen`
+  (`L, N, O, R, S, T, U, W, X, Y, AB, AC, AD`, plan §25.6/25.7). Esa hoja
+  `Resumen` del libro original resultó ser la MISMA tabla que
+  `Centrales.xlsx!Resumen BESS` (confirmado con un archivo real, plan
+  §25.8) — no hacía falta una hoja nueva, así que `M`, `AE` y `AF` se
+  agregaron también. Una etapa 3 (`AG:AV`, plan §25.10) agregó las
+  Prorratas (`AG:AL`, tabla dinámica **derivada de `Subastas`**, no un
+  archivo externo), el FD homologado (`AM:AR`), el costo ponderado
+  (`AS`/`AT`) y el ingreso/costo de Componente 1 (`AU`/`AV`) — el usuario
+  confirmó que `CTF` (`AI/AL/AO/AR`) no existe y sale en 0 (coincide con
+  el VBA original, que las deja hardcodeadas), y que el archivo de
+  Subastas usado para nuestra hoja está corrido una columna respecto del
+  original, lo que explicó por qué las letras que documentaba el VBA para
+  `L` no coincidían con los encabezados reales. `AW, AX, AZ` y toda
+  `Calculo RE545` siguen pendientes: dependen de un umbral de subida/
+  bajada por central+ciclo cuya posición real en `Subastas` involucra una
+  dependencia circular (`COUNTIFS` contra una columna que a su vez
+  depende de `Calculo E Costos`) todavía sin resolver (plan §25.10) — no
+  se adivina, hay que decantarlo primero.
+- **Cada salida tiene su propio botón "Generar" con casillas por sección,
+  en vez de un único botón "Ejecutar" para todo.** Pedido explícito del
+  usuario, con un archivo de referencia (`Revisor_Reliquidacion.py`) para
+  el estilo de ventana (diagrama de carpetas + botón por fila). Al
+  destildar una sección en la ventana de `Consolidado_entradas.xlsx`, esa
+  parte se **conserva** tal cual estaba (copia cruda de la hoja existente,
+  no un recálculo ni un vaciado) — confirmado explícitamente con el
+  usuario frente a las otras dos alternativas (recalcular todo siempre, o
+  dejar vacío lo no tildado). Las 4 casillas de esa ventana no son 1:1 con
+  cada archivo de entrada: `"medidores"` agrupa Medidas_SAE + SoC +
+  Centrales + OfertasSSCC porque `construir_medidores()` los necesita
+  siempre juntos, no se pueden actualizar por separado a ese nivel de
+  detalle. `Pagos_BESS.xlsx` por ahora no tiene casillas (una sola hoja de
+  salida) — "ajustamos detalles después" (palabras del usuario).

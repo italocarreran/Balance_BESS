@@ -7,10 +7,12 @@ testear sin abrir la ventana.
 """
 
 import calendar
+import math
 import re
 import unicodedata
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
 
 
@@ -615,6 +617,45 @@ def leer_medidas_sae(ruta):
 # LECTURA DEL MAESTRO
 # ============================================================
 
+def _leer_resumen_bess(ruta, nombre_hoja, filas_a_revisar=15):
+    """
+    Lee "Resumen BESS" detectando la fila de encabezados en vez de
+    asumir que es la primera fila: el archivo real trae un titulo
+    ("Cuadro N° 1: Resumen BESS") arriba de los encabezados reales.
+    Mismo criterio que detectar_fila_nombres() para el SoC: nunca una
+    posicion fija, se busca la fila que contiene los textos
+    esperados ('Nombre activo' / 'Barra inyección').
+    """
+
+    crudo = pd.read_excel(
+        ruta, sheet_name=nombre_hoja, header=None, nrows=filas_a_revisar
+    )
+
+    fila_encabezado = None
+
+    for indice in range(len(crudo)):
+
+        textos = [normalizar(v) for v in crudo.iloc[indice].tolist()]
+
+        tiene_nombre = any(
+            "nombre" in t and "activ" in t for t in textos
+        )
+        tiene_barra = any("barra" in t for t in textos)
+
+        if tiene_nombre and tiene_barra:
+            fila_encabezado = indice
+            break
+
+    if fila_encabezado is None:
+        raise ErrorEntrada(
+            f"No se encontro, en las primeras {filas_a_revisar} filas de "
+            f"la hoja '{nombre_hoja}' de {ARCHIVO_CENTRALES}, una fila de "
+            f"encabezados con 'Nombre activo' y 'Barra inyección'."
+        )
+
+    return pd.read_excel(ruta, sheet_name=nombre_hoja, header=fila_encabezado)
+
+
 def leer_centrales(ruta):
     """Devuelve (resumen_bess, diccionario) como DataFrames."""
 
@@ -629,10 +670,7 @@ def leer_centrales(ruta):
             f"'{nombre_buscado}'. Hojas: {excel.sheet_names}"
         )
 
-    resumen = pd.read_excel(
-        ruta,
-        sheet_name=buscar_hoja(HOJA_RESUMEN_BESS),
-    )
+    resumen = _leer_resumen_bess(ruta, buscar_hoja(HOJA_RESUMEN_BESS))
 
     diccionario = pd.read_excel(
         ruta,
@@ -2115,6 +2153,75 @@ def construir_mapa_barra(resumen_bess):
     return mapa
 
 
+def construir_dic_resumen_factor(resumen_bess):
+    """
+    Arma nombre_central -> factor (columna "Pmax (MW)") y el umbral
+    global de SoC minimo, a partir de la MISMA hoja "Resumen BESS" de
+    Centrales.xlsx que ya usa construir_mapa_barra().
+
+    Replica Resumen!B:C (factor, usado en AE/AF) y Resumen!H8
+    (umbral, usado en M) de Actualizar_Calculos_Columnas. El usuario
+    confirmo con un archivo real que la hoja "Resumen" del libro
+    original es la MISMA tabla que "Resumen BESS" (los mismos 9
+    encabezados: Nombre activo...Eficiencia) -- no hace falta una
+    hoja nueva ni un archivo aparte.
+
+    El umbral (celda fija H8 en el original) es, en la practica, el
+    valor de "% Energia sobre minima" de la PRIMERA fila de datos de
+    la tabla -- aca se toma igual (primera fila con nombre de
+    central, no una fila fija: el encabezado de Centrales.xlsx no
+    esta siempre en la misma posicion, ver _leer_resumen_bess()).
+    """
+
+    columna_nombre = None
+    columna_factor = None
+    columna_umbral = None
+
+    for columna in resumen_bess.columns:
+        clave = normalizar(columna)
+        if columna_nombre is None and "nombre" in clave and "activ" in clave:
+            columna_nombre = columna
+        if columna_factor is None and "pmax" in clave:
+            columna_factor = columna
+        if columna_umbral is None and "energia sobre" in clave:
+            columna_umbral = columna
+
+    if columna_nombre is None or columna_factor is None or columna_umbral is None:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} debe "
+            f"tener columnas de nombre de central ('Nombre activo'), "
+            f"factor ('Pmax (MW)') y umbral ('% Energía sobre mínima "
+            f"(indicador nuevo ciclo)'). Columnas encontradas: "
+            f"{list(resumen_bess.columns)}"
+        )
+
+    dic_factor = {}
+
+    for _, fila in resumen_bess.iterrows():
+
+        nombre = fila[columna_nombre]
+        if pd.isna(nombre):
+            continue
+
+        factor = fila[columna_factor]
+        dic_factor[normalizar(nombre)] = (
+            pd.NA if pd.isna(factor) else float(factor)
+        )
+
+    filas_con_nombre = resumen_bess[columna_nombre].notna()
+
+    if not filas_con_nombre.any():
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES} no "
+            f"tiene filas de datos para sacar el umbral de SoC minimo."
+        )
+
+    primer_indice = resumen_bess.index[filas_con_nombre][0]
+    umbral_soc_minimo = float(resumen_bess.loc[primer_indice, columna_umbral])
+
+    return dic_factor, umbral_soc_minimo
+
+
 def construir_calculo_e_costos(
     df_medidores, mapa_barra, dic_cmg, registrar=print
 ):
@@ -2223,6 +2330,881 @@ def escribir_pagos_bess(ruta_salida, df_ecostos, registrar=print):
     registrar(f"Archivo generado: {ruta_salida}")
 
     return ruta_salida
+
+
+# ============================================================
+# CALCULO E COSTOS (etapa 2): L, M, N, O, R, S, T, U, W, X, Y, AB,
+# AC, AD, AE, AF
+#
+# Replica esa parte de Actualizar_Calculos_Columnas (modulo
+# J_Calculo_Ecostos, ver plan seccion 25.6/25.7). El usuario confirmo
+# con un archivo real que la hoja "Resumen" del libro original (que
+# M usa para el umbral, y AE/AF para el factor por central) es la
+# MISMA tabla que Centrales.xlsx!Resumen BESS -- no hacia falta una
+# hoja nueva. Ver construir_dic_resumen_factor().
+#
+# Quedan FUERA de esta etapa (bloqueados): AG:AZ -- dependen de la
+# tabla dinamica "Prorrata SSCC" (todavia no se construye en Python,
+# aunque el usuario ya confirmo su estructura: Filas: Configuración,
+# Hora_mes / Columnas: Control / Valores: Cuenta de Sub_Baj) y de un
+# umbral de subida/bajada por central+ventana (en el .xlsm original
+# vive en Subastas!R:V o U:W segun la fuente -- la posicion exacta
+# todavia no esta clara ni siquiera con el archivo de encabezados
+# real, ver BITACORA) y de una categoria "CTF" en FD que no existe en
+# nuestra hoja FD (que solo tiene CSF/CPF).
+#
+# ADVERTENCIA sobre L (parcialmente resuelta, ver BITACORA): el VBA
+# original arma la clave de match contra Subastas usando columnas por
+# posicion que, en el archivo de trazabilidad, no coincidian con los
+# encabezados reales. El usuario confirmo que el "tipo" (BAJADA/
+# SUBIDA) esta en Subastas!Sub_Baj. La central equivalente se uso
+# como Subastas!Configuración, y un archivo real posterior confirmo
+# que "Calculo E Costos"!G se llama literalmente "Configuracion" --
+# el mismo campo en ambas hojas, lo que da bastante mas confianza en
+# esta homologacion (aunque no es una confirmacion letra por letra
+# del match, solo de que el NOMBRE del campo coincide en las dos
+# hojas). Si al correr esto la cantidad de filas con L=1 sale
+# sospechosamente baja o en cero, sigue siendo la primera sospechosa
+# a revisar.
+# ============================================================
+
+def _normaliza_valor_vba(valor):
+    """
+    Replica NormalizarValor: texto en mayusculas y recortado. Los
+    numeros se renderizan sin decimales de mas (igual que CStr en
+    VBA: 7 -> "7", no "7.0"), para poder armar claves compuestas
+    comparables entre hojas.
+    """
+
+    if valor is None:
+        return ""
+
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(valor, bool):
+        texto = str(valor)
+    elif isinstance(valor, (int, float)):
+        numero = float(valor)
+        texto = str(int(numero)) if numero.is_integer() else str(numero)
+    else:
+        texto = str(valor)
+
+    return texto.strip().upper()
+
+
+def _construir_set_subastas_tipo(df_subastas):
+    """
+    Conjunto de claves "central¦mes¦dia¦hora" que SI participaron en
+    una subasta de subida o bajada (Subastas!Sub_Baj en {BAJADA,
+    SUBIDA}), para la columna L.
+    """
+
+    tipo = df_subastas["Sub_Baj"].map(_normaliza_valor_vba)
+    filtro = tipo.isin(["BAJADA", "SUBIDA"])
+
+    sub = df_subastas.loc[filtro]
+
+    claves = (
+        sub["Configuración"].map(_normaliza_valor_vba)
+        + "¦" + sub["Mes"].map(_normaliza_valor_vba)
+        + "¦" + sub["Dia"].map(_normaliza_valor_vba)
+        + "¦" + sub["Hora_dia"].map(_normaliza_valor_vba)
+    )
+
+    return set(claves)
+
+
+def calcular_l(df_ecostos, df_subastas):
+    """
+    Replica la columna L: 1 si la central+mes+dia+hora de la fila
+    existe en Subastas como registro BAJADA o SUBIDA, si no 0.
+    """
+
+    claves_subasta = _construir_set_subastas_tipo(df_subastas)
+
+    clave_fila = (
+        df_ecostos["clave"].map(_normaliza_valor_vba)
+        + "¦" + df_ecostos["Mes"].map(_normaliza_valor_vba)
+        + "¦" + df_ecostos["Dia"].map(_normaliza_valor_vba)
+        + "¦" + df_ecostos["Hora"].map(_normaliza_valor_vba)
+    )
+
+    return clave_fila.isin(claves_subasta).astype("int64")
+
+
+def calcular_n_o(df_ecostos):
+    """
+    Replica N y O: por grupo (central=clave, ventana=Copia_Ventana),
+    ordenando por 'Cuarto de Hora' descendente, suma acumulada de I
+    (N) y de -J (O), solo contando filas con L=1, y repartida a TODAS
+    las filas que comparten el mismo 'Cuarto de Hora' dentro del
+    grupo (no solo a las que tienen L=1).
+    """
+
+    def _por_grupo(grupo):
+
+        valido = grupo["L"] == 1
+
+        i_valido = grupo["Energia_Positiva"].where(valido, 0.0)
+        j_valido = grupo["Energia_Negativa"].where(valido, 0.0)
+
+        suma_i_por_f = i_valido.groupby(grupo["Cuarto de Hora"]).sum()
+        suma_j_por_f = j_valido.groupby(grupo["Cuarto de Hora"]).sum()
+
+        acumulado_i = suma_i_por_f.sort_index(ascending=False).cumsum()
+        acumulado_j = suma_j_por_f.sort_index(ascending=False).cumsum()
+
+        n = grupo["Cuarto de Hora"].map(acumulado_i)
+        o = -grupo["Cuarto de Hora"].map(acumulado_j)
+
+        return pd.DataFrame({"N": n, "O": o}, index=grupo.index)
+
+    resultado = (
+        df_ecostos
+        .groupby(["clave", "Copia_Ventana"], sort=False, group_keys=False)
+        .apply(_por_grupo)
+    )
+
+    return resultado["N"], resultado["O"]
+
+
+def calcular_r_ecostos(df_ecostos):
+    """
+    Replica "Calculo E Costos"!R: ranking por grupo (central+
+    ventana), ordenando por CMg descendente y 'Cuarto de Hora'
+    descendente; las filas empatadas en ambos comparten el mismo
+    ranking (la posicion donde empieza el empate), igual que un
+    RANK() de Excel con "competition ranking" (no denso).
+
+    Nombre con sufijo _ecostos a proposito: Medidores ya tiene su
+    propia calcular_r() (Oferta_Completa_Dia, logica no relacionada)
+    -- no renombrarla ni fusionarlas, son dos columnas "R" de hojas
+    distintas con formulas distintas.
+    """
+
+    def _por_grupo(grupo):
+
+        orden = grupo.sort_values(
+            ["CMg", "Cuarto de Hora"],
+            ascending=[False, False],
+            kind="mergesort",
+        )
+
+        posiciones = pd.Series(range(1, len(orden) + 1), index=orden.index)
+
+        posicion_min = posiciones.groupby(
+            [orden["CMg"], orden["Cuarto de Hora"]]
+        ).transform("min")
+
+        return pd.DataFrame(
+            {"R": posicion_min.reindex(grupo.index)}, index=grupo.index
+        )
+
+    resultado = (
+        df_ecostos
+        .groupby(["clave", "Copia_Ventana"], sort=False, group_keys=False)
+        .apply(_por_grupo)
+    )
+
+    return resultado["R"]
+
+
+def calcular_s_t_u(df_ecostos):
+    """
+    Replica S (=I*Q), T (=J*Q) y U (=L*(S+T)). No dependen de
+    agrupar por central/ventana.
+    """
+
+    cmg_num = pd.to_numeric(df_ecostos["CMg"], errors="coerce").fillna(0.0)
+
+    s = df_ecostos["Energia_Positiva"].fillna(0.0) * cmg_num
+    t = df_ecostos["Energia_Negativa"].fillna(0.0) * cmg_num
+    u = df_ecostos["L"].astype(float) * (s + t)
+
+    return s, t, u
+
+
+def calcular_w_x(df_ecostos):
+    """
+    Replica X (=P, copia de Copia_Ventana) y W (contador que se
+    reinicia a 1 cada vez que cambia X respecto de la fila anterior,
+    GLOBAL -- no por grupo). La primera fila es una excepcion fiel al
+    original: W toma el valor de 'Hora' en vez de 1, y esa diferencia
+    se arrastra en el resto de su bloque (W sigue siendo "contador
+    que suma 1", solo que ese primer bloque no arranca en 1).
+    """
+
+    x = df_ecostos["Copia_Ventana"].reset_index(drop=True)
+
+    cambia = x.ne(x.shift())
+    bloque = cambia.cumsum()
+
+    w = (
+        x.groupby(bloque)
+        .cumcount()
+        .add(1)
+        .astype(float)
+    )
+
+    if len(w):
+        primera_hora = pd.to_numeric(
+            df_ecostos["Hora"].iloc[:1], errors="coerce"
+        ).fillna(0.0).iloc[0]
+        offset = primera_hora - 1.0
+        primer_bloque = bloque.iloc[0]
+        w = w.mask(bloque == primer_bloque, w + offset)
+
+    w.index = df_ecostos.index
+    x.index = df_ecostos.index
+
+    return w, x
+
+
+def calcular_y_ab_ac_ad(df_ecostos):
+    """
+    Replica Y, AB (a partir de las filas con L=1 e I!=0, ordenadas
+    por CMg descendente) y AC, AD (analogo con J!=0, ordenadas por
+    CMg ASCENDENTE), por grupo (central+ventana). Cada fila del grupo
+    (en su orden original) recibe los valores de la fila en esa
+    posicion dentro del orden calificado; si el grupo tiene menos
+    filas calificadas que filas totales, las posiciones sobrantes
+    toman los valores de las filas NO calificadas en su orden
+    original (sin ordenar).
+    """
+
+    def _por_grupo(grupo):
+
+        l_uno = grupo["L"] == 1
+        calif_i = l_uno & (grupo["Energia_Positiva"] != 0)
+        calif_j = l_uno & (grupo["Energia_Negativa"] != 0)
+
+        orden_i = list(
+            grupo.loc[calif_i]
+            .sort_values("CMg", ascending=False, kind="mergesort")
+            .index
+        )
+        fuente_i = orden_i + list(grupo.index[~calif_i])
+        cantidad_calif_i = len(orden_i)
+
+        orden_j = list(
+            grupo.loc[calif_j]
+            .sort_values("CMg", ascending=True, kind="mergesort")
+            .index
+        )
+        fuente_j = orden_j + list(grupo.index[~calif_j])
+        cantidad_calif_j = len(orden_j)
+
+        destino = list(grupo.index)
+
+        y, ab, ac, ad = [], [], [], []
+
+        for posicion, idx_origen in enumerate(fuente_i):
+            y.append(grupo.at[idx_origen, "Cuarto de Hora"])
+            ab.append(
+                grupo.at[idx_origen, "CMg"]
+                if posicion < cantidad_calif_i
+                else pd.NA
+            )
+
+        for posicion, idx_origen in enumerate(fuente_j):
+            ac.append(grupo.at[idx_origen, "Cuarto de Hora"])
+            ad.append(
+                grupo.at[idx_origen, "CMg"]
+                if posicion < cantidad_calif_j
+                else pd.NA
+            )
+
+        return pd.DataFrame(
+            {"Y": y, "AB": ab, "AC": ac, "AD": ad}, index=destino
+        )
+
+    resultado = (
+        df_ecostos
+        .groupby(["clave", "Copia_Ventana"], sort=False, group_keys=False)
+        .apply(_por_grupo)
+    )
+
+    return resultado["Y"], resultado["AB"], resultado["AC"], resultado["AD"]
+
+
+def calcular_m(df_ecostos, umbral_soc_minimo):
+    """
+    Replica M ("SoC sobre el minimo"): 1 si SoC > umbral_soc_minimo
+    (ver construir_dic_resumen_factor), si no 0.
+    """
+
+    soc = pd.to_numeric(df_ecostos["SoC"], errors="coerce").fillna(0.0)
+
+    return (soc > umbral_soc_minimo).astype("int64")
+
+
+def _calcular_asignacion_energia(bloque, energia_maxima, factor):
+    """
+    Replica CalcularAsignacionEnergia (AE/AF): distribuye
+    energia_maxima en bloques de 15 minutos segun 'factor' (Pmax de
+    la central) -- el bloque asigna 1 (completo) si cae dentro de la
+    cantidad de bloques llenos, una fraccion al siguiente bloque si
+    sobra un resto, y 0 al resto. Int() de VBA redondea hacia abajo
+    incluso con numeros negativos, igual que math.floor.
+    """
+
+    cantidad_bloques = 4.0 * energia_maxima / factor / 1000.0
+    parte_entera = math.floor(cantidad_bloques)
+    fraccion = cantidad_bloques - parte_entera
+
+    if bloque <= cantidad_bloques:
+        proporcion = 1.0
+    elif fraccion != 0 and bloque == parte_entera + 1.0:
+        proporcion = fraccion
+    else:
+        proporcion = 0.0
+
+    return proporcion * factor / 4.0 * 1000.0
+
+
+def calcular_ae_af(df_ecostos, dic_factor):
+    """
+    Replica AE ("Energía descargada") y AF ("Energía cargada"):
+    asigna, dentro de cada grupo (central+ventana), la energia
+    maxima acumulada (N para AE, O para AF) en bloques segun el
+    orden W de cada fila y un 'factor' por central (Resumen BESS!
+    Pmax (MW), ver construir_dic_resumen_factor). Requiere que N, O
+    y W ya esten calculados en df_ecostos.
+
+    Si no hay factor para la central (no encontrada) o el factor es
+    0 o no numerico, AE/AF quedan en blanco (pd.NA) -- equivalente a
+    los #N/A / #VALOR! / #DIV/0! del original, sin fabricar un tipo
+    de error de Excel en Python.
+    """
+
+    maximo_n = (
+        df_ecostos.groupby(["clave", "Copia_Ventana"])["N"].transform("max")
+    )
+    maximo_o = (
+        df_ecostos.groupby(["clave", "Copia_Ventana"])["O"].transform("max")
+    )
+
+    factor = df_ecostos["clave"].map(
+        lambda valor: dic_factor.get(normalizar(valor), pd.NA)
+    )
+
+    ae, af = [], []
+
+    for w, mn, mo, f in zip(df_ecostos["W"], maximo_n, maximo_o, factor):
+
+        if pd.isna(f) or not isinstance(f, (int, float)) or f == 0:
+            ae.append(pd.NA)
+            af.append(pd.NA)
+            continue
+
+        ae.append(_calcular_asignacion_energia(w, mn, f))
+        af.append(-_calcular_asignacion_energia(w, mo, f))
+
+    return (
+        pd.Series(ae, index=df_ecostos.index),
+        pd.Series(af, index=df_ecostos.index),
+    )
+
+
+# ============================================================
+# CALCULO E COSTOS (etapa 3): AG:AL (prorratas), AM:AR (FD), AS, AT,
+# AU, AV
+#
+# El usuario confirmo que la categoria "CTF" (AI, AL, AO, AR) no
+# existe en nuestros datos de FD y que en el archivo real esas
+# columnas salen en 0 -- coincide exactamente con el VBA original,
+# que las deja hardcodeadas en 0 (no dependen de ningun diccionario).
+#
+# Tambien confirmo que el archivo de Subastas que uso para armar nuestra
+# hoja esta corrido una columna respecto del original (el original
+# tiene una columna vacia al principio que el nuestro no tiene). Eso
+# explica por que el VBA original documentaba "D"/"G,H,I,K" para L:
+# aplicando ese corrimiento, esas letras coinciden exactamente con
+# Sub_Baj/Configuración+Mes+Dia+Hora_dia -- lo mismo que ya se venia
+# usando, ahora con una explicacion clara de la discrepancia.
+#
+# Sigue FUERA de esta etapa: AW, AX, AZ -- dependen de una tabla de
+# umbrales de subida/bajada en Subastas cuya posicion exacta (con el
+# mismo corrimiento de una columna) parece ser Subastas!S:W, pero
+# involucra una formula circular (COUNTIFS contra 'Energia SSCC',
+# que a su vez depende de Calculo E Costos) que todavia no se
+# termino de decantar. Ver plan seccion 25.10.
+# ============================================================
+
+def construir_prorrata_sscc(df_subastas):
+    """
+    Construye la tabla dinamica "Prorrata SSCC" a partir de Subastas
+    (confirmado por el usuario, NO es un archivo externo):
+        Filas: Configuración, Hora_mes
+        Columnas: Control
+        Valores: Cuenta de Sub_Baj
+    """
+
+    tabla = (
+        df_subastas
+        .pivot_table(
+            index=["Configuración", "Hora_mes"],
+            columns="Control",
+            values="Sub_Baj",
+            aggfunc="count",
+            fill_value=0,
+        )
+        .reset_index()
+    )
+    tabla.columns.name = None
+
+    return tabla
+
+
+def construir_dic_prorrata(tabla_prorrata, registrar=print):
+    """
+    Arma central+hora_mes -> (CPF, CSF) a partir de la tabla dinamica
+    Prorrata SSCC (construir_prorrata_sscc()). Busca, entre las
+    columnas que dejo el pivot (una por cada valor distinto de
+    Subastas!Control), la que contenga "cpf" y la que contenga "csf"
+    en el nombre -- INFERIDO (no confirmado letra por letra que
+    Control tenga exactamente esos dos valores); si no las encuentra,
+    avisa y usa 0 en vez de fallar.
+    """
+
+    columnas_valor = [
+        c for c in tabla_prorrata.columns
+        if c not in ("Configuración", "Hora_mes")
+    ]
+
+    columna_cpf = next(
+        (c for c in columnas_valor if "cpf" in normalizar(str(c))), None
+    )
+    columna_csf = next(
+        (c for c in columnas_valor if "csf" in normalizar(str(c))), None
+    )
+
+    if columna_cpf is None or columna_csf is None:
+        registrar(
+            f"  [AVISO] La columna 'Control' de Subastas no tiene valores "
+            f"identificables como CPF/CSF (encontrados: {columnas_valor}); "
+            f"CPF(-)/CSF(-)/CPF(+)/CSF(+) de Prorrata SSCC quedaran en 0."
+        )
+
+    dic = {}
+
+    for _, fila in tabla_prorrata.iterrows():
+
+        clave = (
+            _normaliza_valor_vba(fila["Configuración"])
+            + "¦" + _normaliza_valor_vba(fila["Hora_mes"])
+        )
+
+        cpf = float(fila[columna_cpf]) if columna_cpf is not None else 0.0
+        csf = float(fila[columna_csf]) if columna_csf is not None else 0.0
+
+        dic[clave] = (cpf, csf)
+
+    return dic
+
+
+def calcular_prorratas(df_ecostos, dic_prorrata):
+    """
+    Replica AG/AH (y sus duplicados AJ/AK, ver comentario de
+    completar_calculo_e_costos_grupos): busca central+"Hora Mes" en
+    el diccionario de construir_dic_prorrata(); si no hay match,
+    ambas quedan en 0 (igual que el original, que no distingue
+    "sin match" de "cero").
+    """
+
+    clave = (
+        df_ecostos["clave"].map(_normaliza_valor_vba)
+        + "¦" + df_ecostos["Hora Mes"].map(_normaliza_valor_vba)
+    )
+
+    valores = clave.map(lambda k: dic_prorrata.get(k, (0.0, 0.0)))
+
+    ag = valores.map(lambda v: v[0])
+    ah = valores.map(lambda v: v[1])
+
+    return ag, ah
+
+
+def construir_dic_mapeo_diccionario(diccionario):
+    """
+    Replica CrearDiccionarioPrimerValor(datosDiccionario, 1, 2):
+    columna A -> columna B de la hoja Diccionario (header=None), la
+    primera coincidencia gana. Es un mapeo DISTINTO de
+    construir_homologacion() (usa toda la fila) y de
+    _mapas_homologacion_fge() (usa E/F/G) -- tres lecturas distintas
+    de la misma hoja Diccionario, no fusionar.
+    """
+
+    dic = {}
+
+    for _, fila in diccionario.iterrows():
+
+        clave = fila[0]
+        if pd.isna(clave):
+            continue
+
+        clave_norm = normalizar(clave)
+
+        if clave_norm and clave_norm not in dic:
+            dic[clave_norm] = fila[1]
+
+    return dic
+
+
+def _calcular_bloque(valor):
+    """Replica CalcularBloque: Int((valor-1)/4)+1."""
+
+    return math.floor((valor - 1.0) / 4.0) + 1.0
+
+
+def construir_dic_fd_bloque(df_fd, columna_id, columna_mas, columna_menos):
+    """
+    Arma id->(valor_mas, valor_menos) a partir de un bloque de FD
+    (CSF o CPF, ya con nombres reales de columna), clave = columna_id
+    normalizada, primera coincidencia gana. Replica
+    CrearDiccionarioFDAL/CrearDiccionarioFDQAD.
+    """
+
+    dic = {}
+
+    for _, fila in df_fd.iterrows():
+
+        clave = normalizar(fila[columna_id])
+
+        if clave and clave not in dic:
+            dic[clave] = (fila[columna_mas], fila[columna_menos])
+
+    return dic
+
+
+def calcular_fd_prorrateado(df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf):
+    """
+    Replica AM, AN, AP, AQ: homologa la central ("clave") contra
+    Diccionario!A->B; si no esta en el Diccionario, las 4 quedan en
+    blanco (pd.NA, equivalente al #N/A del original). Si esta,
+    arma una clave "bloque+central homologada" (bloque = CalcularBloque
+    de Y para descarga, de AC para carga) y busca esa clave en los
+    diccionarios de FD (CPF da AM/AP, CSF da AN/AQ); si no hay match
+    en FD, queda en 0 (fiel al original: ahi solo se registra un
+    aviso, no se propaga un error).
+    """
+
+    y_num = pd.to_numeric(df_ecostos["Y"], errors="coerce").fillna(0.0)
+    ac_num = pd.to_numeric(df_ecostos["AC"], errors="coerce").fillna(0.0)
+
+    bloque_y = y_num.map(_calcular_bloque)
+    bloque_ac = ac_num.map(_calcular_bloque)
+
+    am, an, ap, aq = [], [], [], []
+
+    for central, by, bac in zip(df_ecostos["clave"], bloque_y, bloque_ac):
+
+        mapeo = dic_mapeo.get(normalizar(central))
+
+        if mapeo is None:
+            am.append(pd.NA)
+            an.append(pd.NA)
+            ap.append(pd.NA)
+            aq.append(pd.NA)
+            continue
+
+        mapeo_texto = _normaliza_valor_vba(mapeo)
+
+        clave_y = normalizar(f"{int(by)}{mapeo_texto}")
+        clave_ac = normalizar(f"{int(bac)}{mapeo_texto}")
+
+        cpf_y = dic_fd_cpf.get(clave_y)
+        csf_y = dic_fd_csf.get(clave_y)
+        csf_ac = dic_fd_csf.get(clave_ac)
+
+        ap.append(cpf_y[0] if cpf_y is not None else 0.0)
+        am.append(cpf_y[1] if cpf_y is not None else 0.0)
+        an.append(csf_y[1] if csf_y is not None else 0.0)
+        aq.append(csf_ac[0] if csf_ac is not None else 0.0)
+
+    return (
+        pd.Series(am, index=df_ecostos.index),
+        pd.Series(an, index=df_ecostos.index),
+        pd.Series(ap, index=df_ecostos.index),
+        pd.Series(aq, index=df_ecostos.index),
+    )
+
+
+def _calcular_costo_ponderado(cantidad1, cantidad2, precio1, precio2, energia):
+    """Replica CalcularCostoPonderado (AS/AT)."""
+
+    if pd.isna(energia):
+        return pd.NA
+
+    if (cantidad1 + cantidad2) > 0:
+
+        if pd.isna(precio1) or pd.isna(precio2):
+            return pd.NA
+
+        factor = float(precio1) * cantidad1 + float(precio2) * cantidad2
+
+    else:
+        factor = 1.0
+
+    return factor * float(energia)
+
+
+def calcular_as_at(df_ecostos):
+    """
+    Replica AS (energia descarga con FD) y AT (energia carga con
+    FD): CalcularCostoPonderado combinando las prorratas (AG/AH), el
+    FD homologado (AM/AN para AS, AP/AQ para AT) y la energia
+    asignada (AE para AS, AF para AT).
+    """
+
+    as_ = [
+        _calcular_costo_ponderado(ag, ah, am, an, ae)
+        for ag, ah, am, an, ae in zip(
+            df_ecostos["AG"], df_ecostos["AH"],
+            df_ecostos["AM"], df_ecostos["AN"], df_ecostos["AE"],
+        )
+    ]
+
+    at = [
+        _calcular_costo_ponderado(ag, ah, ap, aq, af)
+        for ag, ah, ap, aq, af in zip(
+            df_ecostos["AG"], df_ecostos["AH"],
+            df_ecostos["AP"], df_ecostos["AQ"], df_ecostos["AF"],
+        )
+    ]
+
+    return (
+        pd.Series(as_, index=df_ecostos.index),
+        pd.Series(at, index=df_ecostos.index),
+    )
+
+
+def calcular_au_av(df_ecostos):
+    """
+    Replica AU (ingreso descarga) y AV (costo carga): promedio de AB
+    (donde AE es valido y distinto de 0, dentro del grupo central+
+    ventana) multiplicado por AE, solo si la suma GLOBAL de energia
+    de descarga por ventana (todas las centrales que comparten esa
+    misma "Copia_Ventana"/P) supera 10; analogo para AV con AF/AD,
+    umbral de suma global menor a -10.
+    """
+
+    ae = df_ecostos["AE"]
+    af = df_ecostos["AF"]
+    ab = df_ecostos["AB"]
+    ad = df_ecostos["AD"]
+
+    grupo = [df_ecostos["clave"], df_ecostos["Copia_Ventana"]]
+
+    ae_valido = ae.notna() & (pd.to_numeric(ae, errors="coerce") != 0)
+    af_valido = af.notna() & (pd.to_numeric(af, errors="coerce") != 0)
+
+    ab_contable = ab.where(ae_valido & ab.notna())
+    ad_contable = ad.where(af_valido & ad.notna())
+
+    suma_ab = ab_contable.groupby(grupo).transform("sum")
+    cantidad_ab = ab_contable.groupby(grupo).transform("count")
+    hay_error_ae = ae.isna().groupby(grupo).transform("any")
+
+    suma_ad = ad_contable.groupby(grupo).transform("sum")
+    cantidad_ad = ad_contable.groupby(grupo).transform("count")
+    hay_error_af = af.isna().groupby(grupo).transform("any")
+
+    promedio_ab = (suma_ab / cantidad_ab.replace(0, pd.NA)).fillna(0.0)
+    promedio_ad = (suma_ad / cantidad_ad.replace(0, pd.NA)).fillna(0.0)
+
+    # sumaIP/sumaJP: suma GLOBAL por ventana (P), agrupando TODAS las
+    # centrales que comparten esa Copia_Ventana -- no por central+P.
+    suma_i_global = (
+        df_ecostos["Energia_Positiva"]
+        .groupby(df_ecostos["Copia_Ventana"])
+        .transform("sum")
+    )
+    suma_j_global = (
+        df_ecostos["Energia_Negativa"]
+        .groupby(df_ecostos["Copia_Ventana"])
+        .transform("sum")
+    )
+
+    condicion_au = (
+        (cantidad_ab > 0) & (~hay_error_ae) & (suma_i_global > 10) & ae.notna()
+    )
+    condicion_av = (
+        (cantidad_ad > 0) & (~hay_error_af) & (suma_j_global < -10) & af.notna()
+    )
+
+    au = (
+        promedio_ab * pd.to_numeric(ae, errors="coerce").fillna(0.0)
+    ).where(condicion_au, 0.0)
+    av = (
+        promedio_ad * pd.to_numeric(af, errors="coerce").fillna(0.0)
+    ).where(condicion_av, 0.0)
+
+    return au, av
+
+
+# Nombres reales de columna de "Calculo E Costos" (confirmados por el
+# usuario contra un archivo real, hoja "E COSTOS"). Se calcula todo
+# con los nombres/letras internos usados hasta aca y se renombra
+# recien al final, mismo criterio que NOMBRES_FD_CSF/NOMBRES_SUBASTAS.
+#
+# OJO: AG:AL ("Prorratas") y AM:AR ("FD") comparten los mismos 6
+# nombres cortos (CPF(-), CSF(-), CTF(-), CPF(+), CSF(+), CTF(+)) --
+# asi esta en el archivo real (se distinguen por un encabezado de
+# grupo en las filas 1-2 que no se replica en este esquema de una
+# sola fila de encabezado, igual que Subastas!Q sin nombre o el
+# "Hora Mes" duplicado de FD). No es un error de tipeo.
+NOMBRES_CALCULO_E_COSTOS = {
+    "Mes": "Mes",
+    "Dia": "Dia",
+    "Hora": "Hora",
+    "Hora Mes": "Hora mes",
+    "Minutos": "Minuto",
+    "Cuarto de Hora": "Bloque horario",
+    "clave": "Configuracion",
+    "Barra": "Barra",
+    "Energia_Positiva": "Descarga kWh",
+    "Energia_Negativa": "Carga kWh",
+    "SoC": "SoC %",
+    "Copia_Ventana": "Ciclo de Carga del mes",
+    "CMg": "CMg",
+    "L": "Adj SSCC",
+    "M": "SoC sobre el minimo",
+    "N": "Energía SSCC (-) por remunerar",
+    "O": "Energía SSCC (+) por remunerar",
+    "R": "ranking cmg",
+    "S": "Valorizacion Descarga",
+    "T": "Valorizacion Carga",
+    "U": "Total",
+    "W": "Bloque ordenado",
+    "X": "Ciclo",
+    "Y": "Bloque Mes Descarga",
+    "AB": "Curva monotona CMg Descarga",
+    "AC": "Bloque Mes  Carga",
+    "AD": "Curva monotona CMg Carga",
+    "AE": "Energía descargada",
+    "AF": "Energía cargada",
+    "AG": "CPF(-)",
+    "AH": "CSF(-)",
+    "AI": "CTF(-)",
+    "AJ": "CPF(+)",
+    "AK": "CSF(+)",
+    "AL": "CTF(+)",
+    "AM": "CPF(-)",
+    "AN": "CSF(-)",
+    "AO": "CTF(-)",
+    "AP": "CPF(+)",
+    "AQ": "CSF(+)",
+    "AR": "CTF(+)",
+    "AS": "Energía descarga con FD",
+    "AT": "Energía carga con FD",
+    "AU": "Ingreso descarga",
+    "AV": "Costo carga",
+}
+
+
+def completar_calculo_e_costos_grupos(
+    df_ecostos,
+    df_subastas,
+    dic_factor,
+    umbral_soc_minimo,
+    diccionario,
+    df_fd_csf,
+    df_fd_cpf,
+    registrar=print,
+):
+    """
+    Etapas 2 y 3 de "Calculo E Costos": agrega L, M, N, O, R, S, T,
+    U, W, X, Y, AB, AC, AD, AE, AF, AG, AH, AI, AJ, AK, AL, AM, AN,
+    AO, AP, AQ, AR, AS, AT, AU, AV a df_ecostos (ya con la etapa base
+    de construir_calculo_e_costos), y renombra todas las columnas a
+    sus nombres reales (NOMBRES_CALCULO_E_COSTOS) antes de devolver.
+    Ver los comentarios de seccion mas arriba para el detalle y las
+    advertencias de cada columna.
+
+    dic_factor, umbral_soc_minimo: de construir_dic_resumen_factor().
+    diccionario: hoja Diccionario de Centrales.xlsx (header=None).
+    df_fd_csf, df_fd_cpf: de construir_fd() (nombres reales ya
+    aplicados).
+
+    Fuera de esta funcion (ver plan seccion 25.10): AW, AX, AZ y toda
+    la hoja Calculo RE545.
+    """
+
+    df = df_ecostos.reset_index(drop=True).copy()
+
+    df["L"] = calcular_l(df, df_subastas)
+    df["M"] = calcular_m(df, umbral_soc_minimo)
+
+    n, o = calcular_n_o(df)
+    df["N"] = n.reset_index(drop=True)
+    df["O"] = o.reset_index(drop=True)
+
+    df["R"] = calcular_r_ecostos(df).reset_index(drop=True)
+
+    s, t, u = calcular_s_t_u(df)
+    df["S"] = s
+    df["T"] = t
+    df["U"] = u
+
+    w, x = calcular_w_x(df)
+    df["W"] = w
+    df["X"] = x
+
+    y, ab, ac, ad = calcular_y_ab_ac_ad(df)
+    df["Y"] = y.reset_index(drop=True)
+    df["AB"] = ab.reset_index(drop=True)
+    df["AC"] = ac.reset_index(drop=True)
+    df["AD"] = ad.reset_index(drop=True)
+
+    ae, af = calcular_ae_af(df, dic_factor)
+    df["AE"] = ae
+    df["AF"] = af
+
+    tabla_prorrata = construir_prorrata_sscc(df_subastas)
+    dic_prorrata = construir_dic_prorrata(tabla_prorrata, registrar=registrar)
+
+    ag, ah = calcular_prorratas(df, dic_prorrata)
+    df["AG"] = ag
+    df["AH"] = ah
+    df["AI"] = 0.0
+    df["AJ"] = df["AG"]
+    df["AK"] = df["AH"]
+    df["AL"] = 0.0
+
+    dic_mapeo = construir_dic_mapeo_diccionario(diccionario)
+    dic_fd_csf = construir_dic_fd_bloque(df_fd_csf, "id", "CSF(+)", "CSF(-)")
+    dic_fd_cpf = construir_dic_fd_bloque(df_fd_cpf, "id", "CPF(+)", "CPF(-)")
+
+    am, an, ap, aq = calcular_fd_prorrateado(
+        df, dic_mapeo, dic_fd_csf, dic_fd_cpf
+    )
+    df["AM"] = am
+    df["AN"] = an
+    df["AO"] = 0.0
+    df["AP"] = ap
+    df["AQ"] = aq
+    df["AR"] = 0.0
+
+    as_, at = calcular_as_at(df)
+    df["AS"] = as_
+    df["AT"] = at
+
+    au, av = calcular_au_av(df)
+    df["AU"] = au
+    df["AV"] = av
+
+    participa = int(df["L"].sum())
+    registrar(
+        f"  Calculo E Costos: {participa:,} de {len(df):,} fila(s) "
+        f"marcadas como 'participa en subasta' (L=1)."
+    )
+
+    return df.rename(columns=NOMBRES_CALCULO_E_COSTOS)
 
 
 # ============================================================
@@ -2572,6 +3554,37 @@ def _escribir_tabla_con_titulo(
 _COLUMNA_Q_INDICE = 16
 
 
+def _copiar_hoja_existente(wb_origen, nombre_hoja, wb_destino):
+    """
+    Copia una hoja (solo valores, sin formulas ni formato) de un
+    workbook openpyxl a otro. La usa escribir_salida() para preservar
+    una hoja que el usuario decidio NO regenerar en la ventana
+    "Generar" (ver hojas_regenerar). Devuelve False si wb_origen es
+    None o no tiene esa hoja (no hay nada que preservar).
+    """
+
+    if wb_origen is None or nombre_hoja not in wb_origen.sheetnames:
+        return False
+
+    hoja_o = wb_origen[nombre_hoja]
+    hoja_d = wb_destino.create_sheet(title=nombre_hoja)
+
+    for fila in hoja_o.iter_rows():
+        for celda in fila:
+            hoja_d.cell(
+                row=celda.row, column=celda.column, value=celda.value
+            )
+
+    for letra, dim in hoja_o.column_dimensions.items():
+        if dim.width:
+            hoja_d.column_dimensions[letra].width = dim.width
+
+    return True
+
+
+_HOJAS_CONSOLIDADO = ("Medidores", "Ofertas SSCC", "CMg", "FD", "Subastas")
+
+
 def escribir_salida(
     df,
     ruta_salida,
@@ -2583,6 +3596,9 @@ def escribir_salida(
     df_fd_csf=None,
     df_fd_cpf=None,
     df_subastas=None,
+    ruta_existente=None,
+    hojas_regenerar=None,
+    registrar=print,
 ):
     """
     Escribe Consolidado_entradas.xlsx: la tabla Medidores (A:U, una
@@ -2591,12 +3607,50 @@ def escribir_salida(
     hoja (HOJA_OFERTAS_SSCC, una debajo de la otra), CMg, FD (el
     bloque CSF y el bloque CPF lado a lado, de distinto largo cada
     uno - ver construir_fd), Subastas, y un Log.
+
+    hojas_regenerar: None (por defecto) regenera las 5 hojas de datos
+    con lo que se haya pasado. Si es un set con algunos nombres de
+    _HOJAS_CONSOLIDADO, las que NO esten en el set se copian tal cual
+    desde ruta_existente en vez de recalcularse -- lo usa
+    generar_consolidado() cuando el usuario destilda una entrada en
+    la ventana "Generar". Si una hoja a preservar no existe en
+    ruta_existente, queda vacia y se registra un aviso (en el log de
+    esta corrida y como fila del Log).
     """
 
     ruta_salida = Path(ruta_salida)
 
+    regenerar = (
+        set(_HOJAS_CONSOLIDADO)
+        if hojas_regenerar is None
+        else set(hojas_regenerar)
+    )
+
+    wb_existente = None
+    if hojas_regenerar is not None and ruta_existente is not None:
+        ruta_existente = Path(ruta_existente)
+        if ruta_existente.is_file():
+            wb_existente = openpyxl.load_workbook(
+                ruta_existente, data_only=True
+            )
+
+    avisos_preservacion = []
+
+    def _preservar_o_avisar(writer, nombre_hoja):
+        if _copiar_hoja_existente(wb_existente, nombre_hoja, writer.book):
+            return
+        pd.DataFrame().to_excel(writer, sheet_name=nombre_hoja, index=False)
+        mensaje = (
+            f"No se regenero la hoja '{nombre_hoja}' (entrada no "
+            f"tildada) y no se encontro una version anterior para "
+            f"preservarla; quedo vacia."
+        )
+        avisos_preservacion.append(mensaje)
+        registrar(f"  [AVISO] {mensaje}")
+
     registros = (
         [("aviso", a) for a in avisos]
+        + [("aviso", a) for a in avisos_preservacion]
         + [("incidencia_soc", i) for i in incidencias]
     )
 
@@ -2607,40 +3661,50 @@ def escribir_salida(
 
     with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
 
-        df.to_excel(
-            writer,
-            sheet_name="Medidores",
-            index=False,
-        )
-
-        columna = 0
-
-        if df_wxy is not None:
-            _, columna = _escribir_tabla_con_titulo(
+        if "Medidores" in regenerar:
+            df.to_excel(
                 writer,
-                HOJA_OFERTAS_SSCC,
-                df_wxy,
-                "Ofertas SSCC por dia (equivalente a Medidores!W:Y)",
-                columna_inicio=columna,
-            )
-
-        if df_resumen_ventana is not None:
-            _escribir_tabla_con_titulo(
-                writer,
-                HOJA_OFERTAS_SSCC,
-                df_resumen_ventana,
-                "Resumen ventana oferta (equivalente a Medidores!AB:AE)",
-                columna_inicio=columna,
-            )
-
-        if df_cmg is not None:
-            df_cmg.to_excel(
-                writer,
-                sheet_name="CMg",
+                sheet_name="Medidores",
                 index=False,
             )
+        else:
+            _preservar_o_avisar(writer, "Medidores")
 
-        if df_fd_csf is not None or df_fd_cpf is not None:
+        if "Ofertas SSCC" in regenerar:
+
+            columna = 0
+
+            if df_wxy is not None:
+                _, columna = _escribir_tabla_con_titulo(
+                    writer,
+                    HOJA_OFERTAS_SSCC,
+                    df_wxy,
+                    "Ofertas SSCC por dia (equivalente a Medidores!W:Y)",
+                    columna_inicio=columna,
+                )
+
+            if df_resumen_ventana is not None:
+                _escribir_tabla_con_titulo(
+                    writer,
+                    HOJA_OFERTAS_SSCC,
+                    df_resumen_ventana,
+                    "Resumen ventana oferta (equivalente a Medidores!AB:AE)",
+                    columna_inicio=columna,
+                )
+        else:
+            _preservar_o_avisar(writer, HOJA_OFERTAS_SSCC)
+
+        if "CMg" in regenerar:
+            if df_cmg is not None:
+                df_cmg.to_excel(
+                    writer,
+                    sheet_name="CMg",
+                    index=False,
+                )
+        else:
+            _preservar_o_avisar(writer, "CMg")
+
+        if "FD" in regenerar:
 
             if df_fd_csf is not None:
                 df_fd_csf.to_excel(
@@ -2657,13 +3721,18 @@ def escribir_salida(
                     index=False,
                     startcol=_COLUMNA_Q_INDICE,
                 )
+        else:
+            _preservar_o_avisar(writer, "FD")
 
-        if df_subastas is not None:
-            df_subastas.to_excel(
-                writer,
-                sheet_name="Subastas",
-                index=False,
-            )
+        if "Subastas" in regenerar:
+            if df_subastas is not None:
+                df_subastas.to_excel(
+                    writer,
+                    sheet_name="Subastas",
+                    index=False,
+                )
+        else:
+            _preservar_o_avisar(writer, "Subastas")
 
         df_log.to_excel(
             writer,
@@ -2676,127 +3745,210 @@ def escribir_salida(
 
 # ============================================================
 # PROCESO COMPLETO
+#
+# Dos salidas independientes, cada una con su ventana "Generar" en
+# Balance_BESS.py:
+#
+#   - generar_consolidado(): Consolidado_entradas.xlsx. El usuario
+#     tilda que "secciones" quiere recalcular esta vez; el resto se
+#     preserva tal cual estaba (ver escribir_salida/hojas_regenerar).
+#   - generar_pagos_bess(): Pagos_BESS.xlsx. Por ahora sin checkboxes
+#     (una sola hoja) -- lee Medidores de Consolidado_entradas.xlsx
+#     ya generado, no lo recalcula.
+#
+# SECCIONES_CONSOLIDADO agrupa los 4 checkboxes de esa ventana con
+# las hojas que produce cada uno. "medidores" junta Medidas_SAE, SoC,
+# Centrales (Diccionario) y OfertasSSCC porque construir_medidores()
+# necesita los 4 juntos: no se pueden tildar por separado a ese nivel
+# de detalle sin recalcular con datos parcialmente viejos.
 # ============================================================
 
-def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
-    """
-    Corre la etapa Medidores de punta a punta.
+SECCIONES_CONSOLIDADO = (
+    (
+        "medidores",
+        "Medidores + Ofertas SSCC",
+        f"Usa {ARCHIVO_MEDIDAS_SAE}, el SoC del periodo, "
+        f"{ARCHIVO_CENTRALES} (hoja Diccionario) y el archivo "
+        f"OfertasSSCC -- los 4 se leen juntos para armar estas dos "
+        f"hojas, no se pueden actualizar por separado.",
+        ("Medidores", "Ofertas SSCC"),
+    ),
+    (
+        "cmg",
+        "CMg",
+        f"Usa {ARCHIVO_CMG}.",
+        ("CMg",),
+    ),
+    (
+        "fd",
+        "FD",
+        f"Usa el archivo {CARPETA_SSCC_DESEMPENO}/ (hojas CPF/CSF "
+        f"Horario).",
+        ("FD",),
+    ),
+    (
+        "subastas",
+        "Subastas",
+        f"Usa el archivo {CARPETA_SUBASTAS}/.",
+        ("Subastas",),
+    ),
+)
 
-    aamm:      periodo ingresado por el usuario en la ventana (4
-               digitos, ej. '2607').
-    registrar: funcion para mensajes.
-    progreso:  funcion que recibe 0..100.
+
+def generar_consolidado(
+    carpeta_base, aamm, secciones_activas, registrar=print, progreso=None
+):
+    """
+    Genera/actualiza Consolidado_entradas.xlsx, recalculando solo las
+    hojas de las secciones tildadas (ids de SECCIONES_CONSOLIDADO) y
+    preservando el resto tal cual estaba en el archivo existente (ver
+    escribir_salida). La usa la ventana "Generar" de esa fila.
+
+    secciones_activas: iterable de ids de SECCIONES_CONSOLIDADO
+    ("medidores", "cmg", "fd", "subastas") a recalcular esta vez.
     """
 
     def avanzar(valor):
         if progreso:
             progreso(valor)
 
-    aamm = validar_aamm(aamm)
+    secciones_activas = set(secciones_activas)
+    ids_validos = {seccion[0] for seccion in SECCIONES_CONSOLIDADO}
+    desconocidas = secciones_activas - ids_validos
 
-    rutas, _ = revisar_estructura(carpeta_base, aamm)
-
-    if not rutas["medidas_sae"].is_file():
+    if desconocidas:
         raise ErrorEntrada(
-            f"No se encontro {rutas['medidas_sae']}"
+            f"Seccion(es) desconocida(s): {sorted(desconocidas)}"
         )
 
-    if not rutas["centrales"].is_file():
+    if not secciones_activas:
         raise ErrorEntrada(
-            f"No se encontro {rutas['centrales']}"
+            "No se tildo ninguna entrada para generar/actualizar."
         )
 
-    archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
-    if not archivo_ofertas:
-        raise ErrorEntrada(
-            f"No se encontro ningun archivo *OfertasSSCC* en "
-            f"{rutas['ofertas_dir']}"
-        )
+    hojas_regenerar = set()
+    for id_seccion, _, _, hojas in SECCIONES_CONSOLIDADO:
+        if id_seccion in secciones_activas:
+            hojas_regenerar.update(hojas)
 
-    if not rutas["cmg"].is_file():
-        raise ErrorEntrada(
-            f"No se encontro {rutas['cmg']}"
-        )
+    rutas = resolver_rutas(carpeta_base)
 
-    archivo_sscc = buscar_archivo_sscc_desempeno(
-        rutas["sscc_desempeno_dir"]
-    )
-    if not archivo_sscc:
-        raise ErrorEntrada(
-            f"No se encontro ningun archivo SSCC_Desempeño_* en "
-            f"{rutas['sscc_desempeno_dir']}"
-        )
+    df_medidores = None
+    avisos, incidencias = [], []
+    df_wxy = df_resumen_ventana = None
+    df_cmg = df_fd_csf = df_fd_cpf = df_subastas = None
 
-    archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
-    if not archivo_subastas:
-        raise ErrorEntrada(
-            f"No se encontro ningun archivo "
-            f"3_REMUNERACIÓN_SUBASTAS_E_ID_* en "
-            f"{rutas['subastas_dir']}"
-        )
-
-    archivo_soc = buscar_soc(rutas["medidas_dir"], aamm)
-    anio, mes = periodo_desde_aamm(aamm)
-
-    registrar(f"Periodo indicado: {anio}-{mes:02d} ({aamm})")
     avanzar(5)
 
-    registrar("Leyendo Centrales.xlsx...")
-    resumen, diccionario = leer_centrales(rutas["centrales"])
-    mapa = construir_homologacion(diccionario)
-    registrar(f"  homologaciones cargadas: {len(mapa):,}")
-    avanzar(20)
+    if "medidores" in secciones_activas:
 
-    registrar(f"Leyendo {archivo_soc.name}...")
-    df_soc, incidencias = extraer_soc(archivo_soc, mapa)
-    registrar(
-        f"  bloques leidos: "
-        f"{df_soc['central'].nunique()}   "
-        f"registros: {len(df_soc):,}"
-    )
+        aamm_val = validar_aamm(aamm)
 
-    for incidencia in incidencias:
-        registrar(f"  [SOC] {incidencia}")
+        if not rutas["medidas_sae"].is_file():
+            raise ErrorEntrada(
+                f"No se encontro {rutas['medidas_sae']}"
+            )
 
-    avanzar(50)
+        if not rutas["centrales"].is_file():
+            raise ErrorEntrada(
+                f"No se encontro {rutas['centrales']}"
+            )
 
-    registrar(f"Leyendo {ARCHIVO_MEDIDAS_SAE}...")
-    df_sae = leer_medidas_sae(rutas["medidas_sae"])
-    registrar(f"  filas: {len(df_sae):,}")
-    avanzar(70)
+        archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
+        if not archivo_ofertas:
+            raise ErrorEntrada(
+                f"No se encontro ningun archivo *OfertasSSCC* en "
+                f"{rutas['ofertas_dir']}"
+            )
 
-    registrar("Construyendo Medidores...")
-    (
-        df_medidores,
-        avisos,
-        df_wxy,
-        df_resumen_ventana,
-    ) = construir_medidores(
-        df_sae,
-        df_soc,
-        anio,
-        mes,
-        archivo_ofertas,
-        diccionario,
-        registrar=registrar,
-    )
+        archivo_soc = buscar_soc(rutas["medidas_dir"], aamm_val)
+        anio, mes = periodo_desde_aamm(aamm_val)
 
-    for aviso in avisos:
-        registrar(f"  [AVISO] {aviso}")
+        registrar(f"Periodo indicado: {anio}-{mes:02d} ({aamm_val})")
 
-    avanzar(80)
+        registrar("Leyendo Centrales.xlsx...")
+        _, diccionario = leer_centrales(rutas["centrales"])
+        mapa = construir_homologacion(diccionario)
+        registrar(f"  homologaciones cargadas: {len(mapa):,}")
+        avanzar(20)
 
-    registrar(f"Leyendo {ARCHIVO_CMG}...")
-    df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
-    avanzar(85)
+        registrar(f"Leyendo {archivo_soc.name}...")
+        df_soc, incidencias = extraer_soc(archivo_soc, mapa)
+        registrar(
+            f"  bloques leidos: "
+            f"{df_soc['central'].nunique()}   "
+            f"registros: {len(df_soc):,}"
+        )
 
-    registrar(f"Leyendo {archivo_sscc.name}...")
-    df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
-    avanzar(90)
+        for incidencia in incidencias:
+            registrar(f"  [SOC] {incidencia}")
 
-    registrar(f"Leyendo {archivo_subastas.name}...")
-    df_subastas = construir_subastas(archivo_subastas, registrar=registrar)
-    avanzar(95)
+        avanzar(35)
+
+        registrar(f"Leyendo {ARCHIVO_MEDIDAS_SAE}...")
+        df_sae = leer_medidas_sae(rutas["medidas_sae"])
+        registrar(f"  filas: {len(df_sae):,}")
+        avanzar(50)
+
+        registrar("Construyendo Medidores...")
+        (
+            df_medidores,
+            avisos,
+            df_wxy,
+            df_resumen_ventana,
+        ) = construir_medidores(
+            df_sae,
+            df_soc,
+            anio,
+            mes,
+            archivo_ofertas,
+            diccionario,
+            registrar=registrar,
+        )
+
+        for aviso in avisos:
+            registrar(f"  [AVISO] {aviso}")
+
+    avanzar(60)
+
+    if "cmg" in secciones_activas:
+        if not rutas["cmg"].is_file():
+            raise ErrorEntrada(f"No se encontro {rutas['cmg']}")
+        registrar(f"Leyendo {ARCHIVO_CMG}...")
+        df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
+
+    avanzar(72)
+
+    if "fd" in secciones_activas:
+        archivo_sscc = buscar_archivo_sscc_desempeno(
+            rutas["sscc_desempeno_dir"]
+        )
+        if not archivo_sscc:
+            raise ErrorEntrada(
+                f"No se encontro ningun archivo SSCC_Desempeño_* en "
+                f"{rutas['sscc_desempeno_dir']}"
+            )
+        registrar(f"Leyendo {archivo_sscc.name}...")
+        df_fd_csf, df_fd_cpf = construir_fd(
+            archivo_sscc, registrar=registrar
+        )
+
+    avanzar(84)
+
+    if "subastas" in secciones_activas:
+        archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
+        if not archivo_subastas:
+            raise ErrorEntrada(
+                f"No se encontro ningun archivo "
+                f"3_REMUNERACIÓN_SUBASTAS_E_ID_* en "
+                f"{rutas['subastas_dir']}"
+            )
+        registrar(f"Leyendo {archivo_subastas.name}...")
+        df_subastas = construir_subastas(
+            archivo_subastas, registrar=registrar
+        )
+
+    avanzar(92)
 
     registrar(f"Escribiendo {rutas['salida'].name}...")
     escribir_salida(
@@ -2810,22 +3962,141 @@ def ejecutar(carpeta_base, aamm, registrar=print, progreso=None):
         df_fd_csf,
         df_fd_cpf,
         df_subastas,
+        ruta_existente=rutas["salida"],
+        hojas_regenerar=hojas_regenerar,
+        registrar=registrar,
     )
-    avanzar(97)
-
-    registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
-               "traspaso de Medidores)...")
-    mapa_barra = construir_mapa_barra(resumen)
-    dic_cmg = construir_dic_cmg(df_cmg)
-    df_ecostos = construir_calculo_e_costos(
-        df_medidores, mapa_barra, dic_cmg, registrar=registrar
-    )
-
-    registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
-    escribir_pagos_bess(rutas["salida_pagos"], df_ecostos, registrar=registrar)
 
     avanzar(100)
     registrar(f"Listo: {rutas['salida']}")
+
+    return rutas["salida"]
+
+
+def generar_pagos_bess(carpeta_base, registrar=print, progreso=None):
+    """
+    Genera/actualiza Pagos_BESS.xlsx: "Calculo E Costos" hasta AV
+    (falta AW:AZ, ver plan seccion 25.10) y todo lo anterior (base +
+    etapas 2/3, plan seccion 25).
+
+    No recalcula Medidores ni Subastas: los lee tal cual estan en
+    Consolidado_entradas.xlsx, que debe generarse primero con su
+    propia ventana "Generar". Centrales.xlsx, cmg.xlsx y el archivo
+    SSCC_Desempeño_* si se leen/recalculan frescos (igual que ya
+    hacia con CMg).
+
+    Sin checkboxes todavia -- una sola hoja de salida, se ajustan
+    detalles en una etapa posterior (pedido explicito del usuario).
+    """
+
+    def avanzar(valor):
+        if progreso:
+            progreso(valor)
+
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["salida"].is_file():
+        raise ErrorEntrada(
+            f"No se encontro {rutas['salida']}. Primero hay que "
+            f"generar Consolidado_entradas.xlsx (boton 'Generar' de "
+            f"esa fila)."
+        )
+
+    registrar(f"Leyendo hoja 'Medidores' de {rutas['salida'].name}...")
+
+    try:
+        df_medidores = pd.read_excel(rutas["salida"], sheet_name="Medidores")
+    except ValueError as error:
+        raise ErrorEntrada(
+            f"{rutas['salida'].name} no tiene la hoja 'Medidores' "
+            f"todavia. Genera Consolidado_entradas.xlsx primero "
+            f"(tildando 'Medidores + Ofertas SSCC')."
+        ) from error
+
+    if df_medidores.empty:
+        raise ErrorEntrada(
+            f"La hoja 'Medidores' de {rutas['salida'].name} esta "
+            f"vacia. Genera Consolidado_entradas.xlsx primero "
+            f"(tildando 'Medidores + Ofertas SSCC')."
+        )
+
+    registrar(f"  filas: {len(df_medidores):,}")
+    avanzar(20)
+
+    if not rutas["centrales"].is_file():
+        raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
+
+    registrar("Leyendo Centrales.xlsx...")
+    resumen, diccionario = leer_centrales(rutas["centrales"])
+    mapa_barra = construir_mapa_barra(resumen)
+    dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
+    avanzar(40)
+
+    if not rutas["cmg"].is_file():
+        raise ErrorEntrada(f"No se encontro {rutas['cmg']}")
+
+    registrar(f"Leyendo {ARCHIVO_CMG}...")
+    df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
+    dic_cmg = construir_dic_cmg(df_cmg)
+    avanzar(55)
+
+    registrar("Construyendo Calculo E Costos (etapa base: H + CMg + "
+               "traspaso de Medidores)...")
+    df_ecostos = construir_calculo_e_costos(
+        df_medidores, mapa_barra, dic_cmg, registrar=registrar
+    )
+    avanzar(70)
+
+    registrar(f"Leyendo hoja 'Subastas' de {rutas['salida'].name}...")
+
+    try:
+        df_subastas = pd.read_excel(rutas["salida"], sheet_name="Subastas")
+    except ValueError as error:
+        raise ErrorEntrada(
+            f"{rutas['salida'].name} no tiene la hoja 'Subastas' "
+            f"todavia. Genera Consolidado_entradas.xlsx primero "
+            f"(tildando 'Subastas')."
+        ) from error
+
+    if df_subastas.empty:
+        raise ErrorEntrada(
+            f"La hoja 'Subastas' de {rutas['salida'].name} esta "
+            f"vacia. Genera Consolidado_entradas.xlsx primero "
+            f"(tildando 'Subastas')."
+        )
+
+    avanzar(75)
+
+    archivo_sscc = buscar_archivo_sscc_desempeno(rutas["sscc_desempeno_dir"])
+    if not archivo_sscc:
+        raise ErrorEntrada(
+            f"No se encontro ningun archivo SSCC_Desempeño_* en "
+            f"{rutas['sscc_desempeno_dir']} (hace falta para AM:AR de "
+            f"Calculo E Costos)."
+        )
+
+    registrar(f"Leyendo {archivo_sscc.name}...")
+    df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
+    avanzar(85)
+
+    registrar(
+        "Completando L, M, N, O, R, S, T, U, W, X, Y, AB, AC, AD, AE, AF, "
+        "AG, AH, AI, AJ, AK, AL, AM, AN, AO, AP, AQ, AR, AS, AT, AU, AV "
+        "(AW:AZ quedan pendientes, ver plan seccion 25.10)..."
+    )
+    df_ecostos = completar_calculo_e_costos_grupos(
+        df_ecostos, df_subastas, dic_factor, umbral_soc_minimo,
+        diccionario, df_fd_csf, df_fd_cpf,
+        registrar=registrar,
+    )
+    avanzar(90)
+
+    registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
+    escribir_pagos_bess(
+        rutas["salida_pagos"], df_ecostos, registrar=registrar
+    )
+
+    avanzar(100)
     registrar(f"Listo: {rutas['salida_pagos']}")
 
-    return df_medidores, avisos, incidencias
+    return rutas["salida_pagos"]
