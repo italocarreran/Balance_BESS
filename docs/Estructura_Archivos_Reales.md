@@ -91,7 +91,7 @@ Ninguno se selecciona a mano — el programa los encuentra por carpeta + patrón
   - Si en cambio hace falta homologar (nombre de SoC distinto al de `Medidas_SAE`), se usa
     `construir_homologacion()` sobre `Centrales.xlsx!Diccionario` — ver más abajo la trampa de
     esa hoja.
-- **Función que lo lee**: `extraer_soc(...)` / `detectar_fila_nombres()` (`nucleo.py`).
+- **Función que lo lee**: `extraer_soc(...)` / `detectar_fila_nombres()` (`Script/nucleo.py`).
 - **Archivo real de referencia**: `docs/SOC_real_2607.xlsx` ✅ (copia completa del real, 1.4 MB).
 
 ---
@@ -201,15 +201,42 @@ Maestro externo, nombre literal. Dos hojas.
 
 ---
 
-### 5. `Cmg/cmg.xlsx`
+### 5. `Cmg/cmg<AAMM>_def_15minutal.csv` y `Cmg/cmg.xlsx`
+
+Son dos archivos y **ninguno de los dos lo arma el usuario a mano**: los genera el propio
+programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
+
+**El CSV (origen)** — `cmg<AAMM>_def_15minutal.csv`:
+
+- **De dónde sale**: el botón **Traer cmg_15min** lo copia de
+  `T:\CMgReales 15MIN\<AAAA>\<AAMM>\Mensual\CMg\Cmg para balance\cmg<AAMM>_def_15minutal.csv`
+  a la carpeta `Cmg/` del caso (única ruta del programa que apunta fuera de la carpeta base).
+- **Formato**: `;` como separador, codificación `latin1`, coma decimal (es-CL).
+- **Columnas que usa**: `FECHA` (AAAAMMDD), `HORA`, `MINUTO`, `BARRA`, `CMg[CLP/KWh]`.
+  ⚠️ El archivo real trae **7 columnas** y de eso depende el layout de `cmg.xlsx` (ver abajo),
+  pero nadie confirmó todavía cuáles son las otras dos contra un CSV real.
+- **Funciones**: `traer_csv_15min()` / `construir_cmg_desde_csv()` en
+  `Script/Cmg/Extrae_CMG_barras.py`.
+- **Archivo real de referencia**: no tenemos copia guardada en `docs/`.
+
+**El Excel (derivado)** — `cmg.xlsx`:
 
 - **Nombre**: única excepción con nombre literal fijo (no cambia con el período).
+- **Cómo se arma**: el botón **Generar** filtra el CSV por las barras de
+  `Centrales.xlsx!Resumen BESS!Barra inyección` (no hay lista de barras en el código) y le agrega
+  `Cuarto de Hora` (numerado con los bloques que el CSV **realmente** trae: los días de cambio de
+  hora tienen 92 o 100, no 96) y el promedio horario de `CMg[CLP/KWh]` por FECHA+HORA+BARRA.
 - **Hoja**: `"CMg"` si existe, si no la primera hoja del archivo.
 - **Estructura**: columnas A:I (9), encabezados en la fila 1 (se **preservan tal cual**, no se
-  renombran — la macro original tampoco los toca). Datos desde la fila 2.
+  renombran — la macro original tampoco los toca). Datos desde la fila 2. Las 7 primeras son las
+  del CSV, H es `Cuarto de Hora` e I el promedio horario.
 - **Uso**: se ordena por columna D ascendente y luego H ascendente (mismo orden que aplica la
   macro real antes de pegarlo) y se usa un lookup por Barra (columna homologada aparte) + Cuarto
   de Hora.
+- **Trampa conocida**: `leer_cmg()` lee este archivo **por posición** (D = Barra, F = valor de Q,
+  H = Cuarto de Hora, I = CMg promedio), así que si el CSV cambia de columnas se rompe la etapa
+  siguiente en silencio. `Extrae_CMG_barras.validar_layout()` avisa en el log si `BARRA` deja de
+  caer en D o `Cuarto de Hora` en H.
 - **Función que lo lee**: `leer_cmg(ruta_cmg)`.
 - **Archivo real de referencia**: no tenemos copia guardada en `docs/`.
 
@@ -224,7 +251,7 @@ Maestro externo, nombre literal. Dos hojas.
   (`header=None`, se descartan las primeras 11 filas de título/metadata).
 - **Columnas reales que usa, en este orden** (✅ el CONTENIDO/nombre de cada columna fue
   confirmado por el usuario contra un caso real — ver comentario de `NOMBRES_FD_CSF`/
-  `NOMBRES_FD_CPF` en `nucleo.py`; ⚠️ el mapeo letra-por-letra de abajo es una reconstrucción a
+  `NOMBRES_FD_CPF` en `Script/nucleo.py`; ⚠️ el mapeo letra-por-letra de abajo es una reconstrucción a
   partir de esos nombres reales + la lectura posicional del código, no la lectura directa de la
   fila de encabezados del archivo de origen — nadie guardó un `SSCC_Desempeño_*.xlsx` real en
   `docs/` todavía, solo la hoja `FD` de salida ya confirmada, ver abajo):
@@ -258,7 +285,7 @@ Maestro externo, nombre literal. Dos hojas.
 - **Salida**: estas columnas alimentan dos bloques de nuestra propia hoja `FD` (`Consolidado_
   entradas.xlsx`) — CSF en `A:M`, CPF en `Q:AE`, con columnas calculadas agregadas (`id`,
   `Hora Mes` duplicada, `CSF(+)`/`CSF(-)`/`CPF(+)`/`CPF(-)` copiadas de la respuesta) — ver
-  `NOMBRES_FD_CSF`/`NOMBRES_FD_CPF` en `nucleo.py` para el detalle exacto de esa hoja de salida
+  `NOMBRES_FD_CSF`/`NOMBRES_FD_CPF` en `Script/nucleo.py` para el detalle exacto de esa hoja de salida
   (no confundir con la estructura del archivo de ENTRADA de arriba, que es distinta).
 - **Función que lo lee**: `construir_fd(ruta_sscc)`.
 - **Archivo real de referencia**: `docs/Libro1_Subastas_real.xlsx`, hoja `"FD"` ✅ (encabezados
@@ -339,7 +366,7 @@ fila, jamás por posición de letra).
 
 1. Si el nombre/estructura coincide con alguno de los 7 de la sección A → es una entrada real del
    proceso. Compararlo contra la tabla de columnas de esa sección; si difiere, es una corrección
-   a documentar acá (y probablemente un bug a corregir en `nucleo.py`).
+   a documentar acá (y probablemente un bug a corregir en `Script/nucleo.py`).
 2. Si trae una hoja "Calculo E Costos"/"Calculo RE545"/similar **más** una hoja pegada con valores
    reales al lado → es una comparación de validación (sección B). Usar el método de comparación
    por clave, no por letra.

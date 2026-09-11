@@ -19,7 +19,8 @@ resto (regla de expansión de contexto, convenciones, trampas conocidas).
    verificarlo en la misma sesión, o dejar explícito en `BITACORA.md` qué
    falta y por qué se cortó.
 5. Antes de dar un cambio por terminado: correr
-   `python -m py_compile Balance_BESS.py nucleo.py` y, si hay un caso de
+   `python -m py_compile Balance_BESS.py Script/nucleo.py
+   Script/Cmg/Extrae_CMG_barras.py` y, si hay un caso de
    prueba disponible (una carpeta con la estructura de
    `docs/Plan_Traspaso_Python_Balance_BESS.md` §3.3), ejecutar
    `nucleo.ejecutar(carpeta)` sobre ella y revisar la hoja `Log` de

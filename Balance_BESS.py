@@ -2,13 +2,13 @@
 """
 Balance BESS / SSCC.
 
-Ventana unica: se elige la carpeta base del caso y el programa
-resuelve solas todas las entradas por ruta relativa. Debajo del
-selector de carpeta y del periodo (AAMM) se muestra un diagrama de la
-estructura esperada, con el estado de cada entrada (OK/FALTA/
-PENDIENTE). Consolidado_entradas.xlsx y Pagos_BESS.xlsx tienen cada
-uno su boton "Generar", que abre una ventana aparte para elegir que
-partes recalcular.
+Ventana unica: se elige la carpeta base del caso, se ingresa el
+periodo (AAMM) y debajo se dibuja el diagrama de la estructura del
+caso con el estado de cada entrada (OK/FALTA/PENDIENTE).
+
+Todo lo que el programa puede hacer sale de un boton en la fila que
+corresponde -no hay ventanas intermedias ni un boton "Ejecutar"
+unico-:
 
     <CARPETA_BASE>/
         Medidas/
@@ -16,19 +16,34 @@ partes recalcular.
             <algo>SOC<algo>AAMM<algo>.xlsx
         Auxiliares/
             Centrales.xlsx
+                hoja 'Resumen BESS'
+                hoja 'Diccionario'
         Ofertas/
             <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Cmg/
-            cmg.xlsx
+            cmg<AAMM>_def_15minutal.csv    [Traer cmg_15min]
+            cmg.xlsx                       [Generar]
         SSCC_Desempeño/
             SSCC_Desempeño_<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Subastas/
             3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (idem)
-        Consolidado_entradas.xlsx      <- salida (boton "Generar")
-        Pagos_BESS.xlsx                <- salida (boton "Generar")
+        Consolidado_entradas.xlsx          [Actualizar todo]
+            hoja 'Medidores'               [Actualizar]
+            hoja 'Ofertas SSCC'            [Actualizar]
+            hoja 'CMg'                     [Actualizar]
+            hoja 'FD'                      [Actualizar]
+            hoja 'Subastas'                [Actualizar]
+        Pagos_BESS.xlsx                    [Actualizar todo]
+            hoja 'Calculo E Costos'        [Actualizar]
+            hoja 'Calculo RE545'           [Actualizar]
 
-La ubicacion de este .py no influye en nada salvo en donde se
-guarda config.json.
+Las dos salidas se desglosan por hoja igual que Centrales.xlsx: cada
+hoja se actualiza sola, y lo que no se toca se conserva tal cual
+estaba en el archivo. Si el archivo todavia no existe, se crea al
+actualizar la primera hoja.
+
+El calculo vive en Script/ (ver Script/__init__.py). La ubicacion de
+este .py no influye en nada salvo en donde se guarda config.json.
 """
 
 import json
@@ -44,7 +59,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import nucleo
+from Script import nucleo
 
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -66,6 +81,15 @@ COLOR_ESTADO = {
     "falta": COLOR_FALTA,
     "pendiente": COLOR_PENDIENTE,
 }
+
+# Anchos de las columnas del diagrama. La de acciones (los botones)
+# va ANTES del detalle, a pedido del usuario, y por eso necesita un
+# ancho fijo en pixeles: si no, cada fila correria el detalle segun el
+# largo de su boton.
+ANCHO_ESTRUCTURA = 52      # caracteres (Consolas 9)
+ANCHO_ESTADO = 11          # caracteres
+ANCHO_ACCION = 150         # pixeles
+ALTO_ACCION = 26           # pixeles
 
 
 # ============================================================
@@ -129,50 +153,38 @@ def formato_tiempo(segundos):
 # ============================================================
 # DIAGRAMA DE CARPETAS (arbol de texto tipo consola)
 #
-# revisar_estructura() de nucleo.py devuelve una lista plana de
-# (etiqueta, estado, detalle). Para dibujarla como arbol (igual que
-# el patron de Revisor_Reliquidacion.py que pidio el usuario) hace
-# falta saber la PROFUNDIDAD de cada fila; se deduce del texto de la
-# etiqueta en vez de pedirle a nucleo.py que conozca conceptos de
-# interfaz (arbol/prefijos), que no le corresponden.
+# revisar_estructura() devuelve una lista plana de filas con su
+# NIVEL (0 = raiz del caso, 1 = adentro de una carpeta/archivo, 2 =
+# un nivel mas). Aca solo se traduce esa lista a prefijos de consola
+# (├── / └── / │): nucleo.py sabe de estructura, no de dibujo.
 # ============================================================
 
-def _profundidad_fila(etiqueta):
-    if etiqueta in ("Carpeta base", "Periodo (AAMM)"):
-        return 0
-    if etiqueta.startswith("  hoja "):
-        return 2
-    if etiqueta.endswith("/"):
-        return 0
-    return 1
-
-
-def _es_ultimo_en_su_nivel(profundidades, i):
+def _es_ultimo_en_su_nivel(niveles, i):
     """
     True si, mirando hacia adelante desde i, se sube de nivel antes
-    de encontrar otra fila con la MISMA profundidad (o se llega al
-    final de la lista): o sea, si i es la ultima de su grupo.
+    de encontrar otra fila con el MISMO nivel (o se llega al final de
+    la lista): o sea, si i es la ultima de su grupo.
     """
-    nivel = profundidades[i]
-    for j in range(i + 1, len(profundidades)):
-        if profundidades[j] < nivel:
+    nivel = niveles[i]
+    for j in range(i + 1, len(niveles)):
+        if niveles[j] < nivel:
             return True
-        if profundidades[j] == nivel:
+        if niveles[j] == nivel:
             return False
     return True
 
 
-def _prefijos_arbol(profundidades):
+def _prefijos_arbol(niveles):
     """
     Prefijos tipo consola (├── / └── / │) para una lista plana de
-    profundidades (0 = raiz), calculando el relleno de cada ancestro
-    segun si ESE ancestro es o no el ultimo de su propio grupo.
+    niveles (0 = raiz), calculando el relleno de cada ancestro segun
+    si ESE ancestro es o no el ultimo de su propio grupo.
     """
-    n = len(profundidades)
-    ultimos = [_es_ultimo_en_su_nivel(profundidades, i) for i in range(n)]
+    n = len(niveles)
+    ultimos = [_es_ultimo_en_su_nivel(niveles, i) for i in range(n)]
     prefijos = []
 
-    for i, nivel in enumerate(profundidades):
+    for i, nivel in enumerate(niveles):
 
         if nivel == 0:
             prefijos.append("")
@@ -181,10 +193,7 @@ def _prefijos_arbol(profundidades):
         relleno = ""
         for ancestro_nivel in range(1, nivel):
             indice_ancestro = next(
-                (
-                    k for k in range(i - 1, -1, -1)
-                    if profundidades[k] == ancestro_nivel
-                ),
+                (k for k in range(i - 1, -1, -1) if niveles[k] == ancestro_nivel),
                 None,
             )
             relleno += (
@@ -208,15 +217,19 @@ def main():
 
     root = tk.Tk()
     root.title("Balance BESS / SSCC")
-    root.geometry("1100x780")
+    root.geometry("1180x820")
 
     var_base = tk.StringVar(value=cfg.get("carpeta_base", ""))
     var_aamm = tk.StringVar(value=cfg.get("aamm", ""))
     var_estado = tk.StringVar(value="Listo")
     var_tiempo = tk.StringVar(value="00:00:00")
 
-    estado_listo = {"consolidado": False}
-    ventanas_generar = {}
+    # Los botones viven DENTRO de las filas del arbol, que se repinta
+    # entero en cada revisar(): se guardan por id de fila para poder
+    # deshabilitarlos mientras corre algo, y se renuevan en cada
+    # pintado.
+    botones_arbol = {}
+    corriendo = {"activo": False}
 
     # --------------------------------------------------------
     # BOTONES FIJOS ABAJO (primero, para que no los tape nada)
@@ -236,9 +249,7 @@ def main():
     canvas.pack(side="left", fill="both", expand=True)
 
     contenedor = tk.Frame(canvas)
-    ventana_canvas = canvas.create_window(
-        (0, 0), window=contenedor, anchor="nw"
-    )
+    ventana_canvas = canvas.create_window((0, 0), window=contenedor, anchor="nw")
 
     def ajustar(event=None):
         canvas.configure(scrollregion=canvas.bbox("all"))
@@ -272,13 +283,16 @@ def main():
 
     lbl_base.bind(
         "<Button-1>",
-        lambda e: (
-            abrir_en_explorador(var_base.get()) if var_base.get() else None
-        ),
+        lambda e: abrir_en_explorador(var_base.get()) if var_base.get() else None,
     )
 
     # --------------------------------------------------------
     # PERIODO DEL CASO (AAMM)
+    #
+    # Se ingresa aca arriba y ya no aparece como fila del diagrama:
+    # no es parte de la estructura de carpetas. De el dependen dos
+    # filas (el SoC dentro de Medidas/ y el CSV dentro de Cmg/), que
+    # lo dicen en su propio detalle cuando falta.
     # --------------------------------------------------------
 
     frame_periodo = tk.LabelFrame(
@@ -305,13 +319,13 @@ def main():
     tk.Label(
         frame_periodo,
         text=(
-            "4 digitos: año+mes simplificado. Ej. 2607 para julio "
-            "de 2026. Solo hace falta para (re)generar Medidores + "
-            "Ofertas SSCC."
+            "4 digitos: año+mes simplificado. Ej. 2607 para julio de "
+            "2026. Con el se buscan el archivo de SoC dentro de "
+            "Medidas/ y el CSV 15-minutal dentro de Cmg/."
         ),
         fg=COLOR_NEUTRO,
         font=("Segoe UI", 8),
-        wraplength=780,
+        wraplength=820,
         justify="left",
     ).pack(side="left", padx=(10, 0))
 
@@ -326,24 +340,41 @@ def main():
 
     enc_arbol = tk.Frame(frame_arbol)
     enc_arbol.pack(fill="x")
+
     tk.Label(
         enc_arbol, text="Estructura", font=("Segoe UI", 8, "bold"),
-        width=52, anchor="w",
+        width=ANCHO_ESTRUCTURA, anchor="w",
     ).pack(side="left")
     tk.Label(
         enc_arbol, text="Estado", font=("Segoe UI", 8, "bold"),
-        width=11, anchor="w",
+        width=ANCHO_ESTADO, anchor="w",
     ).pack(side="left")
+
+    celda_enc_accion = tk.Frame(enc_arbol, width=ANCHO_ACCION, height=16)
+    celda_enc_accion.pack(side="left")
+    celda_enc_accion.pack_propagate(False)
     tk.Label(
-        enc_arbol, text="Detalle", font=("Segoe UI", 8, "bold"),
+        celda_enc_accion, text="Accion", font=("Segoe UI", 8, "bold"),
         anchor="w",
+    ).pack(side="left")
+
+    tk.Label(
+        enc_arbol, text="Detalle", font=("Segoe UI", 8, "bold"), anchor="w",
     ).pack(side="left")
 
     filas_arbol = tk.Frame(frame_arbol)
     filas_arbol.pack(fill="x")
 
     def _fila_arbol(parent, prefijo, texto, estado=None, detalle="",
-                     negrita=False, boton=None):
+                    negrita=False, boton=None, id_fila=None):
+        """
+        Una fila del diagrama. Columnas, en orden: estructura, estado,
+        accion (el boton, si la fila tiene uno) y detalle -- el boton
+        va a la IZQUIERDA del detalle, y por eso su celda tiene ancho
+        fijo: asi el detalle arranca siempre en la misma columna,
+        tenga o no boton esa fila.
+        """
+
         fila = tk.Frame(parent)
         fila.pack(fill="x", pady=1)
 
@@ -351,21 +382,32 @@ def main():
             fila,
             text=prefijo + texto,
             font=("Consolas", 9, "bold" if negrita else "normal"),
-            width=52,
+            width=ANCHO_ESTRUCTURA,
             anchor="w",
         ).pack(side="left")
 
-        if estado is not None:
-            tk.Label(
-                fila,
-                text=SIMBOLO.get(estado, estado),
-                width=11,
-                anchor="w",
-                fg=COLOR_ESTADO.get(estado, COLOR_NEUTRO),
-                font=("Segoe UI", 9, "bold"),
-            ).pack(side="left")
-        else:
-            tk.Label(fila, text="", width=11).pack(side="left")
+        tk.Label(
+            fila,
+            text=SIMBOLO.get(estado, estado) if estado is not None else "",
+            width=ANCHO_ESTADO,
+            anchor="w",
+            fg=COLOR_ESTADO.get(estado, COLOR_NEUTRO),
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+
+        celda_accion = tk.Frame(fila, width=ANCHO_ACCION, height=ALTO_ACCION)
+        celda_accion.pack(side="left")
+        celda_accion.pack_propagate(False)
+
+        if boton is not None:
+            texto_boton, comando = boton
+            widget = tk.Button(
+                celda_accion, text=texto_boton, font=("Segoe UI", 8, "bold"),
+                bg="#fdf0d5", command=comando,
+            )
+            widget.pack(side="left", padx=(0, 6))
+            if id_fila is not None:
+                botones_arbol[id_fila] = widget
 
         tk.Label(
             fila,
@@ -373,23 +415,47 @@ def main():
             anchor="w",
             fg=COLOR_NEUTRO,
             font=("Segoe UI", 8),
-            wraplength=420,
+            wraplength=380,
             justify="left",
         ).pack(side="left", fill="x", expand=True)
 
-        if boton is not None:
-            texto_boton, comando = boton
-            tk.Button(
-                fila, text=texto_boton, font=("Segoe UI", 8, "bold"),
-                bg="#fdf0d5", command=comando,
-            ).pack(side="right", padx=6)
-
         return fila
+
+    def _boton_de_fila(id_fila):
+        """
+        Que boton lleva cada fila del diagrama. El id lo pone
+        nucleo.revisar_estructura(); la ventana decide que accion le
+        cuelga, para que nucleo.py no sepa nada de botones.
+        """
+
+        if id_fila == "cmg_csv":
+            return ("Traer cmg_15min", traer_cmg_15min)
+
+        if id_fila == "cmg_xlsx":
+            return ("Generar", generar_cmg)
+
+        if id_fila == "consolidado":
+            return ("Actualizar todo", lambda: actualizar_consolidado(None))
+
+        if id_fila == "pagos":
+            return ("Actualizar todo", lambda: actualizar_pagos(None))
+
+        if id_fila.startswith("consolidado:"):
+            seccion = id_fila.split(":", 1)[1]
+            return ("Actualizar", lambda s=seccion: actualizar_consolidado({s}))
+
+        if id_fila.startswith("pagos:"):
+            seccion = id_fila.split(":", 1)[1]
+            return ("Actualizar", lambda s=seccion: actualizar_pagos({s}))
+
+        return None
 
     def pintar_arbol(filas):
 
         for hijo in filas_arbol.winfo_children():
             hijo.destroy()
+
+        botones_arbol.clear()
 
         if not filas:
             tk.Label(
@@ -400,36 +466,29 @@ def main():
             ).pack(fill="x")
             return
 
-        profundidades = [_profundidad_fila(etiqueta) for etiqueta, _, _ in filas]
-        prefijos = _prefijos_arbol(profundidades)
+        prefijos = _prefijos_arbol([fila["nivel"] for fila in filas])
 
-        for (etiqueta, estado, detalle), profundidad, prefijo in zip(
-            filas, profundidades, prefijos
-        ):
+        for fila, prefijo in zip(filas, prefijos):
             _fila_arbol(
                 filas_arbol,
                 prefijo,
-                etiqueta,
-                estado=estado,
-                detalle=detalle,
-                negrita=(profundidad == 0),
+                fila["etiqueta"],
+                estado=fila["estado"],
+                detalle=fila["detalle"],
+                negrita=(fila["nivel"] == 0),
+                boton=_boton_de_fila(fila["id"]),
+                id_fila=fila["id"],
             )
 
-        # Las dos salidas van al final del mismo diagrama, como filas
-        # de primer nivel (mismo criterio visual que Medidas/,
-        # Auxiliares/, etc.), cada una con su boton "Generar".
-        _fila_arbol(
-            filas_arbol, "", nucleo.ARCHIVO_SALIDA,
-            detalle="se genera/actualiza con el boton Generar ->",
-            negrita=True,
-            boton=("Generar...", abrir_ventana_generar_consolidado),
-        )
-        _fila_arbol(
-            filas_arbol, "", nucleo.ARCHIVO_SALIDA_PAGOS,
-            detalle="se genera/actualiza con el boton Generar ->",
-            negrita=True,
-            boton=("Generar...", abrir_ventana_generar_pagos),
-        )
+        if corriendo["activo"]:
+            habilitar_botones(False)
+
+    def habilitar_botones(activos):
+        for widget in botones_arbol.values():
+            try:
+                widget.config(state="normal" if activos else "disabled")
+            except tk.TclError:
+                pass
 
     # --------------------------------------------------------
     # PROGRESO Y LOG
@@ -439,8 +498,7 @@ def main():
     frame_estado.pack(fill="x", padx=20, pady=(10, 2))
 
     tk.Label(
-        frame_estado, textvariable=var_estado, anchor="w",
-        font=("Segoe UI", 9),
+        frame_estado, textvariable=var_estado, anchor="w", font=("Segoe UI", 9),
     ).pack(side="left")
 
     tk.Label(
@@ -487,7 +545,6 @@ def main():
         if not ruta or not Path(ruta).is_dir():
             lbl_base.config(fg=COLOR_FALTA)
             pintar_arbol([])
-            estado_listo["consolidado"] = False
             btn_abrir_salida.config(state="disabled")
             return
 
@@ -496,25 +553,30 @@ def main():
         try:
             _, filas = nucleo.revisar_estructura(ruta, var_aamm.get().strip())
         except Exception as error:
-            pintar_arbol([("Error al revisar", "falta", str(error))])
-            estado_listo["consolidado"] = False
+            pintar_arbol(
+                [
+                    {
+                        "id": "error",
+                        "etiqueta": "Error al revisar",
+                        "nivel": 0,
+                        "estado": "falta",
+                        "detalle": str(error),
+                    }
+                ]
+            )
             btn_abrir_salida.config(state="disabled")
             return
 
         pintar_arbol(filas)
 
-        faltan = [f for f in filas if f[1] == "falta"]
+        faltan = [f for f in filas if f["estado"] == "falta"]
 
         if faltan:
             var_estado.set(f"Faltan {len(faltan)} entradas requeridas.")
         else:
             var_estado.set("Entradas completas.")
 
-        rutas = nucleo.resolver_rutas(ruta)
-        estado_listo["consolidado"] = rutas["salida"].is_file()
-        btn_abrir_salida.config(
-            state="normal" if rutas["salida"].is_file() else "disabled"
-        )
+        btn_abrir_salida.config(state="normal")
 
     def seleccionar():
         inicial = var_base.get()
@@ -530,9 +592,7 @@ def main():
             log(f"Carpeta base: {ruta}")
             revisar()
 
-    tk.Button(
-        frame_carpeta, text="Examinar", command=seleccionar
-    ).pack(pady=(6, 0))
+    tk.Button(frame_carpeta, text="Examinar", command=seleccionar).pack(pady=(6, 0))
 
     def aamm_cambiado(*_):
         guardar_config({"aamm": var_aamm.get().strip()})
@@ -542,20 +602,38 @@ def main():
     entry_aamm.bind("<Return>", aamm_cambiado)
 
     # --------------------------------------------------------
-    # LANZADOR GENERICO DE GENERACION (hilo aparte, log/progreso
-    # compartidos con la ventana principal)
+    # LANZADOR GENERICO (hilo aparte; log, barra y timer de la
+    # ventana principal)
     # --------------------------------------------------------
 
-    def lanzar_generacion(funcion, kwargs, ventana, boton_actualizar,
-                           etiqueta_salida):
+    def caso_listo():
+        """Valida lo minimo comun a todos los botones del arbol."""
+
+        ruta = var_base.get()
+
+        if not ruta or not Path(ruta).is_dir():
+            messagebox.showwarning(
+                "Falta la carpeta base",
+                "Elegi primero la carpeta base del caso.",
+            )
+            return None
+
+        return ruta
+
+    def lanzar(funcion, kwargs, etiqueta_salida):
         """
         Corre funcion(**kwargs, registrar=..., progreso=...) en un
-        hilo aparte. registrar/progreso escriben en el log y la
-        barra de progreso de la ventana PRINCIPAL (via root.after,
-        para no tocar tkinter desde el hilo).
+        hilo aparte. registrar/progreso escriben en el log y la barra
+        de la ventana (via root.after, para no tocar tkinter desde el
+        hilo). Mientras corre, todos los botones del arbol quedan
+        deshabilitados.
         """
 
-        boton_actualizar.config(state="disabled")
+        if corriendo["activo"]:
+            return
+
+        corriendo["activo"] = True
+        habilitar_botones(False)
         barra["value"] = 0
         txt_log.delete("1.0", "end")
 
@@ -584,8 +662,7 @@ def main():
             except Exception as error:
                 root.after(
                     0, log,
-                    f"\nERROR INESPERADO:\n{error}\n\n"
-                    f"{traceback.format_exc()}",
+                    f"\nERROR INESPERADO:\n{error}\n\n{traceback.format_exc()}",
                 )
                 resultado["error"] = str(error)
 
@@ -594,7 +671,10 @@ def main():
 
         def terminar(res):
             timer["corriendo"] = False
-            boton_actualizar.config(state="normal")
+            corriendo["activo"] = False
+
+            # revisar() repinta el arbol entero (y con el, todos los
+            # botones): no hace falta rehabilitarlos a mano.
             revisar()
 
             if res["ok"]:
@@ -603,8 +683,6 @@ def main():
                 messagebox.showinfo(
                     "Listo", f"Se genero/actualizo:\n{etiqueta_salida}"
                 )
-                if ventana is not None and ventana.winfo_exists():
-                    ventana.destroy()
             else:
                 var_estado.set("Termino con errores.")
                 messagebox.showerror(
@@ -614,195 +692,109 @@ def main():
         threading.Thread(target=trabajo, daemon=True).start()
 
     # --------------------------------------------------------
-    # VENTANA "GENERAR" — Consolidado_entradas.xlsx
+    # ACCIONES DE LAS FILAS
     # --------------------------------------------------------
 
-    def abrir_ventana_generar_consolidado():
+    def traer_cmg_15min():
+        """Baja el CSV 15-minutal del periodo a <CARPETA_BASE>/Cmg/."""
 
-        if "consolidado" in ventanas_generar and ventanas_generar["consolidado"].winfo_exists():
-            ventanas_generar["consolidado"].lift()
+        ruta = caso_listo()
+        if ruta is None:
             return
 
-        top = tk.Toplevel(root)
-        ventanas_generar["consolidado"] = top
-        top.title(f"Generar {nucleo.ARCHIVO_SALIDA}")
-        top.geometry("620x560")
+        aamm = var_aamm.get().strip()
 
-        tk.Label(
-            top,
-            text=(
-                "Elegi que entradas recalcular esta vez. Lo que dejes "
-                "destildado se conserva tal cual esta hoy en "
-                f"{nucleo.ARCHIVO_SALIDA} (si ya existe)."
-            ),
-            wraplength=580, justify="left", anchor="w",
-            font=("Segoe UI", 9),
-        ).pack(fill="x", padx=14, pady=(14, 8))
-
-        variables = {}
-
-        for id_seccion, etiqueta, descripcion, _ in nucleo.SECCIONES_CONSOLIDADO:
-            var = tk.BooleanVar(value=True)
-            variables[id_seccion] = var
-
-            fila = tk.LabelFrame(top, text=etiqueta, padx=8, pady=4)
-            fila.pack(fill="x", padx=14, pady=4)
-
-            tk.Checkbutton(
-                fila, text="Recalcular esta vez", variable=var,
-                font=("Segoe UI", 9, "bold"),
-            ).pack(anchor="w")
-
-            tk.Label(
-                fila, text=descripcion, fg=COLOR_NEUTRO,
-                font=("Segoe UI", 8), wraplength=560, justify="left",
-                anchor="w",
-            ).pack(anchor="w")
-
-        pie = tk.Frame(top)
-        pie.pack(fill="x", side="bottom", pady=10)
-
-        def actualizar():
-            activas = {
-                id_seccion for id_seccion, var in variables.items()
-                if var.get()
-            }
-            if not activas:
-                messagebox.showwarning(
-                    "Nada tildado",
-                    "Tilda al menos una entrada para generar/actualizar.",
-                )
-                return
-
-            top.attributes("-topmost", False)
-            lanzar_generacion(
-                nucleo.generar_consolidado,
-                dict(
-                    carpeta_base=var_base.get(),
-                    aamm=var_aamm.get().strip(),
-                    secciones_activas=activas,
-                ),
-                top,
-                btn_actualizar,
-                nucleo.ARCHIVO_SALIDA,
-            )
-
-        btn_actualizar = tk.Button(
-            pie, text="Actualizar", bg="#2d7a2d", fg="white",
-            font=("Segoe UI", 10, "bold"), command=actualizar,
-        )
-        btn_actualizar.pack(side="left", padx=14)
-
-        tk.Button(
-            pie, text="Cancelar", command=top.destroy
-        ).pack(side="left", padx=6)
-
-    # --------------------------------------------------------
-    # VENTANA "GENERAR" — Pagos_BESS.xlsx
-    # --------------------------------------------------------
-
-    def abrir_ventana_generar_pagos():
-
-        if "pagos" in ventanas_generar and ventanas_generar["pagos"].winfo_exists():
-            ventanas_generar["pagos"].lift()
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
             return
 
-        top = tk.Toplevel(root)
-        ventanas_generar["pagos"] = top
-        top.title(f"Generar {nucleo.ARCHIVO_SALIDA_PAGOS}")
-        top.geometry("620x380")
-
-        tk.Label(
-            top,
-            text=(
-                "Elegi que hojas recalcular esta vez. Lo que dejes "
-                "destildado se conserva tal cual esta hoy en "
-                f"{nucleo.ARCHIVO_SALIDA_PAGOS} (si ya existe).\n\n"
-                f"Usa la hoja 'Medidores' (y 'Subastas') ya generadas "
-                f"en {nucleo.ARCHIVO_SALIDA} (no las recalcula: "
-                f"primero hay que generar esa con su propio boton), "
-                f"mas Centrales.xlsx y cmg.xlsx frescos."
-            ),
-            wraplength=580, justify="left", anchor="w",
-            font=("Segoe UI", 9),
-        ).pack(fill="x", padx=14, pady=(14, 8))
-
-        variables = {}
-
-        for id_seccion, etiqueta, descripcion, _ in nucleo.SECCIONES_PAGOS:
-            var = tk.BooleanVar(value=True)
-            variables[id_seccion] = var
-
-            fila = tk.LabelFrame(top, text=etiqueta, padx=8, pady=4)
-            fila.pack(fill="x", padx=14, pady=4)
-
-            tk.Checkbutton(
-                fila, text="Recalcular esta vez", variable=var,
-                font=("Segoe UI", 9, "bold"),
-            ).pack(anchor="w")
-
-            tk.Label(
-                fila, text=descripcion, fg=COLOR_NEUTRO,
-                font=("Segoe UI", 8), wraplength=560, justify="left",
-                anchor="w",
-            ).pack(anchor="w")
-
-        pie = tk.Frame(top)
-        pie.pack(fill="x", side="bottom", pady=10)
-
-        def actualizar():
-            activas = {
-                id_seccion for id_seccion, var in variables.items()
-                if var.get()
-            }
-            if not activas:
-                messagebox.showwarning(
-                    "Nada tildado",
-                    "Tilda al menos una hoja para generar/actualizar.",
-                )
-                return
-
-            top.attributes("-topmost", False)
-            lanzar_generacion(
-                nucleo.generar_pagos_bess,
-                dict(
-                    carpeta_base=var_base.get(),
-                    secciones_activas=activas,
-                ),
-                top,
-                btn_actualizar,
-                nucleo.ARCHIVO_SALIDA_PAGOS,
-            )
-
-        btn_actualizar = tk.Button(
-            pie, text="Actualizar", bg="#2d7a2d", fg="white",
-            font=("Segoe UI", 10, "bold"), command=actualizar,
+        lanzar(
+            nucleo.traer_csv_cmg,
+            dict(carpeta_base=ruta, aamm=aamm),
+            nucleo.extrae_cmg.nombre_csv_15min(aamm),
         )
-        btn_actualizar.pack(side="left", padx=14)
 
-        tk.Button(
-            pie, text="Cancelar", command=top.destroy
-        ).pack(side="left", padx=6)
+    def generar_cmg():
+        """Arma cmg.xlsx con el CSV que ya esta en Cmg/."""
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
+            return
+
+        lanzar(
+            nucleo.generar_cmg,
+            dict(carpeta_base=ruta, aamm=aamm),
+            nucleo.ARCHIVO_CMG,
+        )
+
+    def actualizar_consolidado(secciones):
+        """
+        secciones: set con UN id de SECCIONES_CONSOLIDADO (el boton
+        de esa hoja) o None para todas (el boton del archivo). Lo que
+        no entra se conserva tal cual esta hoy en el archivo.
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        if secciones is None:
+            secciones = {s[0] for s in nucleo.SECCIONES_CONSOLIDADO}
+
+        lanzar(
+            nucleo.generar_consolidado,
+            dict(
+                carpeta_base=ruta,
+                aamm=var_aamm.get().strip(),
+                secciones_activas=secciones,
+            ),
+            nucleo.ARCHIVO_SALIDA,
+        )
+
+    def actualizar_pagos(secciones):
+        """Idem para Pagos_BESS.xlsx / SECCIONES_PAGOS."""
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        if secciones is None:
+            secciones = {s[0] for s in nucleo.SECCIONES_PAGOS}
+
+        lanzar(
+            nucleo.generar_pagos_bess,
+            dict(carpeta_base=ruta, secciones_activas=secciones),
+            nucleo.ARCHIVO_SALIDA_PAGOS,
+        )
 
     # --------------------------------------------------------
     # BOTONES FIJOS ABAJO
     # --------------------------------------------------------
 
     def abrir_salida():
-        rutas = nucleo.resolver_rutas(var_base.get())
-        abrir_en_explorador(rutas["salida"], es_archivo=True)
+        abrir_en_explorador(var_base.get())
 
     btn_abrir_salida = tk.Button(
         frame_botones,
-        text="Abrir carpeta de salida",
+        text="Abrir carpeta del caso",
         state="disabled",
         command=abrir_salida,
     )
     btn_abrir_salida.pack(side="left", padx=10, expand=True)
 
-    tk.Button(
-        frame_botones, text="Salir", command=root.destroy
-    ).pack(side="left", padx=10, expand=True)
+    tk.Button(frame_botones, text="Salir", command=root.destroy).pack(
+        side="left", padx=10, expand=True
+    )
 
     # --------------------------------------------------------
     # ARRANQUE
@@ -811,8 +803,9 @@ def main():
     pintar_arbol([])
     log(
         "Selecciona la carpeta base del caso e ingresa el periodo "
-        "(AAMM). Los botones 'Generar' de Consolidado_entradas.xlsx "
-        "y Pagos_BESS.xlsx aparecen al final del diagrama de abajo."
+        "(AAMM). Cada fila del diagrama de abajo trae su propio boton: "
+        "'Traer cmg_15min' y 'Generar' en Cmg/, y 'Actualizar' en cada "
+        "hoja de las dos salidas."
     )
 
     if var_aamm.get():

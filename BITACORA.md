@@ -54,6 +54,16 @@ estado, no un historial.
   hasta ahora, los nombres de la fila 2 ya vienen idénticos a
   `Medidas_SAE.xlsx` — sospechar que el `Diccionario` quizás ni haga falta
   para el SoC, pero falta confirmarlo con otro período/archivo.
+- Abrir la ventana en Windows y confirmar el ancho de la columna "Acción"
+  (`ANCHO_ACCION`, hoy 150 px) contra los botones más largos ("Traer
+  cmg_15min", "Actualizar todo") y el alto de fila (`ALTO_ACCION`, 26 px).
+- Correr `traer_csv_cmg()`/`generar_cmg()` una vez contra el CSV real de
+  `T:\CMgReales 15MIN`
+  para confirmar que las barras de `Resumen BESS!Barra inyección` están
+  escritas exactamente igual que la columna `BARRA` del CSV (con el relleno
+  de guiones bajos, ej. `TOCOPILLA_____110`) y que el CSV real trae las 7
+  columnas que dejan `BARRA` en D y `Cuarto de Hora` en H (ver
+  `_validar_layout_cmg`).
 - Validar la Prorrata SSCC normalizada (corregida esta sesión) contra más
   filas de la planilla 11 real — solo se confirmaron 2 casos puntuales
   (los que el usuario reportó), aunque el mecanismo (normalizar por fila)
@@ -1727,7 +1737,171 @@ reales) no era un bug nuevo — era el mismo bug de `AU` de la sesión 20 propag
 y 21) aplicados juntos en el pipeline real (donde el resumen se reconstruye siempre a partir del
 `AU` ya corregido), no hace falta ningún fix adicional para esa cadena.
 
-## 2026-09-11 (22) — Encabezados de grupo (celdas combinadas) en Pagos_BESS.xlsx
+---
+
+## 2026-09-11 (22) — `cmg.xlsx` ahora lo genera el programa (botón "Generar" en su fila del árbol)
+
+**Pedido del usuario:** `cmg.xlsx` (entrada de `Cmg/`) se armaba a mano corriendo un script suelto
+(`Extrae_CMG_barras.py`) al lado del CSV. Quería (1) un botón "Generar" al lado del nombre en la
+ventana de Balance_BESS, (2) que el CSV de origen se busque en la ruta de red
+`T:\CMgReales 15MIN\AAAA\AAMM\Mensual\CMg\Cmg para balance` en vez de al lado del `.py`, y (3) que
+las barras a filtrar salgan de `Centrales.xlsx` (hoja `Resumen BESS`) en vez de estar escritas en
+el código.
+
+**Lo que se hizo:**
+
+- `nucleo.py`: sección nueva "GENERACION DE cmg.xlsx DESDE EL CSV 15-MINUTAL" con
+  `ruta_csv_cmg_15min()`, `barras_desde_resumen_bess()`, `construir_cmg_desde_csv()`,
+  `_validar_layout_cmg()` y `generar_cmg(carpeta_base, aamm, ruta_csv=None, ...)` — misma firma
+  `registrar`/`progreso` que `generar_consolidado`/`generar_pagos_bess`, así entra sin cambios en
+  el `lanzar_generacion()` que ya existe en la ventana.
+- Constantes nuevas: `RAIZ_CMG_REALES` (`T:\CMgReales 15MIN`), `SUBCARPETAS_CMG_REALES`,
+  `PLANTILLA_CSV_CMG_15MIN`, `SEPARADOR_CSV_CMG`, `CODIFICACION_CSV_CMG`,
+  `COLUMNA_CSV_CMG_VALOR`. La letra de unidad queda en UN solo lugar por si cambia.
+- Las barras salen de `construir_mapa_barra()` (la misma función que ya alimenta
+  `Calculo E Costos!Barra`), no de una lectura nueva: así el filtro del CSV y la homologación
+  posterior **no se pueden desincronizar**. Se comparan en mayúsculas (mismo criterio que
+  `_buscar_cmg`) pero se conserva el texto tal cual viene del CSV.
+- `Balance_BESS.py`: la fila `cmg.xlsx` del árbol lleva su propio botón "Generar". No abre ventana
+  con casillas como las dos salidas — no hay nada que elegir. Pide confirmación si el archivo ya
+  existe. `pintar_arbol()` guarda ahora las referencias de los botones dibujados dentro del árbol
+  (`botones_arbol`), y `terminar()` tolera que ese widget ya no exista (el árbol se repinta entero
+  en cada `revisar()`).
+- La fila `cmg.xlsx` del diagrama dice además si el CSV de origen del período está disponible o
+  no, que es lo que decide si el botón va a poder hacer algo.
+
+**Detalle que importa y es fácil de romper:** `leer_cmg()` lee `cmg.xlsx` **por posición**
+(D = Barra, F = valor de Q, H = Cuarto de Hora, I = CMg promedio). El layout que sale de
+`construir_cmg_desde_csv()` (columnas del CSV + `Cuarto de Hora` + promedio horario) es justo ese,
+pero depende de que el CSV siga trayendo 7 columnas. Por eso `_validar_layout_cmg()` avisa en el
+log si `BARRA` deja de caer en D o `Cuarto de Hora` en H, y corta con `ErrorEntrada` si quedan
+menos de 9 columnas.
+
+**Lo que NO cambió respecto del script original:** la numeración del `Cuarto de Hora` global sigue
+saliendo de los bloques que el CSV realmente trae (no se asumen 96 por día), así que los días de
+cambio de hora con 92/100 cuartos siguen funcionando; ahora además se listan en el log los días
+que no tienen 24 h.
+
+**Verificación:** caso sintético end-to-end (CSV de 2 días —uno con 23 h—, 3 barras en el CSV y 3
+en `Centrales.xlsx`, una de ellas sin datos): genera `cmg.xlsx`, avisa de la barra sin datos,
+detecta el día de 23 h, y el archivo resultante se vuelve a leer con `leer_cmg()` +
+`construir_dic_cmg()` dando las claves `BARRA|cuarto` esperadas. `python -m py_compile
+Balance_BESS.py nucleo.py` pasa. La ventana en sí no se pudo abrir (no hay `tkinter` en el
+contenedor de la sesión): el cableado del botón se revisó a mano.
+
+**Pendiente:** correrlo una vez contra el CSV real de la unidad `T:` para confirmar que las barras
+de `Centrales.xlsx` están escritas exactamente igual que en el CSV (con el relleno de guiones
+bajos, ej. `TOCOPILLA_____110`). Si alguna no coincide, el log lo dice barra por barra.
+
+---
+
+## 2026-09-11 (23) — Reorganización: paquete `Script/`, un botón por fila, salidas desglosadas por hoja
+
+**Pedido del usuario**, seis puntos:
+
+1. los botones a la izquierda del detalle;
+2. el cálculo adentro de una carpeta `Script/`, con `nucleo.py` ahí y una subcarpeta `Cmg/`
+   con `Extrae_CMG_barras.py` (la idea declarada es ir modularizando `nucleo.py` por etapas);
+3. sacar la fila "Periodo (AAMM)" de entre las carpetas del diagrama — el SoC va dentro de
+   `Medidas/`;
+4. desglosar `Consolidado_entradas.xlsx` como carpeta, una fila por hoja, cada una con botón
+   "Actualizar", y eliminar la ventana intermedia de "Generar". Si el archivo no existe, que
+   se genere;
+5. lo mismo para `Pagos_BESS.xlsx`;
+6. el `cmg<AAMM>_def_15minutal.csv` pasa a vivir en la carpeta `Cmg/` del caso, al lado de
+   `cmg.xlsx`, con un botón "Traer cmg_15min" que lo baja de la ruta de red.
+
+**Estructura nueva del repo:**
+
+```
+Balance_BESS.py
+Script/
+    __init__.py
+    nucleo.py
+    Cmg/
+        __init__.py
+        Extrae_CMG_barras.py
+```
+
+`Balance_BESS.py` hace `from Script import nucleo`; `nucleo.py` hace `from .Cmg import
+Extrae_CMG_barras` (con fallback a `from Cmg import ...` por si se importa suelto con
+`Script/` en el `sys.path`). **Regla nueva, importante para la modularización que viene:**
+un módulo de etapa NO importa `nucleo` — recibe rutas y datos, y levanta su propia excepción
+(`ErrorCmg`), que `nucleo` traduce a `ErrorEntrada`. Así no hay ciclos de import cuando se
+saquen más etapas. El nombre del archivo usa guiones bajos y no espacios para que sea
+importable (el usuario lo escribió como "Extrae CMG barras.py").
+
+**Contrato nuevo de `revisar_estructura()`:** antes devolvía tuplas
+`(etiqueta, estado, detalle)` y la ventana deducía la profundidad de cada fila mirando el
+TEXTO de la etiqueta (`_profundidad_fila()`: ¿termina en "/"?, ¿empieza con dos espacios?).
+Eso ya venía frágil y con el desglose por hojas no daba más. Ahora devuelve dicts
+`{id, etiqueta, nivel, estado, detalle}`:
+
+- el **nivel** lo pone `nucleo` porque es estructura, no dibujo (que un archivo esté adentro
+  de una carpeta, o una hoja adentro de un archivo, no es una decisión de interfaz);
+- el **id** es estable y es lo único que la ventana necesita para saber qué botón colgarle a
+  cada fila (`_boton_de_fila()`), así `nucleo` sigue sin saber nada de botones.
+
+**Ventana:**
+
+- columnas `Estructura | Estado | Acción | Detalle`. La celda de acción tiene ancho FIJO en
+  píxeles (`ANCHO_ACCION`), si no cada fila correría el detalle según el largo de su botón.
+- desaparecieron las dos ventanas "Generar" con casillas. Botones: `Traer cmg_15min` y
+  `Generar` en `Cmg/`, `Actualizar` en cada fila-hoja de las dos salidas, `Actualizar todo`
+  en la fila del archivo.
+- mientras corre algo, TODOS los botones del árbol quedan deshabilitados (`corriendo` +
+  `habilitar_botones`), y al terminar el árbol se repinta entero (que es lo que los
+  rehabilita).
+- el campo del período (AAMM) sigue arriba; lo que se sacó es la FILA del diagrama. El SoC
+  quedó donde corresponde, colgando de `Medidas/`.
+
+**CMg en dos pasos:** `nucleo.traer_csv_cmg()` copia el CSV de la unidad de red a
+`<CARPETA_BASE>/Cmg/` y `nucleo.generar_cmg()` arma `cmg.xlsx` con el CSV que quedó ahí. Se
+copia en vez de leer directo de la red a propósito: el caso queda autocontenido (se puede
+regenerar `cmg.xlsx` sin la unidad conectada) y queda registrado con qué archivo se trabajó.
+
+**Dos bugs encontrados de paso, los dos arreglados:**
+
+1. **El `Log` de `Consolidado_entradas.xlsx` perdía todos los avisos de preservación.**
+   `escribir_salida()` armaba el `df_log` ANTES del bloque `with pd.ExcelWriter(...)`, pero
+   los avisos de "no se regeneró la hoja X y no había versión anterior" los agrega
+   `_preservar_o_avisar()` DENTRO de ese bloque. Resultado: el `Log` decía "Sin
+   observaciones" mientras cuatro hojas quedaban vacías. Nunca se había notado porque hasta
+   ahora lo normal era generar todo junto; con un botón por hoja, generar una sola es el caso
+   normal y esos avisos son justamente los que hay que ver. El log ahora se arma al final
+   (`_armar_log()`).
+2. **El estado de una hoja no se podía deducir de que la hoja existiera.** Al generar una sola
+   sección, el archivo se crea con TODAS las hojas (las no pedidas, vacías), así que el
+   diagrama las mostraba todas como "generada". Se agregó `hojas_con_datos()` (openpyxl en
+   `read_only`, `max_row > 1`): una hoja vacía se ve PENDIENTE. El estado de la fila del
+   archivo es ahora el rollup de sus hojas ("le faltan hojas por generar").
+
+**Verificación:** caso sintético con `Consolidado_entradas.xlsx` a medias — el árbol
+renderizado (niveles, prefijos, estados, botones) sale correcto y el SoC cuelga de `Medidas/`;
+`traer_csv_15min` + `generar_cmg` contra una "unidad de red" falsa, con el `cmg.xlsx`
+resultante releído por `leer_cmg()`/`construir_dic_cmg()`; `generar_consolidado()` de una sola
+sección sobre una carpeta sin el archivo (lo crea, deja el resto de las hojas vacías y ahora
+sí las lista en el `Log`); y el error esperado cuando se pide "Generar" sin haber traído el
+CSV. `py_compile` de los tres módulos pasa. La ventana en sí no se pudo abrir (no hay
+`tkinter` en el contenedor de la sesión): el cableado se revisó a mano y los helpers del árbol
+(`_prefijos_arbol`) se probaron aparte, sin tkinter.
+
+**Pendiente que deja esta sesión:** abrir la ventana una vez en Windows para confirmar el
+ancho de la columna "Acción" (`ANCHO_ACCION = 150 px`) contra los botones más largos
+("Traer cmg_15min", "Actualizar todo") y el alto de fila (`ALTO_ACCION = 26 px`).
+
+---
+
+## 2026-09-11 (24) — Encabezados de grupo (celdas combinadas) en Pagos_BESS.xlsx
+
+> **Nota de integración:** esta entrada se escribió en paralelo a las (22) y (23) (rama
+> `claude/brave-wozniak-24n138`, PR #11), en las dos se numeró como "(22)". Al fusionar se
+> renumeró a (24), que es el orden real en que entró a `main`. El trabajo de esta sesión es
+> independiente del de las otras dos y no se pisan: acá se tocó `escribir_pagos_bess()`; allá,
+> la estructura del repo y la ventana. Dos cosas que esta entrada menciona cambiaron de lugar
+> con la (23): `nucleo.py` ahora es `Script/nucleo.py`, y el `py_compile` de verificación es
+> `python -m py_compile Balance_BESS.py Script/nucleo.py Script/Cmg/Extrae_CMG_barras.py`.
+
 
 El usuario pidió agregar "los encabezados de celdas combinadas que van arriba de algunas hojas",
 como en el libro real. Pregunté alcance (Calculo RE545 / Calculo E Costos / hojas de
@@ -1807,7 +1981,7 @@ Subastas) por falta de un archivo real de referencia con títulos de grupo para 
 usuario comparte uno, se puede repetir el mismo mecanismo (`_escribir_encabezados_grupo()`, ya
 genérico) para esas hojas también.
 
-## 2026-09-11 (23) — Nuevo documento: `docs/Estructura_Archivos_Reales.md`
+## 2026-09-11 (25) — Nuevo documento: `docs/Estructura_Archivos_Reales.md`
 
 El usuario pidió que los archivos Excel reales que manda (de entrada del proceso, o de
 comparación/validación) queden bien descritos en algún `.md`, específicamente dudando si
@@ -1859,3 +2033,41 @@ normal, sin que el usuario tenga que señalarlo).
 **Pendiente:** no hay archivo real guardado todavía para `Medidas_SAE.xlsx`, `*OfertasSSCC*` ni
 `cmg.xlsx` — si el usuario comparte alguno, guardarlo en `docs/` y sacar el ⚠️ de esa sección
 (pasa a ✅).
+
+---
+
+## 2026-09-11 (26) — Fusión de la rama de encabezados de grupo con la reorganización en `Script/`
+
+El PR #11 (`claude/brave-wozniak-24n138`, encabezados de grupo en `Pagos_BESS.xlsx` +
+`docs/Estructura_Archivos_Reales.md`) salió de `main` ANTES de las sesiones (22) y (23) y quedó en
+conflicto. Se fusionó `main` dentro de esa rama.
+
+**Conflictos reales: uno solo, `BITACORA.md`.** Las dos ramas agregaron su entrada al final y las
+dos la numeraron "(22)" (y la segunda de esa rama, "(23)"). Se conservaron las cuatro entradas y
+las de la rama se renumeraron a (24) y (25) — el orden real en que entran a `main` — con una nota
+de integración explicando el renumerado. Ninguna entrada vieja se tocó.
+
+`Script/nucleo.py` lo fusionó git solo (detectó el rename `nucleo.py` → `Script/nucleo.py` y los
+dos lados tocaban partes distintas de `escribir_pagos_bess()`: allá los encabezados de grupo, acá
+el mensaje de preservación). El resto de los archivos, automático.
+
+**Lo que SÍ hubo que arreglar a mano es una interacción que ninguna de las dos ramas podía ver
+sola:** `_copiar_hoja_existente()` copia valores y anchos de columna, pero **no** las celdas
+combinadas. Con los encabezados de grupo de la rama (24) y el botón "Actualizar" por hoja de la
+(23), cada vez que se actualiza UNA de las dos hojas de `Pagos_BESS.xlsx` la otra se preserva…
+perdiendo la combinación de sus encabezados (el texto quedaba, la combinación no). Antes esto no
+se notaba porque preservar era la excepción; ahora es el caso normal. Se agregó el copiado de
+`merged_cells.ranges`.
+
+**Verificación:** test dedicado a esa interacción — se generan las dos hojas (8 rangos combinados
+cada una), se actualiza solo `Calculo RE545` y se comprueba que `Calculo E Costos` conserva sus 8
+rangos y el texto de los grupos. Se confirmó además, monkeypatcheando la versión vieja de
+`_copiar_hoja_existente()`, que sin el fix quedaban en **0** (no es una suposición: es el
+comportamiento medido). Más la regresión de las sesiones (22) y (23) (árbol del diagrama,
+`Traer cmg_15min` + `Generar`, `generar_consolidado()` de una sola sección) y `py_compile` de los
+tres módulos.
+
+También se actualizó `docs/Estructura_Archivos_Reales.md` (que nació en la rama (25) y cuyo
+propósito es ser la referencia AL DÍA): su §5 ahora documenta los dos archivos de `Cmg/` —el CSV
+15-minutal y el `cmg.xlsx` derivado—, cómo se generan, y la trampa de que `leer_cmg()` los lee por
+posición; y las rutas `nucleo.py` pasaron a `Script/nucleo.py`.

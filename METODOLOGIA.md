@@ -29,8 +29,14 @@ código (no versionado, es de la herramienta, no del caso).
 
 - `Balance_BESS.py` — ventana tkinter. Único punto de entrada para el
   usuario.
-- `nucleo.py` — todo el cálculo, sin dependencias de interfaz. `Balance_BESS.py`
-  importa `nucleo` y nunca al revés.
+- `Script/` — paquete con todo el cálculo, sin dependencias de interfaz.
+  `Balance_BESS.py` importa `Script.nucleo` y nunca al revés.
+  - `Script/nucleo.py` — el cálculo del caso.
+  - `Script/Cmg/Extrae_CMG_barras.py` — arma `cmg.xlsx` desde el CSV
+    15-minutal. Primer módulo separado de `nucleo.py`; la idea es ir
+    sacando uno por etapa a medida que se agreguen entradas. Un módulo de
+    etapa **no importa `nucleo`** (evita ciclos): recibe rutas y datos, y
+    levanta su propia excepción, que `nucleo` traduce a `ErrorEntrada`.
 
 Cada caso a procesar vive en su propia carpeta ("carpeta base"), fuera del
 repositorio, con la estructura fija documentada en
@@ -62,17 +68,20 @@ con grep o por su encabezado (p. ej. "9.4" para la columna `Ventana`).
 **Dónde vive el código**, con nombres exactos:
 
 - `Balance_BESS.py` — módulo/entrada principal, se abre siempre primero.
-- `nucleo.py` — módulo de cálculo compartido, vive junto al principal en la
-  raíz del repositorio, no adentro de una subcarpeta.
+  Vive en la raíz del repositorio.
+- `Script/nucleo.py` — módulo de cálculo compartido.
+- `Script/Cmg/Extrae_CMG_barras.py` — módulo de la etapa CMg. Los nombres
+  de archivo de los módulos usan guiones bajos, no espacios, para que sean
+  importables.
 - `config.json` — configuración/estado por PC/usuario (última carpeta base
   elegida). No se versiona (ver `.gitignore`). Vive junto a `Balance_BESS.py`
   únicamente porque así lo resuelve `Path(__file__).parent` en el propio
   script; el resto del código nunca debe depender de esa ruta.
 - `docs/Plan_Traspaso_Python_Balance_BESS.md` — documento de dominio.
 
-No hay hoy scripts satélite ni un módulo común adicional: solo estos dos
-archivos. Si `Balance_BESS.py` se mueve de carpeta, `nucleo.py` debe moverse
-con él (import relativo simple, sin paquete).
+No hay hoy scripts satélite. Si `Balance_BESS.py` se mueve de carpeta,
+`Script/` debe moverse con él: la ventana hace `from Script import nucleo`,
+y dentro del paquete los imports son relativos (`from .Cmg import ...`).
 
 ---
 
@@ -134,8 +143,9 @@ alguno autentica con el nombre de otra persona).
 No hay todavía scripts de apoyo (`scripts/sincronizar.sh`,
 `scripts/verificar.sh`). Mientras no existan, la verificación antes de
 cerrar una sesión es manual: correr `python -m py_compile Balance_BESS.py
-nucleo.py` y, si hay un caso de prueba disponible, `nucleo.generar_
-consolidado(...)`/`nucleo.generar_pagos_bess(...)` contra él.
+Script/nucleo.py Script/Cmg/Extrae_CMG_barras.py` y, si hay un caso de
+prueba disponible, `nucleo.generar_consolidado(...)`/
+`nucleo.generar_pagos_bess(...)` contra él.
 
 ---
 
@@ -146,22 +156,27 @@ consolidado(...)`/`nucleo.generar_pagos_bess(...)` contra él.
   barra de progreso + contador de tiempo"). El diagrama es un árbol de
   texto tipo consola (prefijos `├──`/`└──`/`│`, patrón tomado de un
   `Revisor_Reliquidacion.py` que el usuario dio como referencia): cada
-  fila de `nucleo.revisar_estructura()` se pinta con su profundidad
-  deducida del texto (`_profundidad_fila()` en `Balance_BESS.py` — nucleo
-  no conoce conceptos de árbol/interfaz). Los estados son exactamente
-  tres: `ok` (verde), `falta` (rojo) y `pendiente` (ámbar). No agregar un
-  cuarto estado sin actualizar `SIMBOLO` y `COLOR_ESTADO` en
-  `Balance_BESS.py` a la vez.
-  Las dos salidas (`Consolidado_entradas.xlsx`, `Pagos_BESS.xlsx`) son las
-  últimas dos filas de ese mismo diagrama, cada una con un botón
-  **Generar...** que abre su propia ventana — no hay un botón "Ejecutar"
-  único para todo el proceso. La ventana de `Consolidado_entradas.xlsx`
-  tiene una casilla por sección de `nucleo.SECCIONES_CONSOLIDADO`; lo que
-  el usuario destilda se **conserva** tal cual estaba (no se recalcula ni
-  se borra, ver `escribir_salida()`/`hojas_regenerar`). Ambas ventanas
-  corren su función de `nucleo` en un hilo aparte y reportan al log/barra
-  de progreso de la ventana PRINCIPAL (helper `lanzar_generacion()`), no a
-  widgets propios.
+  fila de `nucleo.revisar_estructura()` trae su **nivel** (0 = raíz del
+  caso, 1 = adentro de una carpeta/archivo, 2 = un nivel más) y su **id**;
+  la ventana traduce los niveles a prefijos (`_prefijos_arbol()`) y usa el
+  id para decidir qué botón le cuelga a cada fila (`_boton_de_fila()`):
+  `nucleo` sabe de estructura, no de árboles ni de botones. Los estados
+  son exactamente tres: `ok` (verde), `falta` (rojo) y `pendiente`
+  (ámbar). No agregar un cuarto estado sin actualizar `SIMBOLO` y
+  `COLOR_ESTADO` en `Balance_BESS.py` a la vez.
+  **Cada acción es un botón en su propia fila del diagrama**: no hay
+  ventanas intermedias ni un botón "Ejecutar" único. Las columnas son
+  `Estructura | Estado | Acción | Detalle`, con el botón a la izquierda
+  del detalle en una celda de ancho fijo en píxeles (`ANCHO_ACCION`) para
+  que el detalle arranque siempre en la misma columna. Las dos salidas se
+  desglosan por hoja (una fila-hoja por sección de
+  `nucleo.SECCIONES_CONSOLIDADO` / `SECCIONES_PAGOS`, igual que las hojas
+  de `Centrales.xlsx`), y lo que no se actualiza se **conserva** tal cual
+  estaba (no se recalcula ni se borra, ver
+  `escribir_salida()`/`hojas_regenerar`). Todos los botones corren su
+  función de `nucleo` en un hilo aparte reportando al log/barra de la
+  ventana (helper `lanzar()`), y mientras algo corre quedan todos
+  deshabilitados.
 - **Persistencia de configuración:** `config.json` junto al `.py`, con una
   clave por PC/usuario (`get_usuario()` = `hostname_usuario`), para que
   varias personas puedan compartir la misma copia del script sin pisarse la
@@ -289,9 +304,10 @@ consolidado(...)`/`nucleo.generar_pagos_bess(...)` contra él.
 ## 6. Generación de `INTERFACES.md`
 
 No aplica todavía: no existe un generador de interfaces en este repositorio.
-Con dos archivos (`Balance_BESS.py`, `nucleo.py`) alcanza con `MAPA.md`. Si
-se agregan más módulos y esto deja de ser suficiente, documentar acá la
-decisión de introducir un generador (o no) antes de empezar a usarlo.
+Con los módulos de hoy (`Balance_BESS.py`, `Script/nucleo.py`,
+`Script/Cmg/Extrae_CMG_barras.py`) alcanza con `MAPA.md`. Si se agregan
+muchos más y esto deja de ser suficiente, documentar acá la decisión de
+introducir un generador (o no) antes de empezar a usarlo.
 
 ---
 
