@@ -16,15 +16,32 @@ estado, no un historial.
   a `calcular_r`) necesita persistirse en una hoja propia para poder
   auditarla fila a fila contra la planilla 11, o si alcanza con auditar
   "Ofertas SSCC por Dia" + `Diccionario!E:F:G` a mano.
-- **Revisar con el usuario los valores reales de `Subastas!Sub_Baj`**: la
-  primera corrida contra un caso real mostró que NINGUNA fila normaliza a
-  `BAJADA`/`SUBIDA` exactamente (ver entrada de esta sesión — el crash que
-  eso disparó ya está arreglado, pero el hallazgo de fondo sigue abierto).
-  Puede ser que el período de ese caso no tuviera subastas, o que el texto
-  real use otras palabras/formato. Mientras no se confirme, `Calculo E
-  Costos!L` (y todo lo que depende del mismo filtro: `M`, `N`, `O`, y las
-  reservas por subasta de `Calculo RE545`) da 0 en todas las filas para
-  ese caso.
+- **Bloqueante: confirmar la estructura real de columnas de `Subastas`**
+  contra un ejemplo que el usuario compartió de la planilla 11 original.
+  La foto muestra una fila de datos con `CSF(-)` (Control, calculado) 
+  seguido de `CSF` y de `BAJADA` en celdas consecutivas — eso sugiere una
+  columna "Servicio" (`CSF`/`CTF`/`CPF`, el tipo de servicio SIN la
+  dirección) que **no está en `NOMBRES_SUBASTAS` hoy**, entre `Control` y
+  `Sub_Baj`, coherente con la fórmula real de `Control`
+  (`=IF(AND(C1="CSF",D1="SUBIDA"),"CSF(+)",...)`, sección 5.3 del
+  documento de trazabilidad) que necesita DOS insumos (servicio +
+  dirección) para armar el label. Si esto es así, **toda la letra de
+  `Subastas` de `E` en adelante está corrida una posición** respecto de
+  lo que asume hoy `NOMBRES_SUBASTAS`/`construir_subastas()` — no se
+  tocó código todavía porque esto necesita confirmación letra por letra,
+  no otra inferencia (ya van varias con este archivo). Ver entrada de
+  esta sesión.
+- Confirmar con el usuario qué son los `[Configuración, Ciclo, Clave,
+  SUBIDA, BAJADA]` que se ven en la planilla real al lado de `Subastas`
+  (columnas más allá de `Q`) — coincide con la tabla de umbrales que
+  `construir_dic_umbrales_subastas()` ya calcula en Python (no la lee del
+  archivo), así que sirve como dato de validación cruzada una vez resuelto
+  el punto anterior.
+- ~~Revisar con el usuario los valores reales de `Subastas!Sub_Baj`~~ —
+  probablemente explicado por el punto de arriba (columna corrida): si
+  `Sub_Baj` en realidad vive una posición más allá de lo asumido, el
+  filtro `BAJADA`/`SUBIDA` estaba comparando contra la columna
+  equivocada. Se resuelve junto con el punto anterior.
 - Validar contra un caso real que `Subastas!Control` tenga exactamente los
   valores `CPF`/`CSF` (usado para separar la tabla dinámica Prorrata SSCC
   en `AG`/`AH` — ver `construir_dic_prorrata()`, plan §25.10). Es una
@@ -1166,3 +1183,81 @@ texto real use otra palabra/formato — hay que confirmarlo con el usuario (ver 
 abiertos"). Mientras tanto, con ese caso, `L`, `M`, `N`, `O` y las reservas por subasta de
 `Calculo RE545` dan 0/vacío en todas las filas — no es un error, es el resultado correcto de la
 fórmula real con ese filtro.
+
+---
+
+## 2026-09-11 (15) — Fix: SoC con nombres de central como ruta SCADA + hallazgo en `Subastas`
+
+Segunda corrida contra datos reales del usuario, dos problemas nuevos.
+
+### Fix: SoC — nombres de bloque como ruta SCADA completa
+
+El log mostró: `Centrales en Medidas_SAE.xlsx sin bloque de SoC: [9 centrales limpias]` y
+`Centrales en el SOC que no estan en Medidas_SAE.xlsx: [rutas tipo
+'\\SRV-SCADA-AF1\SEN\Generación\SEN\03 Región II\SAE-Del Desierto|Nombre PCP/PID']` — cero
+cruces. Causa: en el archivo real de SoC (exportación tipo PI), el nombre de cada bloque de
+central **no es el nombre limpio**: es la ruta SCADA completa del punto, con un sufijo `|Nombre
+PCP/PID` (o `|Nombre` en al menos un caso) pegado al final. `detectar_bloques()` toma ese texto
+tal cual (`nombre_bess_origen = str(valor).strip()`, es lo correcto — no reinterpreta nada), pero
+`extraer_soc()` buscaba ese texto LITERAL en el `Diccionario`, y ningún humano escribe esa ruta
+completa a mano en una hoja de equivalencias — por eso el cruce daba siempre 0.
+
+**Fix:** `_extraer_nombre_desde_ruta_scada(texto)` — si el texto tiene `\`, devuelve solo el
+último tramo (después de la última `\`) sin el sufijo después de `|` (ej. de la ruta de arriba
+saca `"SAE-Del Desierto"`). No es una reinterpretación de datos: es separar una estructura ya
+presente en el archivo (ruta + sufijo), no adivinar a qué central corresponde. `extraer_soc()`
+ahora prueba primero el texto literal (compatibilidad con cualquier SoC "limpio" sin ruta) y, si
+no hay match, prueba de nuevo con el nombre extraído — el `Diccionario` puede tener cualquiera de
+las dos formas. Si ninguna tiene match, usa el nombre **limpio** (no la ruta completa) como
+`central`, solo para que avisos/incidencias sean legibles — sigue sin cruzar contra `Medidores`,
+mismo comportamiento que antes.
+
+**Importante, se lo dejo dicho al usuario en el chat:** este fix por sí solo **no alcanza** para
+la mayoría de las 9 centrales. Comparando el nombre que queda tras extraerlo de la ruta contra el
+nombre limpio real de `Medidas_SAE.xlsx`:
+
+| Extraído de la ruta SoC | Real en Medidas_SAE.xlsx | ¿Cruza solo con el fix? |
+|---|---|---|
+| `SAE-Tocopilla` | `SAE-TOCOPILLA` | Sí (`normalizar()` ya ignora mayúsculas) — pero el merge final es por texto LITERAL, así que de todas formas necesita un `Diccionario` que devuelva el texto exacto `SAE-TOCOPILLA` |
+| `SAE-Del Desierto` | `SAE-DEL-DESIERTO` | No (espacio vs guion) |
+| `SAE-PE La Cabaña` | `SAE-CRCA-PE-LA-CABANA` | No (falta prefijo `CRCA-`) |
+| `SAE-PFV Victor Jara` | `SAE-CRCA-PFV-VICTOR-JARA` | No (falta prefijo) |
+| `SAE-PFV Andes Solar 4` | `SAE-CRCA-PFV-ANDES4` | No |
+| `SAE-PFV Andes Solar III` | `SAE-CRCA-PFV-ANDES3` | No (`III` vs `3`) |
+| `SAE-PFV Nuevo Quillagua II` | `SAE-CRCA-PFV-NUEVO-QUILLAGUA-2` | No (`II` vs `2`) |
+| `SAE-PFV Don Humberto` | `SAE-CRCA-PFV-DON-HUMBERTO` | No (falta prefijo) |
+
+Las 9 (todas, en la práctica) necesitan una fila en `Centrales.xlsx!Diccionario` con el nombre
+limpio de `Medidas_SAE` y el nombre extraído de la ruta (o la ruta completa, cualquiera de las
+dos funciona ahora) — eso es contenido del archivo del usuario, no algo que el código deba
+adivinar (`Diccionario` es mantenimiento manual, ver `METODOLOGIA.md`).
+
+**Caso sin resolver, no es una ruta SCADA:** `'07 Region RM'` apareció como un bloque completo
+aparte, sin `\` ni `|`. No encaja con el patrón de los otros 8 — no se adivinó qué es (podría ser
+un bloque real mal cortado, o una columna/central que no corresponde). Se le preguntó al usuario.
+
+### Hallazgo (sin tocar código): posible columna faltante en `Subastas`
+
+El usuario compartió una foto de la hoja `Subastas` real de la planilla 11. Una fila de datos
+muestra, en celdas consecutivas: `CSF(-)` (que es exactamente el resultado de la fórmula real de
+`Control`, sección 5.3 del documento de trazabilidad: `=IF(AND(C1="CSF",D1="SUBIDA"),"CSF(+)",
+IF(AND(C1="CSF",D1="BAJADA"),"CSF(-)",...))`) seguido de `CSF` y de `BAJADA`. Esa fórmula necesita
+DOS insumos (`C`=servicio SIN dirección, `D`=dirección) para armar el label de `Control` — pero
+`NOMBRES_SUBASTAS` hoy solo tiene UNA columna entre `Control` y `Fecha` (`Sub_Baj`, que se asumía
+que guardaba `SUBIDA`/`BAJADA` directamente, confirmado hace sesiones por el usuario: "Es la
+columna C de la hoja subastas que ya generamos"). Si la foto es correcta, falta una columna
+"Servicio" que nunca se mapeó, y **todo lo que sigue después de `Control` queda corrido una
+posición**. Esto también explicaría el otro hallazgo de la sesión anterior (`Sub_Baj` dando 0
+filas BAJADA/SUBIDA con datos reales — si el filtro estaba comparando contra la columna
+equivocada, por supuesto no cruza nada).
+
+**No se tocó código todavía.** Este archivo ya tuvo varias rondas de "corrimiento de columna" mal
+resueltas por inferencia (ver sesiones anteriores); antes de tocar `NOMBRES_SUBASTAS` de nuevo
+hace falta confirmación letra por letra del usuario, no otra inferencia visual sobre una captura
+de pantalla. Se le pidió que confirme el contenido exacto de las primeras columnas de `Subastas`
+en la planilla 11 real.
+
+**Verificación:** tests sintéticos de `_extraer_nombre_desde_ruta_scada()` (ruta con los dos
+sufijos vistos, texto sin ruta queda intacto) y de `extraer_soc()` de punta a punta (con y sin
+`Diccionario`, y confirmando que `nombre_scada_original` sigue guardando la ruta completa sin
+tocar, solo `central` cambia). Regresión completa: pasa.

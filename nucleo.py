@@ -859,6 +859,31 @@ def detectar_bloques(df_crudo, fila_nombres, fila_encabezados):
     return bloques, incidencias
 
 
+def _extraer_nombre_desde_ruta_scada(texto):
+    """
+    Si el nombre de un bloque de SoC viene como una ruta SCADA (visto
+    con datos reales: exportaciones tipo PI traen el nombre de la
+    central como
+        \\SERVIDOR\SEN\Generación\SEN\<region>\<central>|<sufijo>
+    en vez de solo "<central>"), devuelve unicamente "<central>": el
+    ultimo tramo de la ruta (separado por "\\"), sin el sufijo
+    despues de "|".
+
+    No es una reinterpretacion de datos: es separar una ESTRUCTURA
+    conocida (ruta + sufijo) que ya viene asi en el archivo, no una
+    suposicion sobre a que central corresponde. Si el texto no tiene
+    ese formato (no contiene "\\"), se devuelve tal cual -- no se
+    inventa nada quitando texto de un nombre que no es una ruta.
+    """
+
+    texto = str(texto).strip()
+
+    if "\\" not in texto:
+        return texto
+
+    return texto.split("\\")[-1].split("|")[0].strip()
+
+
 def extraer_soc(ruta_soc, mapa_homologacion=None):
     """
     Lee el archivo SOC y devuelve (df_soc, incidencias).
@@ -890,10 +915,26 @@ def extraer_soc(ruta_soc, mapa_homologacion=None):
 
         nombre_origen = bloque["nombre_bess_origen"]
 
-        canonico = mapa_homologacion.get(
-            normalizar(nombre_origen),
-            nombre_origen,
-        )
+        # Primero se prueba el texto literal (compatibilidad con
+        # cualquier archivo de SoC "limpio", sin ruta SCADA). Si no
+        # hay match, se prueba de nuevo con el nombre extraido de la
+        # ruta (ver _extraer_nombre_desde_ruta_scada) -- el
+        # Diccionario puede tener registrada cualquiera de las dos
+        # formas. Si ninguna tiene match, se usa igual el nombre
+        # extraido (no la ruta completa) como "canonico": aunque no
+        # homologue, es mucho mas legible en avisos/incidencias que
+        # la ruta cruda, y no cambia el comportamiento (sigue sin
+        # cruzar contra Medidores).
+        clave_directa = normalizar(nombre_origen)
+        nombre_limpio = _extraer_nombre_desde_ruta_scada(nombre_origen)
+
+        if clave_directa in mapa_homologacion:
+            canonico = mapa_homologacion[clave_directa]
+        else:
+            canonico = mapa_homologacion.get(
+                normalizar(nombre_limpio),
+                nombre_limpio,
+            )
 
         sub = df_crudo.iloc[
             fila_encabezados + 1:,
