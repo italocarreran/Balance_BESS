@@ -89,6 +89,7 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 | Reglas de negocio del cálculo y el plan completo de migración | `docs/Plan_Traspaso_Python_Balance_BESS.md` |
 | El código VBA original, las fórmulas del `.xlsm` y de dónde sale cada dato | `docs/Trazabilidad_11_PAGOS_BESS_2607_Definitivo.md` |
 | La hoja `Calculo RE545` real (recortada), con sus nombres de columna y fórmulas | `docs/Calculo_RE545_reducido_para_IA.xlsx` |
+| La hoja `Subastas` real, con encabezados y fórmulas (fuente de la corrección de `NOMBRES_SUBASTAS`) | `docs/Libro1_Subastas_real.xlsx` |
 
 ## Estado actual
 
@@ -107,10 +108,14 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
   sus columnas calculadas, con sus nombres reales de columna (replica
   `Cargar_SSCC_Desempeno_En_FD`). Los bloques CSF (A:M) y CPF (Q:AE) son dos
   tablas de distinto largo, lado a lado en la misma hoja.
-- `Subastas` — datos de la hoja `DB` filtrados por "Propietario" (BESS/SAE),
-  más la columna "Ciclo" calculada, con sus nombres reales de columna
-  (replica `Cargar_Remuneracion_Subastas_Rapido`). La columna "Energía
-  SSCC" queda vacía: depende de `Calculo E Costos`.
+- `Subastas` — datos de la hoja `DB` filtrados por "Configuración" contiene
+  BESS/SAE (funcionalmente equivalente a filtrar por Propietario: los
+  nombres de central BESS empiezan con "SAE-"), más la columna "Clave
+  horaria" calculada, con sus nombres reales de columna (`Concepto`,
+  `Control`, `Sub_Baj`, ..., `Energía SSCC`, `FD`, `FMA` — corregidos en
+  una sesión posterior, ver `BITACORA.md`; replica
+  `Cargar_Remuneracion_Subastas_Rapido`). La columna "Ciclo" queda vacía:
+  depende de `Calculo E Costos`.
 - `Log` — avisos e incidencias detectadas durante el cálculo.
 
 `Pagos_BESS.xlsx` (nombre provisorio, a pedido del usuario) tiene dos hojas:

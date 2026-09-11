@@ -626,7 +626,7 @@ def main():
         top = tk.Toplevel(root)
         ventanas_generar["consolidado"] = top
         top.title(f"Generar {nucleo.ARCHIVO_SALIDA}")
-        top.geometry("620x420")
+        top.geometry("620x560")
 
         tk.Label(
             top,

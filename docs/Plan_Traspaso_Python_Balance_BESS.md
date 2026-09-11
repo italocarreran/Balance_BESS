@@ -1548,29 +1548,19 @@ copia directa; no se "corrige" para que tenga más sentido semántico — replic
 
 ## 24.2. `Subastas` — encabezados confirmados
 
-| Letra | Nombre | Origen |
-|---|---|---|
-| B | `Control` | copiado de `DB!B` |
-| C | `Sub_Baj` | copiado de `DB!C` |
-| D | `Fecha` | copiado de `DB!D` |
-| E | `Año` | copiado de `DB!E` |
-| F | `Mes` | copiado de `DB!F` |
-| G | `Dia` | copiado de `DB!G` |
-| H | `Hora_dia` | copiado de `DB!H` |
-| I | `Hora_mes` | copiado de `DB!I` |
-| J | `Configuración` | copiado de `DB!J` |
-| K | `Propietario` | copiado de `DB!K` — **esta es la columna que se filtra por BESS/SAE** |
-| L | `Clave horaria` | copiado de `DB!L` |
-| M | `Ciclo` | fórmula: `= Propietario & Hora_dia & Hora_mes` (`K&H&I`) |
-| N | `Energía SSCC` | **pendiente** — depende de `'Calculo E Costos'`, etapa sin implementar |
-| O | `FD` | copiado de `DB!P` |
-| P | `FMA` | copiado de `DB!Y` |
-| Q | *(sin nombre en el archivo real)* | copiado de `DB!V` |
+**⚠️ Esta tabla estaba MAL — corregida en una sesión posterior (ver sección 26.8).** Se deja
+tachada como registro, no se borra:
 
-`A` (`Concepto`) no forma parte de lo que escribe `Cargar_Remuneracion_Subastas_Rapido`, y
-`R:V` (`Configuración`, `Ciclo`, `Clave`, `SUBIDA`, `BAJADA`) tampoco: son columnas de otra
-lógica (probablemente relacionada con las fórmulas `U:W` ya descartadas como fuera de alcance
-en la sección 23.3).
+~~| Letra | Nombre | Origen |~~
+~~|---|---|---|~~
+~~| B | `Control` | copiado de `DB!B` |~~
+~~| C | `Sub_Baj` | copiado de `DB!C` |~~
+~~| D | `Fecha` | copiado de `DB!D` |~~
+~~| ... | ... | (una posición corrida en toda la tabla) |~~
+
+~~`A` (`Concepto`) no forma parte de lo que escribe `Cargar_Remuneracion_Subastas_Rapido`~~ — Falso:
+`Concepto` sí existe, es la columna `B` (el label completo `CSF(-)`/`CSF(+)`/etc), no `A`. Ver
+sección 26.8 para la tabla correcta y la explicación completa del error.
 
 ## 24.3. Hoja "Ofertas SSCC": las dos tablas van lado a lado, no una debajo de la otra
 
@@ -1746,20 +1736,20 @@ sugería el propio nombre de esa columna. Con esa confirmación, la clave equiva
 reconstruyó **por nombre de columna real**, no por posición:
 
 - tipo → `Subastas!Sub_Baj` (confirmado por el usuario)
-- central → `Subastas!Configuración` (**inferido**, no confirmado letra por letra: es el mismo
-  campo que usa la tabla dinámica Prorrata SSCC como identificador de central, y el que produce
-  una alineación semántica limpia con `Mes`/`Dia`/`Hora_dia` de Subastas contra `Mes`/`Dia`/
-  `Hora` de `Calculo E Costos` — `Propietario`, la otra columna candidata, se descartó porque es
-  el campo que se usa para filtrar por BESS/SAE, no para identificar una central puntual)
+- central → `Subastas!Configuración` (**confirmado por el usuario, sesión del 2026-09-11**:
+  "si se usa configuración" — no `Propietario`, que es el campo que se usa para filtrar por
+  BESS/SAE, no para identificar una central puntual). Hasta esa confirmación era una inferencia
+  razonada: mismo campo que usa la tabla dinámica Prorrata SSCC como identificador de central, y
+  el que produce una alineación semántica limpia con `Mes`/`Dia`/`Hora_dia` de Subastas contra
+  `Mes`/`Dia`/`Hora` de `Calculo E Costos`; también coincidía con que `Calculo E Costos!G` se
+  llama literalmente `Configuracion` — el mismo nombre de campo. Esta misma elección la reusan
+  `AG:AL`/`AM:AR` (Prorratas/FD homologado, plan §25.10), `AW` (tabla de umbrales, §25.11), y
+  las reservas por subasta de `Calculo RE545` (`AC:AU`, §26.3).
 - mes/día/hora → `Subastas!Mes`, `Subastas!Dia`, `Subastas!Hora_dia`
 
-**Pendiente de validar contra un caso real**: si al correr esto la cantidad de filas con `L=1`
-sale sospechosamente baja o en cero, la primera sospechosa es esta inferencia (`Configuración`
-en vez de `Propietario`). Dicho esto, el archivo de encabezados reales que confirmó los nombres
-de `Calculo E Costos` (25.8) subió bastante la confianza en esta elección: la columna `G` de
-`Calculo E Costos` se llama literalmente **`Configuracion`** — el mismo nombre de campo que
-`Subastas!Configuración` — lo que es un indicio fuerte (aunque no una prueba fila por fila) de
-que es el campo correcto para homologar centrales entre las dos hojas.
+**Sigue pendiente** (no es lo mismo que la homologación en sí, que ya está confirmada): validar
+fila por fila contra un caso real que la cantidad de filas con `L=1` sea razonable — eso confirma
+que el cruce funciona bien con datos reales.
 
 ## 25.7. Detalle columna por columna de la etapa 2
 
@@ -2155,3 +2145,86 @@ Queda claro entonces qué índice usa cada columna:
 | 4 | `Capacidad (MWh)` | `U` y `BC` de RE545, `BC` de E Costos |
 | 6 | `Barra inyección` | `H` de las dos hojas |
 | 9 | `Eficiencia` | `V` de RE545 |
+
+---
+
+# 26.8. Corrección grande: `NOMBRES_SUBASTAS` estaba mal — falta contar la columna `Concepto`
+
+El usuario entregó `Libro1.xlsx` (ahora en `docs/Libro1_Subastas_real.xlsx`) con la hoja
+`subastas` real, encabezados **y fórmulas**, y pidió revisar `Cargar_Remuneracion_Subastas_Rapido`
+contra ese archivo. Esto reveló que la tabla de la sección 24.2 (y todo lo que dependía de ella)
+tenía cada nombre pegado una posición más adelante de donde correspondía.
+
+**La prueba definitiva es la fórmula real de `Subastas!B1`:**
+
+```
+=IF(AND(C1="CSF",D1="SUBIDA"),"CSF(+)",IF(AND(C1="CSF",D1="BAJADA"),"CSF(-)",
+  IF(AND(C1="CTF",D1="SUBIDA"),"CTF(+)",IF(AND(C1="CTF",D1="BAJADA"),"CTF(-)","REVISAR"))))
+```
+
+Arma `B` a partir de DOS insumos: `C` (tipo de servicio SIN dirección: `CSF`/`CTF`/`CPF`) y `D`
+(dirección: `SUBIDA`/`BAJADA`). La sección 24.2 solo tenía UNA columna ahí — le faltaba contar
+`Concepto` (`B`, el label completo `CSF(-)`/`CSF(+)`/etc, lo que se venía llamando "Control") como
+columna real y propia. Confirmado letra por letra contra los datos reales del archivo:
+
+```
+B3='CSF(-)'   C3='CSF'   D3='BAJADA'   K3='SAE-CRCA-PFV-DON-HUMBERTO'   L3='EGP_CHILE'
+```
+
+**Tabla correcta de `Subastas!B:Q`** (reemplaza la de la sección 24.2, tachada):
+
+| Letra | Nombre | Origen |
+|---|---|---|
+| B | `Concepto` | fórmula (label completo, ver arriba) — **antes se creía que era "Control"** |
+| C | `Control` | copiado de `DB!C` (tipo de servicio SIN dirección) — **columna que nunca se había mapeado** |
+| D | `Sub_Baj` | copiado de `DB!D` (dirección: `SUBIDA`/`BAJADA`) |
+| E | `Fecha` | copiado de `DB!E` |
+| F | `Año` | copiado de `DB!F` |
+| G | `Mes` | copiado de `DB!G` |
+| H | `Dia` | copiado de `DB!H` |
+| I | `Hora_dia` | copiado de `DB!I` |
+| J | `Hora_mes` | copiado de `DB!J` |
+| K | `Configuración` | copiado de `DB!K` — **esta es la columna que se filtra por BESS/SAE**, no `Propietario`: funciona igual porque los nombres de central BESS empiezan con `"SAE-"` |
+| L | `Propietario` | copiado de `DB!L` |
+| M | `Clave horaria` | fórmula: `= Configuración & Dia & Hora_dia` (`K&H&I`) — confirmada contra la fórmula real `M3=K3&H3&I3` |
+| N | `Ciclo` | XLOOKUP contra `'Calculo E Costos'!P` (Ciclo de Carga del mes) — **antes se llamaba "Energía SSCC" por error**; la lógica ya implementada (`calcular_subastas_ciclo`, antes `calcular_subastas_energia_sscc`) era correcta, solo el nombre estaba mal |
+| O | `Energía SSCC` | copiado de `DB!P` |
+| P | `FD` | copiado de `DB!Y` |
+| Q | `FMA` | copiado de `DB!V` |
+
+`A` sigue genuinamente sin usar (confirmado: no hay datos ahí en el archivo real) — eso sí estaba
+bien. La tabla de umbrales SUBIDA/BAJADA que la sección 25.10/25.11 documentaba como `R:V` en
+realidad vive en `Subastas!S:W` (`S`=Configuración, `T`=Ciclo, `U`=Clave, `V`=SUBIDA,
+`W`=BAJADA) — confirmado con este mismo archivo, y coincide exactamente con lo que
+`construir_dic_umbrales_subastas()` ya calculaba en Python de forma independiente.
+
+**No era un "corrimiento uniforme de todo el archivo"** (la explicación que se venía dando desde
+la sección 25.6/25.10, "el original tiene una primera columna vacía") — era que faltaba UNA
+columna real (`Concepto`) al principio del bloque de 11 que copia la macro (confirmado también
+por el propio `MsgBox` de la macro: `"DB B:L → Subastas B:L"`, `"DB P → Subastas O"`,
+`"DB Y → Subastas P"`, `"DB V → Subastas Q"` — un bloque de 11 columnas + 3 copias sueltas, sin
+ningún hueco).
+
+## Consecuencia: casi nada de la lógica ya escrita estaba mal, solo los nombres
+
+`construir_subastas()` arma los valores por **posición** dentro del bloque `B:Y` de origen (`DB`),
+y esas posiciones ya eran correctas — el error estaba únicamente en qué nombre se le pegaba a
+cada posición al final, vía `NOMBRES_SUBASTAS`. Por ejemplo, la fórmula de "Clave horaria" ya se
+calculaba exactamente así en el código (usando las letras internas `K`,`H`,`I` como *posiciones*
+dentro del bloque `B:L`, que por construcción coinciden con las letras reales de Excel en ese
+rango) — solo estaba mal etiquetada como `"Ciclo"`.
+
+**Un cambio de código real (no solo de nombre):** `construir_dic_reservas_subastas()` (reservas
+por subasta de `Calculo RE545`, sección 26.3) usaba `df_subastas["Control"]` como criterio de
+tipo — pero la fórmula real usa `Subastas!$B:$B` (`Concepto`, el label completo) contra el
+encabezado de columna de RE545 (`AC$3="CPF(-)"`, con dirección). `Control` (el tipo sin
+dirección) nunca iba a poder distinguir `(-)` de `(+)`. Corregido a `df_subastas["Concepto"]`.
+
+`construir_prorrata_sscc()`/`construir_dic_prorrata()` (Prorrata SSCC, sección 25.10) **no
+cambiaron**: ya usaban `columns="Control"`, y con el significado real de `Control` (tipo sin
+dirección) esto sigue siendo exactamente lo que el pivot necesita — coincide con que el VBA
+original duplique literalmente `AJ=AG`/`AK=AH` sin distinguir dirección en absoluto (algo que
+ahora tiene una explicación clara: la fuente de datos del pivot tampoco la distingue).
+
+Ver `BITACORA.md`, entrada "Corrección grande: `NOMBRES_SUBASTAS` estaba mal desde el principio",
+para el detalle de verificación (test con los valores exactos de dos filas del archivo real).
