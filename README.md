@@ -25,16 +25,33 @@ python Balance_BESS.py
    recuerda la última carpeta usada, por PC/usuario, en `config.json`.
 2. Ingresar el **período (AAMM)** en el recuadro de la ventana: 4 dígitos,
    año+mes simplificado (ej. `2607` para julio de 2026). No se adivina del
-   nombre de ningún archivo — es el dato que el programa usa para ubicar el
-   SoC del período dentro de `Medidas/`.
+   nombre de ningún archivo — es el dato con el que el programa ubica el
+   SoC del período dentro de `Medidas/` y el CSV de CMg dentro de `Cmg/`.
 3. La ventana detecta automáticamente las entradas y las dibuja como un
    diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
-4. Al final del diagrama están `Consolidado_entradas.xlsx` y
-   `Pagos_BESS.xlsx`, cada una con su botón **Generar...**. Ese botón abre
-   una ventana aparte donde se elige qué partes recalcular esta vez (una
-   casilla por hoja); lo que no se tilda se conserva tal cual estaba en el
-   archivo existente. `Pagos_BESS.xlsx` tiene dos casillas: `Calculo E
-   Costos` y `Calculo RE545`.
+4. **Cada acción es un botón en la fila que le corresponde** — no hay
+   ventanas intermedias ni un botón "Ejecutar" único:
+   - `Cmg/cmg<AAMM>_def_15minutal.csv` → **Traer cmg_15min** (lo baja de la
+     unidad de red).
+   - `Cmg/cmg.xlsx` → **Generar** (lo arma con ese CSV).
+   - `Consolidado_entradas.xlsx` y `Pagos_BESS.xlsx` se desglosan por hoja,
+     igual que `Centrales.xlsx`, y cada hoja tiene su botón **Actualizar**
+     (el de la fila del archivo, **Actualizar todo**, las hace todas). Lo
+     que no se actualiza se conserva tal cual estaba; si el archivo todavía
+     no existe, se crea.
+
+## Estructura del repositorio
+
+```text
+Balance_BESS.py            <- la ventana (lo único que se ejecuta)
+Script/
+    nucleo.py              <- todo el cálculo del caso
+    Cmg/
+        Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
+```
+
+La idea es ir sacando de `nucleo.py` un módulo por etapa, como ya se hizo
+con `Cmg/`; por ahora el resto sigue en un solo archivo.
 
 ## Estructura de carpeta de un caso
 
@@ -49,17 +66,16 @@ python Balance_BESS.py
 ├── Ofertas/
 │   └── <algún archivo Excel cuyo nombre contenga "OfertasSSCC">
 ├── Cmg/
-│   └── cmg.xlsx             (nombre literal, no cambia con el período;
-│                             lo genera el propio programa, botón
-│                             "Generar" al lado del nombre)
+│   ├── cmg<AAMM>_def_15minutal.csv   (botón "Traer cmg_15min")
+│   └── cmg.xlsx                      (botón "Generar")
 ├── SSCC_Desempeño/
 │   └── <algún archivo Excel cuyo nombre empiece con "SSCC_Desempeño_">
 ├── Subastas/
 │   └── <algún archivo Excel cuyo nombre empiece con
 │        "3_REMUNERACIÓN_SUBASTAS_E_ID_">
-├── Consolidado_entradas.xlsx    <- salida generada por el programa
-└── Pagos_BESS.xlsx              <- salida generada por el programa
-                                     (nombre provisorio)
+├── Consolidado_entradas.xlsx    <- salida (una fila por hoja en la
+│                                   ventana, cada una con "Actualizar")
+└── Pagos_BESS.xlsx              <- salida, idem (nombre provisorio)
 ```
 
 Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
@@ -75,18 +91,24 @@ Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
   automáticamente el más reciente por fecha de modificación — así lo hacen
   las macros originales de la planilla.
 - **cmg.xlsx**: única excepción con nombre literal fijo, dentro de `Cmg/`.
-  Tampoco hay que armarlo a mano: el botón **Generar** que aparece al lado
-  de esa fila en el diagrama lo construye desde el CSV 15-minutal oficial,
+  Tampoco hay que armarlo a mano, y son dos pasos, cada uno con su botón en
+  esa misma carpeta del diagrama:
 
-  ```
-  T:\CMgReales 15MIN\<AAAA>\<AAMM>\Mensual\CMg\Cmg para balance\cmg<AAMM>_def_15minutal.csv
-  ```
+  1. **Traer cmg_15min** copia el CSV 15-minutal oficial del período,
 
-  filtrando las barras que trae la columna `Barra inyección` de la hoja
-  `Resumen BESS` de `Centrales.xlsx` (no hay ninguna lista de barras
-  escrita en el código: se agregan o se sacan editando `Centrales.xlsx`).
-  El período `AAMM` es el mismo de la ventana, y la raíz `T:` está en una
-  sola constante (`nucleo.RAIZ_CMG_REALES`) por si cambia de letra.
+     ```
+     T:\CMgReales 15MIN\<AAAA>\<AAMM>\Mensual\CMg\Cmg para balance\cmg<AAMM>_def_15minutal.csv
+     ```
+
+     a `<CARPETA_BASE>/Cmg/`, al lado de `cmg.xlsx`. Se copia (en vez de
+     leerlo directo de la red) para que el caso quede autocontenido: se
+     puede regenerar `cmg.xlsx` después sin la unidad conectada, y queda
+     registrado con qué archivo se trabajó. La raíz `T:` está en una sola
+     constante (`Extrae_CMG_barras.RAIZ_CMG_REALES`) por si cambia de letra.
+  2. **Generar** arma `cmg.xlsx` con ese CSV, filtrando las barras que trae
+     la columna `Barra inyección` de la hoja `Resumen BESS` de
+     `Centrales.xlsx` — no hay ninguna lista de barras escrita en el
+     código: se agregan o se sacan editando `Centrales.xlsx`.
 
 La carpeta base puede estar en cualquier ubicación (disco local, red,
 OneDrive); moverla o mover `Balance_BESS.py` a otro lugar no cambia el

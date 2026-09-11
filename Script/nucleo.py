@@ -15,6 +15,15 @@ from pathlib import Path
 import openpyxl
 import pandas as pd
 
+# La logica de cmg.xlsx vive en su propio modulo (Script/Cmg/). El
+# import tolera las dos formas de llegar aca: como parte del paquete
+# Script (lo normal, desde Balance_BESS.py) o con nucleo.py importado
+# suelto con Script/ en el sys.path (tests).
+try:
+    from .Cmg import Extrae_CMG_barras as extrae_cmg
+except ImportError:  # pragma: no cover - depende de como se importe
+    from Cmg import Extrae_CMG_barras as extrae_cmg
+
 
 # ============================================================
 # PARAMETROS FIJOS
@@ -50,23 +59,11 @@ HOJA_DICCIONARIO = "Diccionario"
 ARCHIVO_CMG = "cmg.xlsx"
 HOJA_CMG_ORIGEN = "CMg"
 
-# Origen de cmg.xlsx: el CSV 15-minutal oficial, que NO vive en la
-# carpeta del caso sino en la unidad de red, con una ruta armada a
-# partir del periodo:
-#
-#   T:\CMgReales 15MIN\AAAA\AAMM\Mensual\CMg\Cmg para balance\
-#       cmgAAMM_def_15minutal.csv
-#
-# (AAAA = año completo, AAMM = el mismo periodo de 4 digitos de la
-# ventana). Es la unica entrada del programa que se busca fuera de la
-# carpeta base del caso; si la unidad T: cambia de letra, se cambia
-# aca y nada mas.
-RAIZ_CMG_REALES = r"T:\CMgReales 15MIN"
-SUBCARPETAS_CMG_REALES = ("Mensual", "CMg", "Cmg para balance")
-PLANTILLA_CSV_CMG_15MIN = "cmg{aamm}_def_15minutal.csv"
-SEPARADOR_CSV_CMG = ";"
-CODIFICACION_CSV_CMG = "latin1"
-COLUMNA_CSV_CMG_VALOR = "CMg[CLP/KWh]"
+# El CSV 15-minutal del que sale cmg.xlsx vive en la carpeta Cmg/ del
+# caso, al lado de cmg.xlsx, y se baja ahi desde la unidad de red con
+# el boton "Traer cmg_15min" (ver traer_csv_cmg). El nombre del
+# archivo, la ruta de red y el formato del CSV los conoce
+# Script/Cmg/Extrae_CMG_barras.py, no este modulo.
 
 HOJA_CPF_HORARIO = "CPF Horario"
 HOJA_CSF_HORARIO = "CSF Horario"
@@ -403,70 +400,169 @@ def periodo_desde_aamm(aamm):
 # VALIDACION DE ESTRUCTURA
 # ============================================================
 
+def hojas_de(ruta):
+    """
+    Nombres de hoja de un Excel, o None si no se puede abrir (no
+    existe, esta abierto por Excel, corrupto). Se usa para mostrar el
+    estado hoja por hoja de las dos SALIDAS, que se generan por
+    partes: cada hoja puede estar o no estar.
+    """
+
+    ruta = Path(ruta)
+
+    if not ruta.is_file():
+        return None
+
+    try:
+        return list(pd.ExcelFile(ruta).sheet_names)
+    except Exception:
+        return None
+
+
+def _fila(id_fila, etiqueta, nivel, estado, detalle=""):
+    """
+    Una fila del diagrama de la ventana.
+
+    id_fila: identificador estable (la ventana lo usa para saber que
+    boton va en que fila; nucleo.py no sabe nada de botones).
+    nivel: 0 = raiz del caso, 1 = adentro de una carpeta/archivo,
+    2 = adentro de un archivo que esta adentro de una carpeta. Lo
+    decide nucleo porque es estructura, no presentacion: como
+    dibujarlo (prefijos, colores) es cosa de la ventana.
+    """
+
+    return {
+        "id": id_fila,
+        "etiqueta": etiqueta,
+        "nivel": nivel,
+        "estado": estado,
+        "detalle": detalle,
+    }
+
+
+def hojas_con_datos(ruta):
+    """
+    {nombre de hoja: tiene datos} de un Excel, o None si no se puede
+    abrir. "Tiene datos" = mas de una fila usada: una hoja preservada
+    que nunca se genero queda con una sola celda vacia (ver
+    _preservar_o_avisar en escribir_salida), y en el diagrama tiene
+    que verse como PENDIENTE, no como generada.
+    """
+
+    ruta = Path(ruta)
+
+    if not ruta.is_file():
+        return None
+
+    try:
+        libro = openpyxl.load_workbook(ruta, read_only=True)
+    except Exception:
+        return None
+
+    try:
+        return {hoja.title: (hoja.max_row or 0) > 1 for hoja in libro.worksheets}
+    finally:
+        libro.close()
+
+
+def _filas_de_hojas(ruta_archivo, secciones, prefijo_id, nivel):
+    """
+    Una fila por hoja de una de las dos salidas
+    (SECCIONES_CONSOLIDADO / SECCIONES_PAGOS): 'ok' si la hoja ya
+    existe en el archivo, 'pendiente' si todavia no se genero.
+
+    Las dos salidas se desglosan como el resto del arbol -el archivo
+    como "carpeta", sus hojas adentro- y cada hoja trae su propio
+    boton "Actualizar" en la ventana: por eso no hace falta ninguna
+    ventana intermedia para elegir que recalcular.
+    """
+
+    hojas = hojas_con_datos(ruta_archivo)
+    con_datos = (
+        {normalizar(nombre) for nombre, tiene in hojas.items() if tiene}
+        if hojas is not None else set()
+    )
+
+    filas = []
+
+    for id_seccion, etiqueta, _, nombres_hoja in secciones:
+
+        presentes = [
+            nombre for nombre in nombres_hoja
+            if normalizar(nombre) in con_datos
+        ]
+
+        if hojas is None:
+            estado, detalle = "pendiente", "todavia no generada"
+        elif len(presentes) == len(nombres_hoja):
+            estado, detalle = "ok", "generada"
+        elif presentes:
+            estado, detalle = "pendiente", "generada a medias"
+        else:
+            estado, detalle = "pendiente", "todavia no generada"
+
+        filas.append(
+            _fila(
+                f"{prefijo_id}:{id_seccion}",
+                f"hoja '{etiqueta}'",
+                nivel,
+                estado,
+                detalle,
+            )
+        )
+
+    return filas
+
+
 def revisar_estructura(carpeta_base, aamm=None):
     """
-    Revisa la carpeta base y devuelve una lista de
-    (etiqueta, estado, detalle) para pintar en la ventana.
+    Revisa la carpeta base y devuelve (rutas, filas), donde cada fila
+    es el dict que arma _fila(): id, etiqueta, nivel, estado
+    ('ok'/'falta'/'pendiente') y detalle.
 
     aamm: periodo ingresado por el usuario en la ventana (4 digitos,
-    ej. '2607'). Sin un AAMM valido no se puede buscar el SoC.
-
-    estado: 'ok' | 'falta' | 'pendiente'
+    ej. '2607'). Sin un AAMM valido no se pueden buscar ni el SoC ni
+    el CSV de CMg; eso se dice en el detalle de ESAS filas, no en una
+    fila propia del periodo (el AAMM se ingresa arriba, en su campo,
+    y no es parte de la estructura de carpetas).
     """
 
     rutas = resolver_rutas(carpeta_base)
     filas = []
 
-    def agregar(etiqueta, existe, detalle=""):
+    def agregar(id_fila, etiqueta, nivel, existe, detalle=""):
         filas.append(
-            (
-                etiqueta,
-                "ok" if existe else "falta",
-                detalle,
-            )
+            _fila(id_fila, etiqueta, nivel, "ok" if existe else "falta", detalle)
         )
 
-    agregar(
-        "Carpeta base",
-        rutas["base"].is_dir(),
-        str(rutas["base"]),
-    )
-
-    agregar(
-        f"{CARPETA_MEDIDAS}/",
-        rutas["medidas_dir"].is_dir(),
-    )
-
-    agregar(
-        ARCHIVO_MEDIDAS_SAE,
-        rutas["medidas_sae"].is_file(),
-    )
-
-    # Periodo AAMM: lo ingresa el usuario, no se infiere de un nombre
-    # de archivo (ver PATRON_AAMM / validar_aamm).
     try:
         aamm_valido = validar_aamm(aamm)
-        filas.append(("Periodo (AAMM)", "ok", aamm_valido))
-    except ErrorEntrada as error:
+    except ErrorEntrada:
         aamm_valido = None
-        filas.append(
-            ("Periodo (AAMM)", "falta", str(error).split("\n")[0])
-        )
 
     rutas["aamm"] = aamm_valido
 
-    # SOC del periodo indicado
+    agregar("base", "Carpeta base", 0, rutas["base"].is_dir(), str(rutas["base"]))
+
+    # ---- Medidas/ -------------------------------------------------
+    agregar("medidas_dir", f"{CARPETA_MEDIDAS}/", 0, rutas["medidas_dir"].is_dir())
+    agregar("medidas_sae", ARCHIVO_MEDIDAS_SAE, 1, rutas["medidas_sae"].is_file())
+
+    # El SoC del periodo vive aca adentro (nivel 1), no es una entrada
+    # suelta: su nombre solo tiene que contener "SOC" y el AAMM.
     if aamm_valido:
         try:
             archivo_soc = buscar_soc(rutas["medidas_dir"], aamm_valido)
             filas.append(
-                (archivo_soc.name, "ok", f"periodo {aamm_valido}")
+                _fila("soc", archivo_soc.name, 1, "ok", f"periodo {aamm_valido}")
             )
             rutas["soc"] = archivo_soc
         except ErrorEntrada as error:
             filas.append(
-                (
-                    f"SoC periodo {aamm_valido}",
+                _fila(
+                    "soc",
+                    f"SoC del periodo {aamm_valido}",
+                    1,
                     "falta",
                     str(error).split("\n")[0],
                 )
@@ -474,135 +570,139 @@ def revisar_estructura(carpeta_base, aamm=None):
             rutas["soc"] = None
     else:
         filas.append(
-            (
+            _fila(
+                "soc",
                 "SoC del periodo",
+                1,
                 "falta",
-                "ingresa el AAMM para poder buscarlo",
+                "ingresa el periodo (AAMM) arriba para poder buscarlo",
             )
         )
         rutas["soc"] = None
 
+    # ---- Auxiliares/ ----------------------------------------------
     agregar(
-        f"{CARPETA_AUXILIARES}/",
+        "auxiliares_dir", f"{CARPETA_AUXILIARES}/", 0,
         rutas["auxiliares_dir"].is_dir(),
     )
+    agregar("centrales", ARCHIVO_CENTRALES, 1, rutas["centrales"].is_file())
 
-    agregar(
-        ARCHIVO_CENTRALES,
-        rutas["centrales"].is_file(),
-    )
-
-    # Hojas del maestro
     if rutas["centrales"].is_file():
-        try:
-            hojas = pd.ExcelFile(rutas["centrales"]).sheet_names
-            hojas_norm = {normalizar(h) for h in hojas}
 
-            for hoja in (HOJA_RESUMEN_BESS, HOJA_DICCIONARIO):
-                filas.append(
-                    (
-                        f"  hoja '{hoja}'",
-                        (
-                            "ok"
-                            if normalizar(hoja) in hojas_norm
-                            else "falta"
-                        ),
-                        "",
-                    )
-                )
-        except Exception as error:
+        hojas = hojas_de(rutas["centrales"])
+
+        if hojas is None:
             filas.append(
-                ("  hojas de Centrales.xlsx", "falta", str(error))
+                _fila(
+                    "centrales:hojas",
+                    "hojas de Centrales.xlsx",
+                    2,
+                    "falta",
+                    "no se pudo abrir el archivo",
+                )
             )
+        else:
+            hojas_norm = {normalizar(hoja) for hoja in hojas}
+            for hoja in (HOJA_RESUMEN_BESS, HOJA_DICCIONARIO):
+                agregar(
+                    f"centrales:{hoja}", f"hoja '{hoja}'", 2,
+                    normalizar(hoja) in hojas_norm,
+                )
 
-    # Ofertas SSCC: ubicacion definida en <CARPETA_BASE>/Ofertas/ (plan
-    # seccion 16.2). Las macros de Ofertas SSCC son obligatorias (plan
-    # seccion 17-18), asi que esto SI bloquea Ejecutar si falta.
-    agregar(
-        f"{CARPETA_OFERTAS}/",
-        rutas["ofertas_dir"].is_dir(),
-    )
+    # ---- Ofertas/ -------------------------------------------------
+    agregar("ofertas_dir", f"{CARPETA_OFERTAS}/", 0, rutas["ofertas_dir"].is_dir())
 
     archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
     rutas["ofertas"] = archivo_ofertas
 
     if archivo_ofertas:
         filas.append(
-            (archivo_ofertas.name, "ok", f"en {CARPETA_OFERTAS}/")
+            _fila("ofertas", archivo_ofertas.name, 1, "ok", f"en {CARPETA_OFERTAS}/")
         )
     else:
         filas.append(
-            (
-                "Archivo *OfertasSSCC*",
-                "falta",
+            _fila(
+                "ofertas", "Archivo *OfertasSSCC*", 1, "falta",
                 f"ningun archivo en {CARPETA_OFERTAS}/ contiene "
                 f"'OfertasSSCC' en el nombre",
             )
         )
 
-    # CMg: nombre de archivo literal fijo (Cargar_CMg_Desde_Archivo).
-    agregar(
-        f"{CARPETA_CMG}/",
-        rutas["cmg_dir"].is_dir(),
-    )
-    # cmg.xlsx no se descarga: se arma desde el CSV 15-minutal de la
-    # unidad de red con el boton "Generar" de esta fila (generar_cmg).
-    # Se muestra si ese CSV esta o no disponible, que es lo que decide
-    # si el boton va a poder hacer algo.
-    rutas["csv_cmg"] = (
-        ruta_csv_cmg_15min(aamm_valido) if aamm_valido else None
+    # ---- Cmg/ -----------------------------------------------------
+    # Dos archivos, en orden de uso: primero se trae el CSV 15-minutal
+    # de la unidad de red ("Traer cmg_15min"), y con ese CSV ya al
+    # lado se genera cmg.xlsx ("Generar").
+    agregar("cmg_dir", f"{CARPETA_CMG}/", 0, rutas["cmg_dir"].is_dir())
+
+    rutas["cmg_csv"] = (
+        extrae_cmg.ruta_csv_local(rutas["cmg_dir"], aamm_valido)
+        if aamm_valido else None
     )
 
-    if rutas["cmg"].is_file():
-        detalle_cmg = "se regenera con el boton Generar ->"
-    elif rutas["csv_cmg"] is None:
-        detalle_cmg = "ingresa el AAMM y usa el boton Generar ->"
-    elif rutas["csv_cmg"].is_file():
-        detalle_cmg = (
-            f"falta, pero el CSV del periodo esta disponible: usa el "
-            f"boton Generar ->"
+    if rutas["cmg_csv"] is None:
+        filas.append(
+            _fila(
+                "cmg_csv", "cmg<AAMM>_def_15minutal.csv", 1, "falta",
+                "ingresa el periodo (AAMM) arriba para poder traerlo",
+            )
         )
     else:
-        detalle_cmg = (
-            f"falta, y tampoco esta el CSV de origen ({rutas['csv_cmg']})"
+        filas.append(
+            _fila(
+                "cmg_csv",
+                rutas["cmg_csv"].name,
+                1,
+                "ok" if rutas["cmg_csv"].is_file() else "falta",
+                (
+                    f"en {CARPETA_CMG}/"
+                    if rutas["cmg_csv"].is_file()
+                    else "se baja de la unidad de red con el boton ->"
+                ),
+            )
         )
 
-    agregar(
-        ARCHIVO_CMG,
-        rutas["cmg"].is_file(),
-        detalle_cmg,
+    filas.append(
+        _fila(
+            "cmg_xlsx",
+            ARCHIVO_CMG,
+            1,
+            "ok" if rutas["cmg"].is_file() else "pendiente",
+            (
+                "se regenera desde el CSV de arriba ->"
+                if rutas["cmg"].is_file()
+                else "se genera desde el CSV de arriba ->"
+            ),
+        )
     )
 
-    # SSCC_Desempeño (alimenta la hoja FD): obligatorio, se toma el mas
-    # reciente si hay varios (Cargar_SSCC_Desempeno_En_FD).
+    # ---- SSCC_Desempeño/ ------------------------------------------
     agregar(
-        f"{CARPETA_SSCC_DESEMPENO}/",
+        "sscc_dir", f"{CARPETA_SSCC_DESEMPENO}/", 0,
         rutas["sscc_desempeno_dir"].is_dir(),
     )
 
-    archivo_sscc = buscar_archivo_sscc_desempeno(
-        rutas["sscc_desempeno_dir"]
-    )
+    archivo_sscc = buscar_archivo_sscc_desempeno(rutas["sscc_desempeno_dir"])
     rutas["sscc_desempeno"] = archivo_sscc
 
     if archivo_sscc:
         filas.append(
-            (archivo_sscc.name, "ok", f"en {CARPETA_SSCC_DESEMPENO}/")
+            _fila(
+                "sscc", archivo_sscc.name, 1, "ok",
+                f"en {CARPETA_SSCC_DESEMPENO}/",
+            )
         )
     else:
         filas.append(
-            (
-                "Archivo SSCC_Desempeño_*",
-                "falta",
+            _fila(
+                "sscc", "Archivo SSCC_Desempeño_*", 1, "falta",
                 f"ningun archivo en {CARPETA_SSCC_DESEMPENO}/ empieza "
                 f"con 'SSCC_Desempeño_'",
             )
         )
 
-    # Subastas (alimenta la hoja Subastas): obligatorio, se toma el
-    # mas reciente si hay varios (Cargar_Remuneracion_Subastas_Rapido).
+    # ---- Subastas/ ------------------------------------------------
     agregar(
-        f"{CARPETA_SUBASTAS}/",
+        "subastas_dir", f"{CARPETA_SUBASTAS}/", 0,
         rutas["subastas_dir"].is_dir(),
     )
 
@@ -611,17 +711,55 @@ def revisar_estructura(carpeta_base, aamm=None):
 
     if archivo_subastas:
         filas.append(
-            (archivo_subastas.name, "ok", f"en {CARPETA_SUBASTAS}/")
+            _fila(
+                "subastas", archivo_subastas.name, 1, "ok",
+                f"en {CARPETA_SUBASTAS}/",
+            )
         )
     else:
         filas.append(
-            (
-                "Archivo 3_REMUNERACIÓN_SUBASTAS_E_ID_*",
+            _fila(
+                "subastas", "Archivo 3_REMUNERACIÓN_SUBASTAS_E_ID_*", 1,
                 "falta",
                 f"ningun archivo en {CARPETA_SUBASTAS}/ empieza con "
                 f"'3_REMUNERACIÓN_SUBASTAS_E_ID_'",
             )
         )
+
+    # ---- Salidas --------------------------------------------------
+    # Las dos salidas se desglosan igual que Centrales.xlsx: el
+    # archivo y, adentro, una fila por hoja. Cada hoja se actualiza
+    # por separado desde su propio boton; si el archivo todavia no
+    # existe, se crea al actualizar la primera hoja.
+    for id_salida, nombre, ruta, secciones in (
+        ("consolidado", ARCHIVO_SALIDA, rutas["salida"], SECCIONES_CONSOLIDADO),
+        (
+            "pagos", ARCHIVO_SALIDA_PAGOS, rutas["salida_pagos"],
+            SECCIONES_PAGOS,
+        ),
+    ):
+        filas_hojas = _filas_de_hojas(ruta, secciones, id_salida, 1)
+
+        # El archivo esta "ok" solo si TODAS sus hojas tienen datos:
+        # que el .xlsx exista no dice nada (se crea entero, con las
+        # hojas que todavia no se generaron vacias).
+        completas = all(fila["estado"] == "ok" for fila in filas_hojas)
+
+        if not ruta.is_file():
+            detalle = "salida: se crea al actualizar la primera hoja ->"
+        elif completas:
+            detalle = "salida: se actualiza hoja por hoja ->"
+        else:
+            detalle = "salida: le faltan hojas por generar ->"
+
+        filas.append(
+            _fila(
+                id_salida, nombre, 0,
+                "ok" if (ruta.is_file() and completas) else "pendiente",
+                detalle,
+            )
+        )
+        filas.extend(filas_hojas)
 
     return rutas, filas
 
@@ -2543,13 +2681,13 @@ def escribir_pagos_bess(
 
     hojas_regenerar: None (por defecto) escribe cada hoja para la que
     se paso su DataFrame, sin mas (asi funcionaba antes de que
-    generar_pagos_bess() tuviera casillas por seccion). Si es un set
+    generar_pagos_bess() recibiera secciones). Si es un set
     con alguno de los nombres de _HOJAS_PAGOS ("Calculo E Costos",
     "Calculo RE545"), la(s) que NO esten en el set se copian tal cual
     desde ruta_existente en vez de escribirse desde el DataFrame --
     mismo criterio que escribir_salida()/hojas_regenerar para
-    Consolidado_entradas.xlsx (una hoja destildada en la ventana
-    "Generar" se preserva, no se recalcula). Si una hoja a preservar
+    Consolidado_entradas.xlsx (una hoja que no se pidio actualizar se
+    preserva, no se recalcula). Si una hoja a preservar
     no existe en ruta_existente, queda vacia y se registra un aviso.
     """
 
@@ -2574,9 +2712,10 @@ def escribir_pagos_bess(
             return
         pd.DataFrame().to_excel(writer, sheet_name=nombre_hoja, index=False)
         mensaje = (
-            f"No se regenero la hoja '{nombre_hoja}' (seccion no "
-            f"tildada) y no se encontro una version anterior para "
-            f"preservarla; quedo vacia."
+            f"No se regenero la hoja '{nombre_hoja}' (no se pidio "
+            f"actualizarla en esta corrida) y no habia una version "
+            f"anterior para preservarla: quedo vacia. Usa su boton "
+            f"'Actualizar' en la ventana."
         )
         avisos_preservacion.append(mensaje)
 
@@ -5621,7 +5760,7 @@ def escribir_salida(
     _HOJAS_CONSOLIDADO, las que NO esten en el set se copian tal cual
     desde ruta_existente en vez de recalcularse -- lo usa
     generar_consolidado() cuando el usuario destilda una entrada en
-    la ventana "Generar". Si una hoja a preservar no existe en
+    su boton "Actualizar". Si una hoja a preservar no existe en
     ruta_existente, queda vacia y se registra un aviso (en el log de
     esta corrida y como fila del Log).
     """
@@ -5649,23 +5788,30 @@ def escribir_salida(
             return
         pd.DataFrame().to_excel(writer, sheet_name=nombre_hoja, index=False)
         mensaje = (
-            f"No se regenero la hoja '{nombre_hoja}' (entrada no "
-            f"tildada) y no se encontro una version anterior para "
-            f"preservarla; quedo vacia."
+            f"No se regenero la hoja '{nombre_hoja}' (no se pidio "
+            f"actualizarla en esta corrida) y no habia una version "
+            f"anterior para preservarla: quedo vacia. Usa su boton "
+            f"'Actualizar' en la ventana."
         )
         avisos_preservacion.append(mensaje)
         registrar(f"  [AVISO] {mensaje}")
 
-    registros = (
-        [("aviso", a) for a in avisos]
-        + [("aviso", a) for a in avisos_preservacion]
-        + [("incidencia_soc", i) for i in incidencias]
-    )
-
-    df_log = pd.DataFrame(
-        registros or [("ok", "Sin observaciones.")],
-        columns=["tipo", "detalle"],
-    )
+    # El Log se arma recien al final: los avisos de preservacion los
+    # va agregando _preservar_o_avisar() MIENTRAS se escriben las
+    # hojas, asi que construirlo antes (como estaba) los perdia todos.
+    # Con el desglose hoja por hoja de la ventana, generar solo una
+    # hoja es el caso normal y esos avisos son justamente los que hay
+    # que ver.
+    def _armar_log():
+        registros = (
+            [("aviso", a) for a in avisos]
+            + [("aviso", a) for a in avisos_preservacion]
+            + [("incidencia_soc", i) for i in incidencias]
+        )
+        return pd.DataFrame(
+            registros or [("ok", "Sin observaciones.")],
+            columns=["tipo", "detalle"],
+        )
 
     with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
 
@@ -5742,7 +5888,7 @@ def escribir_salida(
         else:
             _preservar_o_avisar(writer, "Subastas")
 
-        df_log.to_excel(
+        _armar_log().to_excel(
             writer,
             sheet_name="Log",
             index=False,
@@ -5754,21 +5900,29 @@ def escribir_salida(
 # ============================================================
 # PROCESO COMPLETO
 #
-# Dos salidas independientes, cada una con su ventana "Generar" en
-# Balance_BESS.py:
+# Dos salidas independientes:
 #
-#   - generar_consolidado(): Consolidado_entradas.xlsx. El usuario
-#     tilda que "secciones" quiere recalcular esta vez; el resto se
-#     preserva tal cual estaba (ver escribir_salida/hojas_regenerar).
-#   - generar_pagos_bess(): Pagos_BESS.xlsx. Por ahora sin checkboxes
-#     (una sola hoja) -- lee Medidores de Consolidado_entradas.xlsx
-#     ya generado, no lo recalcula.
+#   - generar_consolidado(): Consolidado_entradas.xlsx.
+#   - generar_pagos_bess(): Pagos_BESS.xlsx -- lee Medidores y
+#     Subastas de Consolidado_entradas.xlsx ya generado, no los
+#     recalcula.
 #
-# SECCIONES_CONSOLIDADO agrupa los 4 checkboxes de esa ventana con
-# las hojas que produce cada uno. "medidores" junta Medidas_SAE, SoC,
-# Centrales (Diccionario) y OfertasSSCC porque construir_medidores()
-# necesita los 4 juntos: no se pueden tildar por separado a ese nivel
-# de detalle sin recalcular con datos parcialmente viejos.
+# Las dos reciben un set de "secciones activas": lo que entra se
+# recalcula y lo que queda afuera se preserva tal cual estaba en el
+# archivo (ver escribir_salida/hojas_regenerar). En la ventana, cada
+# seccion es una fila-hoja del diagrama con su boton "Actualizar", y
+# el boton del archivo manda todas juntas.
+#
+# SECCIONES_CONSOLIDADO agrupa cada seccion con las hojas que produce.
+# "medidores" junta Medidas_SAE, SoC, Centrales (Diccionario) y
+# OfertasSSCC porque construir_medidores() necesita los 4 juntos: no
+# se pueden actualizar por separado a ese nivel de detalle sin
+# recalcular con datos parcialmente viejos.
+#
+# El tercer elemento de cada tupla (la descripcion de que lee esa
+# seccion) ya no se muestra en la ventana -antes era el texto debajo
+# de cada casilla-: queda como documentacion del contrato de cada
+# seccion, que es donde hay que mirarlo al tocar una.
 # ============================================================
 
 SECCIONES_CONSOLIDADO = (
@@ -5777,15 +5931,15 @@ SECCIONES_CONSOLIDADO = (
         "Medidores",
         f"Usa {ARCHIVO_MEDIDAS_SAE}, el SoC del periodo, "
         f"{ARCHIVO_CENTRALES} y OfertasSSCC (comparte esta lectura "
-        f"con 'Ofertas SSCC' de abajo: alcanza con que una de las dos "
-        f"este tildada). Esta casilla decide si se reescribe la hoja "
-        f"'Medidores' en particular.",
+        f"con 'Ofertas SSCC' de abajo: actualizar cualquiera de las "
+        f"dos dispara la misma lectura). Esta seccion decide si se "
+        f"reescribe la hoja 'Medidores' en particular.",
         ("Medidores",),
     ),
     (
         "ofertas_sscc",
         "Ofertas SSCC",
-        f"Misma lectura que 'Medidores' (arriba) -- esta casilla "
+        f"Misma lectura que 'Medidores' (arriba) -- esta seccion "
         f"decide si se reescribe la hoja 'Ofertas SSCC' en particular.",
         ("Ofertas SSCC",),
     ),
@@ -5836,18 +5990,19 @@ def generar_consolidado(
 ):
     """
     Genera/actualiza Consolidado_entradas.xlsx, recalculando solo las
-    hojas de las secciones tildadas (ids de SECCIONES_CONSOLIDADO) y
+    hojas de las secciones pedidas (ids de SECCIONES_CONSOLIDADO) y
     preservando el resto tal cual estaba en el archivo existente (ver
-    escribir_salida). La usa la ventana "Generar" de esa fila.
+    escribir_salida). Si el archivo no existe, se crea. La usan los
+    botones "Actualizar" de las filas-hoja del diagrama (y el
+    "Actualizar todo" de la fila del archivo, que manda todas).
 
     secciones_activas: iterable de ids de SECCIONES_CONSOLIDADO
     ("medidores", "ofertas_sscc", "cmg", "fd", "subastas") a
     recalcular esta vez. "medidores" y "ofertas_sscc" comparten una
     unica lectura/calculo (construir_medidores() arma las dos hojas
-    de una, porque Medidores!R:S:T depende de Ofertas SSCC) -- alcanza
-    con que UNA de las dos este tildada para que esa lectura se
-    dispare; lo que cada id decide por separado es solo que hoja se
-    reescribe.
+    de una, porque Medidores!R:S:T depende de Ofertas SSCC) --
+    actualizar cualquiera de las dos dispara esa lectura; lo que cada
+    id decide por separado es solo que hoja se reescribe.
     """
 
     def avanzar(valor):
@@ -6020,17 +6175,18 @@ def generar_pagos_bess(
 ):
     """
     Genera/actualiza Pagos_BESS.xlsx, recalculando solo las hojas de
-    las secciones tildadas (ids de SECCIONES_PAGOS: "ecostos",
+    las secciones pedidas (ids de SECCIONES_PAGOS: "ecostos",
     "re545") y preservando el resto tal cual estaba en el archivo
     existente (ver escribir_pagos_bess/hojas_regenerar) -- mismo
-    criterio que generar_consolidado()/SECCIONES_CONSOLIDADO. La usa
-    la ventana "Generar" de esa fila.
+    criterio que generar_consolidado()/SECCIONES_CONSOLIDADO. Si el
+    archivo no existe, se crea. La usan los botones "Actualizar" de
+    las filas-hoja del diagrama.
 
     No recalcula Medidores ni Subastas: los lee tal cual estan en
     Consolidado_entradas.xlsx, que debe generarse primero con su
-    propia ventana "Generar". Centrales.xlsx y cmg.xlsx si se leen/
+    propio boton "Actualizar". Centrales.xlsx y cmg.xlsx si se leen/
     recalculan frescos. El archivo SSCC_Desempeño_* solo se exige si
-    "ecostos" esta tildada -- "re545" no usa FD.
+    se pide "ecostos" -- "re545" no usa FD.
     """
 
     def avanzar(valor):
@@ -6235,43 +6391,140 @@ def generar_pagos_bess(
 
 
 # ============================================================
-# GENERACION DE cmg.xlsx DESDE EL CSV 15-MINUTAL
+# cmg.xlsx: TRAER EL CSV Y GENERARLO
 #
-# cmg.xlsx (la entrada de la carpeta Cmg/) no se descarga: se arma a
-# partir del CSV 15-minutal oficial que vive en la unidad de red (ver
-# RAIZ_CMG_REALES). Esto reemplaza al script suelto
-# "Extrae_CMG_barras.py" que se corria a mano al lado del CSV, con dos
-# cambios pedidos por el usuario:
-#   1) el CSV ya no se busca al lado del .py, sino en la ruta de red
-#      armada desde el periodo AAMM de la ventana;
-#   2) las barras a filtrar ya no son una lista hardcodeada: salen de
-#      la columna "Barra inyección" de la hoja "Resumen BESS" de
-#      Centrales.xlsx -- la MISMA fuente que ya usa construir_mapa_barra
-#      para homologar Calculo E Costos!H, asi que las dos puntas no
-#      pueden desincronizarse.
+# La logica en si vive en Script/Cmg/Extrae_CMG_barras.py (que no
+# conoce la estructura del caso: recibe rutas y barras). Aca queda
+# solo lo que SI es del caso: resolver las rutas, sacar las barras de
+# Centrales.xlsx y escribir el Excel.
 # ============================================================
 
-def ruta_csv_cmg_15min(aamm, raiz=None):
+def traer_csv_cmg(carpeta_base, aamm, registrar=print, progreso=None):
     """
-    Arma la ruta del CSV 15-minutal del periodo:
-
-        <raiz>/AAAA/AAMM/Mensual/CMg/Cmg para balance/
-            cmgAAMM_def_15minutal.csv
-
-    raiz: por defecto RAIZ_CMG_REALES (T:\\CMgReales 15MIN). No se
-    valida la existencia aca (la ventana quiere poder mostrar la ruta
-    esperada aunque falte).
+    Copia el CSV 15-minutal del periodo desde la unidad de red a
+    <CARPETA_BASE>/Cmg/ (boton "Traer cmg_15min"). Devuelve la ruta
+    local del CSV.
     """
 
     aamm = validar_aamm(aamm)
-    anio, _ = periodo_desde_aamm(aamm)
+    rutas = resolver_rutas(carpeta_base)
 
-    carpeta = Path(raiz or RAIZ_CMG_REALES) / str(anio) / aamm
+    if not rutas["base"].is_dir():
+        raise ErrorEntrada(f"No se encontro la carpeta base {rutas['base']}")
 
-    for subcarpeta in SUBCARPETAS_CMG_REALES:
-        carpeta = carpeta / subcarpeta
+    if progreso:
+        progreso(10)
 
-    return carpeta / PLANTILLA_CSV_CMG_15MIN.format(aamm=aamm)
+    try:
+        destino = extrae_cmg.traer_csv_15min(
+            rutas["cmg_dir"], aamm, registrar=registrar
+        )
+    except extrae_cmg.ErrorCmg as error:
+        raise ErrorEntrada(str(error)) from error
+    except OSError as error:
+        raise ErrorEntrada(
+            f"No se pudo copiar el CSV de CMg: {error}"
+        ) from error
+
+    if progreso:
+        progreso(100)
+
+    registrar(f"Listo: {destino}")
+
+    return destino
+
+
+def generar_cmg(
+    carpeta_base, aamm, ruta_csv=None, registrar=print, progreso=None
+):
+    """
+    Genera/actualiza <CARPETA_BASE>/Cmg/cmg.xlsx a partir del CSV
+    15-minutal que ya esta en esa misma carpeta (se trae con
+    traer_csv_cmg / boton "Traer cmg_15min").
+
+    Las barras a filtrar salen de "Resumen BESS" de Centrales.xlsx,
+    via construir_mapa_barra(): la MISMA fuente que alimenta
+    Calculo E Costos!Barra, asi que las dos puntas no se pueden
+    desincronizar.
+
+    ruta_csv: opcional, para forzar otro CSV.
+    """
+
+    def avanzar(valor):
+        if progreso:
+            progreso(valor)
+
+    aamm = validar_aamm(aamm)
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["base"].is_dir():
+        raise ErrorEntrada(f"No se encontro la carpeta base {rutas['base']}")
+
+    if not rutas["centrales"].is_file():
+        raise ErrorEntrada(
+            f"No se encontro {rutas['centrales']} (de ahi salen las "
+            f"barras a filtrar)."
+        )
+
+    ruta_csv = (
+        Path(ruta_csv) if ruta_csv
+        else extrae_cmg.ruta_csv_local(rutas["cmg_dir"], aamm)
+    )
+
+    if not ruta_csv.is_file():
+        raise ErrorEntrada(
+            f"No esta el CSV 15-minutal del periodo {aamm} en la "
+            f"carpeta del caso:\n{ruta_csv}\n\n"
+            f"Usa primero el boton 'Traer cmg_15min' de esa fila."
+        )
+
+    avanzar(10)
+
+    registrar(f"Leyendo {ARCHIVO_CENTRALES} (hoja '{HOJA_RESUMEN_BESS}')...")
+    resumen, _ = leer_centrales(rutas["centrales"])
+    barras = barras_desde_resumen_bess(resumen)
+    registrar(f"  barras a filtrar: {len(barras)}")
+    for barra in barras:
+        registrar(f"    {barra}")
+
+    avanzar(25)
+
+    registrar(f"Leyendo {ruta_csv.name}...")
+
+    try:
+        df_salida, resumen_dias = extrae_cmg.construir_cmg_desde_csv(
+            ruta_csv, barras, registrar=registrar
+        )
+        avanzar(70)
+        extrae_cmg.validar_layout(df_salida, registrar=registrar)
+    except extrae_cmg.ErrorCmg as error:
+        raise ErrorEntrada(str(error)) from error
+
+    rutas["cmg_dir"].mkdir(parents=True, exist_ok=True)
+
+    registrar(f"Escribiendo {rutas['cmg']}...")
+    df_salida.to_excel(rutas["cmg"], sheet_name=HOJA_CMG_ORIGEN, index=False)
+
+    avanzar(95)
+
+    registrar(f"  registros exportados: {len(df_salida):,}")
+    registrar(
+        f"  maximo Cuarto de Hora: "
+        f"{int(df_salida[extrae_cmg.COLUMNA_CUARTO].max())}"
+    )
+    registrar(f"  dias en el archivo: {len(resumen_dias)}")
+
+    anomalos = extrae_cmg.resumen_dias_anomalos(resumen_dias)
+
+    if anomalos:
+        registrar("  dias que NO tienen 24 horas (cambio de hora):")
+        for linea in anomalos:
+            registrar(f"    {linea}")
+
+    avanzar(100)
+    registrar(f"Listo: {rutas['cmg']}")
+
+    return rutas["cmg"]
 
 
 def barras_desde_resumen_bess(resumen_bess):
@@ -6280,7 +6533,8 @@ def barras_desde_resumen_bess(resumen_bess):
     aparecen) de la hoja "Resumen BESS" de Centrales.xlsx. Reusa
     construir_mapa_barra() -- misma deteccion de columna por nombre
     normalizado, mismo .strip() -- para que el filtro de cmg.xlsx y la
-    homologacion de Calculo E Costos!H miren exactamente el mismo dato.
+    homologacion de Calculo E Costos!Barra miren exactamente el mismo
+    dato.
     """
 
     barras = []
@@ -6308,248 +6562,3 @@ def barras_desde_resumen_bess(resumen_bess):
         )
 
     return barras
-
-
-def construir_cmg_desde_csv(ruta_csv, barras, registrar=print):
-    """
-    Traduccion de "Extrae_CMG_barras.py" (ver cabecera de esta
-    seccion): lee el CSV 15-minutal, numera el "Cuarto de Hora" global
-    segun los bloques que el archivo realmente trae (no asume 96 por
-    dia: los dias de cambio de hora tienen 92 o 100), filtra por las
-    barras pedidas y agrega el promedio horario de CMg[CLP/KWh] por
-    FECHA + HORA + BARRA.
-
-    Devuelve (df_salida, resumen_dias). El orden de columnas del
-    resultado es el del CSV + "Cuarto de Hora" + el promedio horario,
-    que es justo el layout A:I que leer_cmg() espera despues.
-    """
-
-    ruta_csv = Path(ruta_csv)
-
-    df = pd.read_csv(
-        ruta_csv,
-        sep=SEPARADOR_CSV_CMG,
-        encoding=CODIFICACION_CSV_CMG,
-    )
-
-    registrar(f"  filas leidas del CSV: {len(df):,}")
-
-    faltantes = [
-        columna for columna in
-        ("FECHA", "HORA", "MINUTO", "BARRA", COLUMNA_CSV_CMG_VALOR)
-        if columna not in df.columns
-    ]
-
-    if faltantes:
-        raise ErrorEntrada(
-            f"{ruta_csv.name} no tiene la(s) columna(s) {faltantes}. "
-            f"Columnas encontradas: {list(df.columns)}"
-        )
-
-    df["FECHA_DT"] = pd.to_datetime(df["FECHA"].astype(str), format="%Y%m%d")
-    df["HORA"] = pd.to_numeric(df["HORA"], errors="coerce").astype("Int64")
-    df["MINUTO"] = pd.to_numeric(df["MINUTO"], errors="coerce").astype("Int64")
-
-    # El CSV viene con coma decimal (es-CL).
-    df[COLUMNA_CSV_CMG_VALOR] = pd.to_numeric(
-        df[COLUMNA_CSV_CMG_VALOR]
-        .astype(str)
-        .str.replace(",", ".", regex=False),
-        errors="coerce",
-    )
-
-    # Bloques reales del archivo (fecha + hora + minuto distintos),
-    # numerados dentro de cada dia y despues acumulados: asi el
-    # "Cuarto de Hora" global sale de lo que el CSV trae y no de una
-    # cuenta teorica de 96 bloques diarios.
-    bloques = (
-        df[["FECHA_DT", "HORA", "MINUTO"]]
-        .drop_duplicates()
-        .sort_values(["FECHA_DT", "HORA", "MINUTO"])
-        .reset_index(drop=True)
-    )
-
-    bloques["QH_DIA"] = bloques.groupby("FECHA_DT").cumcount() + 1
-
-    resumen_dias = (
-        bloques.groupby("FECHA_DT", as_index=False)
-        .agg(QH_DEL_DIA=("QH_DIA", "max"))
-    )
-    resumen_dias["OFFSET_DIA"] = (
-        resumen_dias["QH_DEL_DIA"].cumsum().shift(fill_value=0)
-    )
-    resumen_dias["HORAS_DEL_DIA"] = resumen_dias["QH_DEL_DIA"] / 4
-
-    bloques = bloques.merge(resumen_dias, on="FECHA_DT", how="left")
-    bloques["Cuarto de Hora"] = bloques["OFFSET_DIA"] + bloques["QH_DIA"]
-
-    df = df.merge(
-        bloques[["FECHA_DT", "HORA", "MINUTO", "Cuarto de Hora"]],
-        on=["FECHA_DT", "HORA", "MINUTO"],
-        how="left",
-    )
-
-    df["BARRA"] = df["BARRA"].astype(str).str.strip()
-
-    # Se compara en mayusculas (mismo criterio que _buscar_cmg), pero
-    # se conserva el texto tal cual viene del CSV.
-    buscadas = {str(barra).strip().upper() for barra in barras}
-    df_filtrado = df[df["BARRA"].str.upper().isin(buscadas)].copy()
-
-    encontradas = set(df_filtrado["BARRA"].str.upper().unique())
-    sin_datos = [
-        barra for barra in barras
-        if str(barra).strip().upper() not in encontradas
-    ]
-
-    if sin_datos:
-        registrar(
-            f"  AVISO: {len(sin_datos)} barra(s) de {ARCHIVO_CENTRALES} "
-            f"no aparecen en el CSV: {', '.join(sin_datos)}"
-        )
-
-    if df_filtrado.empty:
-        raise ErrorEntrada(
-            f"Ninguna de las {len(barras)} barras de "
-            f"'{HOJA_RESUMEN_BESS}' ({ARCHIVO_CENTRALES}) aparece en "
-            f"{ruta_csv.name}. Revisa que las barras esten escritas "
-            f"igual que en el CSV (ej. 'TOCOPILLA_____110')."
-        )
-
-    df_filtrado["CMg_CLP_KWh_Promedio_Horario"] = (
-        df_filtrado
-        .groupby(["FECHA", "HORA", "BARRA"])[COLUMNA_CSV_CMG_VALOR]
-        .transform("mean")
-        .round(6)
-    )
-
-    df_filtrado = (
-        df_filtrado
-        .drop(columns=["FECHA_DT"])
-        .sort_values(["Cuarto de Hora", "BARRA"])
-        .reset_index(drop=True)
-    )
-
-    return df_filtrado, resumen_dias
-
-
-def _validar_layout_cmg(df, registrar=print):
-    """
-    cmg.xlsx lo vuelve a leer leer_cmg() POR POSICION (D = Barra,
-    F = valor de Q, H = Cuarto de Hora, I = CMg promedio), asi que un
-    cambio de columnas en el CSV de origen romperia silenciosamente la
-    etapa siguiente. Se avisa aca, donde todavia se entiende por que.
-    """
-
-    if df.shape[1] < 9:
-        raise ErrorEntrada(
-            f"El resultado quedo con {df.shape[1]} columnas y "
-            f"{ARCHIVO_CMG} necesita al menos 9 (A:I): el CSV de "
-            f"origen debe haber cambiado de formato."
-        )
-
-    esperado = {3: "BARRA", 7: "Cuarto de Hora"}
-
-    for indice, nombre in esperado.items():
-        real = str(df.columns[indice])
-        if normalizar(real) != normalizar(nombre):
-            registrar(
-                f"  AVISO: se esperaba '{nombre}' en la columna "
-                f"{chr(ord('A') + indice)} y quedo '{real}'. "
-                f"La lectura posterior de {ARCHIVO_CMG} es por "
-                f"posicion: revisa el formato del CSV."
-            )
-
-
-def generar_cmg(
-    carpeta_base, aamm, ruta_csv=None, registrar=print, progreso=None
-):
-    """
-    Genera/actualiza <CARPETA_BASE>/Cmg/cmg.xlsx a partir del CSV
-    15-minutal del periodo. La usa el boton "Generar" de la fila
-    cmg.xlsx de la ventana.
-
-    ruta_csv: opcional, para forzar otro CSV. Por defecto se arma con
-    ruta_csv_cmg_15min(aamm) (la ruta de red).
-    """
-
-    def avanzar(valor):
-        if progreso:
-            progreso(valor)
-
-    aamm = validar_aamm(aamm)
-    rutas = resolver_rutas(carpeta_base)
-
-    if not rutas["base"].is_dir():
-        raise ErrorEntrada(
-            f"No se encontro la carpeta base {rutas['base']}"
-        )
-
-    if not rutas["centrales"].is_file():
-        raise ErrorEntrada(
-            f"No se encontro {rutas['centrales']} (de ahi salen las "
-            f"barras a filtrar)."
-        )
-
-    ruta_csv = Path(ruta_csv) if ruta_csv else ruta_csv_cmg_15min(aamm)
-
-    if not ruta_csv.is_file():
-        raise ErrorEntrada(
-            f"No se encontro el CSV de CMg del periodo {aamm}:\n"
-            f"{ruta_csv}\n\n"
-            f"Revisa que la unidad de red este conectada y que el "
-            f"archivo del periodo ya este publicado."
-        )
-
-    avanzar(10)
-
-    registrar(f"Leyendo {ARCHIVO_CENTRALES} (hoja '{HOJA_RESUMEN_BESS}')...")
-    resumen, _ = leer_centrales(rutas["centrales"])
-    barras = barras_desde_resumen_bess(resumen)
-    registrar(f"  barras a filtrar: {len(barras)}")
-    for barra in barras:
-        registrar(f"    {barra}")
-
-    avanzar(25)
-
-    registrar(f"Leyendo {ruta_csv}...")
-    df_salida, resumen_dias = construir_cmg_desde_csv(
-        ruta_csv, barras, registrar=registrar
-    )
-    avanzar(70)
-
-    _validar_layout_cmg(df_salida, registrar=registrar)
-
-    rutas["cmg_dir"].mkdir(parents=True, exist_ok=True)
-
-    registrar(f"Escribiendo {rutas['cmg']}...")
-    df_salida.to_excel(
-        rutas["cmg"], sheet_name=HOJA_CMG_ORIGEN, index=False
-    )
-
-    avanzar(95)
-
-    registrar(f"  registros exportados: {len(df_salida):,}")
-    registrar(
-        f"  maximo Cuarto de Hora: "
-        f"{int(df_salida['Cuarto de Hora'].max())}"
-    )
-    registrar(f"  dias en el archivo: {len(resumen_dias)}")
-
-    # Los dias de cambio de hora no traen 24 h: se listan para que
-    # salten a la vista antes de usar el archivo.
-    anomalos = resumen_dias[resumen_dias["HORAS_DEL_DIA"] != 24]
-
-    if not anomalos.empty:
-        registrar("  dias que NO tienen 24 horas (cambio de hora):")
-        for _, fila in anomalos.iterrows():
-            registrar(
-                f"    {fila['FECHA_DT']:%Y-%m-%d}: "
-                f"{fila['HORAS_DEL_DIA']:g} h "
-                f"({int(fila['QH_DEL_DIA'])} cuartos)"
-            )
-
-    avanzar(100)
-    registrar(f"Listo: {rutas['cmg']}")
-
-    return rutas["cmg"]
