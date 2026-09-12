@@ -26,6 +26,7 @@ try:
     from .Medidas.comun import ErrorMedidas
     from .Subastas import Ofertas_Adjudicadas as ofertas_adj
     from .Subastas import Fma as fma_subastas
+    from .Fd import Indicadores_DCO as indicadores_dco
 except ImportError:  # pragma: no cover - depende de como se importe
     from Cmg import Extrae_CMG_barras as extrae_cmg
     from Medidas import Homologacion, Descarga_PRMTE, Claves_Balance
@@ -33,6 +34,7 @@ except ImportError:  # pragma: no cover - depende de como se importe
     from Medidas.comun import ErrorMedidas
     from Subastas import Ofertas_Adjudicadas as ofertas_adj
     from Subastas import Fma as fma_subastas
+    from Fd import Indicadores_DCO as indicadores_dco
 
 
 # ============================================================
@@ -808,8 +810,8 @@ def revisar_estructura(carpeta_base, aamm=None):
         filas.append(
             _fila(
                 "sscc", "Archivo SSCC_Desempeño_*", 1, "falta",
-                f"ningun archivo en {CARPETA_FD_FMA}/ empieza "
-                f"con 'SSCC_Desempeño_'",
+                f"no esta en {CARPETA_FD_FMA}/: se baja del DCO con el "
+                f"boton 'Traer FD' de la carpeta",
             )
         )
 
@@ -7541,6 +7543,58 @@ def traer_subastas(carpeta_base, aamm, registrar=print, progreso=None):
     )
 
     return rutas["db_subastas_dir"]
+
+
+def traer_fd(carpeta_base, aamm, version=None, registrar=print, progreso=None):
+    """
+    Copia el FD del periodo (lo que el DCO publica como
+    SSCC_Disponibilidad_CSF_* / SSCC_Desempeño_*) desde el arbol de
+    indicadores del DCO a <CARPETA_BASE>/FD y FMA/, y descomprime el
+    zip si lo que vino es un zip (boton "Traer FD"). Devuelve la ruta
+    de esa carpeta.
+    """
+
+    aamm = validar_aamm(aamm)
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["base"].is_dir():
+        raise ErrorEntrada(f"No se encontro la carpeta base {rutas['base']}")
+
+    destino = rutas["sscc_desempeno_dir"]
+
+    if not destino.is_dir():
+        raise ErrorEntrada(
+            f"No se encontro la carpeta {CARPETA_FD_FMA}/ en "
+            f"{rutas['base']}"
+        )
+
+    if progreso:
+        progreso(5)
+
+    registrar(
+        f"Trayendo el FD de {indicadores_dco.RAIZ_DCO_INDICADORES} "
+        f"(periodo {aamm})..."
+    )
+
+    try:
+        copiados, extraidos, carpeta_version = indicadores_dco.traer_fd(
+            destino, aamm, version=version, registrar=registrar
+        )
+    except indicadores_dco.ErrorFd as error:
+        raise ErrorEntrada(str(error)) from error
+    except OSError as error:
+        raise ErrorEntrada(f"No se pudo traer el FD: {error}") from error
+
+    if progreso:
+        progreso(100)
+
+    registrar(
+        f"Listo: {len(copiados)} archivo(s) desde {carpeta_version.name}"
+        + (f" y {len(extraidos)} descomprimido(s)" if extraidos else "")
+        + f" en {destino}"
+    )
+
+    return destino
 
 
 def generar_cmg(

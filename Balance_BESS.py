@@ -26,7 +26,7 @@ unico-:
         Cmg/
             cmg<AAMM>_def_15minutal.csv    [Traer cmg_15min]
             cmg.xlsx                       [Generar]
-        FD y FMA/
+        FD y FMA/                          [Traer FD]
             SSCC_Desempeño_<algo>.xlsx (o .xlsm/.xlsb/.xls)
             fma_cpf_<AAMM>.xlsx
             fma_csf_<AAMM>.xlsx
@@ -450,6 +450,9 @@ def main():
         if id_fila == "cmg_xlsx":
             return ("Generar", generar_cmg)
 
+        if id_fila == "sscc_dir":
+            return ("Traer FD", traer_fd)
+
         if id_fila == "db_subastas":
             return ("Traer subastas", traer_subastas)
 
@@ -735,6 +738,31 @@ def main():
             nucleo.extrae_cmg.nombre_csv_15min(aamm),
         )
 
+    def traer_fd():
+        """
+        Baja el FD del periodo (SSCC_Disponibilidad_CSF_* /
+        SSCC_Desempeño_*) del arbol de indicadores del DCO a
+        <CARPETA_BASE>/FD y FMA/.
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
+            return
+
+        lanzar(
+            nucleo.traer_fd,
+            dict(carpeta_base=ruta, aamm=aamm),
+            f"{nucleo.CARPETA_FD_FMA}/",
+        )
+
     def traer_subastas():
         """
         Copia los Access de subastas del periodo
@@ -885,7 +913,8 @@ def main():
     log(
         "Selecciona la carpeta base del caso e ingresa el periodo "
         "(AAMM). Cada fila del diagrama de abajo trae su propio boton: "
-        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer subastas' en "
+        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer FD' en "
+        "'FD y FMA/', 'Traer subastas' en "
         "Subastas/DB subastas/, 'Actualizar' en cada hoja de "
         "Consolidado_entradas.xlsx y 'Calcular' en cada hoja de "
         "Pagos_BESS.xlsx."

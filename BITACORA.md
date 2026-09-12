@@ -2455,3 +2455,54 @@ tabla y un concepto raro (→ 0): las 10 dieron el valor esperado. Y un caso end
 `Consolidado_entradas.xlsx` con la carpeta nueva, verifica el orden por `Hora_mes` y que el
 programa siga aceptando la carpeta con el nombre viejo. **Falta compararlo contra un `DB!V` real**
 (el documento propone justamente esa validación, §24).
+
+---
+
+## 2026-09-12 (3) — Boton "Traer FD"
+
+El usuario pidio un boton que baje el FD, apuntando a que en `entradas_sscc.py` y su
+`archivo_de_configuracion.yaml` esta como se llega a el.
+
+**Precision importante:** el script **no copia** el FD de ningun lado. Lo que hay ahi son dos
+piezas sueltas: el nombre del archivo
+(`SSCC_Disponibilidad_CSF_<Mes>_20<AA>_<version_fd>.zip`, con `version_fd` = V1 para el Preliminar
+y V2 para el Definitivo) y la raiz `ruta_fma_dco`. La ruta completa aparece en el comentario de la
+rutina de FMA CPF:
+
+    ...\02 Cálculo indicadores\2021\12. Diciembre\Indicadores Publicar\V1\01 Respuesta\...
+
+de donde sale que la carpeta del periodo es
+`<RAIZ>\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<version>`. Eso es lo que se armo.
+
+**`Script/Fd/Indicadores_DCO.py`** (paquete nuevo, mismo patron que los otros: no importa
+`nucleo`, solo biblioteca estandar). `nucleo.traer_fd()` lo llama desde el boton **"Traer FD"**,
+que cuelga de la fila de la carpeta `FD y FMA/`. Copia lo que encuentra a esa carpeta y, si lo
+publicado es el `.zip`, lo descomprime ahi mismo: lo que la etapa FD lee despues es el Excel
+`SSCC_Desempeño_*` que viene adentro, y asi queda justo donde `buscar_archivo_sscc_desempeno()` lo
+busca.
+
+**Cuatro decisiones que hubo que tomar** (ninguna venia dada, todas estan en el codigo comentadas
+y son de una linea si se quiere cambiarlas):
+
+- **Que version bajar.** La ventana no tiene selector Pre/Def, asi que se toma la **mas alta
+  publicada** (V2 le gana a V1) y se dice en el log cual uso. La funcion acepta `version` por si
+  despues se quiere elegir a mano.
+- **Las carpetas de año y mes se buscan comparando por nombre normalizado**, no con una ruta
+  literal: las escribe una persona todos los meses, y `"03. Marzo"` y `"3. Marzo"` tienen que ser
+  la misma (se probo que lo son).
+- **La busqueda del archivo es recursiva** dentro de la carpeta de version, porque el DCO cambia
+  de subcarpeta de un mes a otro. Se filtra por prefijo **y** por el año en el nombre, para no
+  llevarse un archivo de otro periodo que haya quedado suelto ahi (se probo con uno de febrero de
+  2025 puesto a proposito en la misma carpeta: no se copia).
+- **Al descomprimir se sacan solo los Excel**, sueltos en la carpeta (sin recrear el arbol del
+  zip), y se ignoran las entradas con ruta absoluta o con `..`: un zip no tiene por que poder
+  escribir fuera de la carpeta a la que se lo descomprime.
+
+**Verificacion:** un arbol del DCO simulado con las dos versiones publicadas, un zip con un Excel
+y un `.txt` adentro, y ruido de otro periodo en la misma carpeta. Se comprobo la resolucion de la
+ruta, que elija V2, que se pueda forzar V1, que copie y descomprima, que el `.txt` NO salga, que
+el archivo de otro mes NO se copie, que lo que queda lo encuentre despues
+`buscar_archivo_sscc_desempeno()`, y los mensajes de error de los dos casos que de verdad van a
+pasar (mes todavia sin publicar y servidor sin conectar). **Falta correrlo una vez contra el DCO
+real**, que es donde se va a ver si el FD esta en esa carpeta de version o mas adentro con otro
+nombre.

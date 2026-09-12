@@ -16,6 +16,9 @@ Script/
     Cmg/
         __init__.py
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
+    Fd/
+        __init__.py
+        Indicadores_DCO.py     <- trae el FD del arbol del DCO
     Subastas/
         __init__.py
         Ofertas_Adjudicadas.py <- trae y lee los Access de subastas
@@ -64,6 +67,7 @@ importable como cualquier módulo.
   | `Medidas/Medidas_SAE.xlsx` | **Actualizar** | `nucleo.generar_medidas_sae` — corre los cuatro pasos de Medidas de un viaje |
   | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
   | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
+  | `FD y FMA/` | **Traer FD** | `nucleo.traer_fd` — baja el FD del período del árbol de indicadores del DCO y descomprime el zip |
   | `Subastas/DB subastas/` | **Traer subastas** | `nucleo.traer_subastas` — copia los `OfertasSSCCAdj*.accdb` del período desde la unidad de red |
   | `Consolidado_entradas.xlsx` | **Actualizar todo** | `generar_consolidado` con todas las secciones |
   | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
@@ -206,6 +210,43 @@ importable como cualquier módulo.
   se pone en 0 fuera de la banda 1, `CANTIDAD PONDERADA MW` vacía se completa
   con `CANTIDAD MW` y se eliminan duplicados: exactamente lo que hacía
   `entradas_sscc.py`, verificado con un caso sintético.
+
+---
+
+## `Script/Fd/Indicadores_DCO.py`
+
+- **Qué hace:** sabe llegar a la carpeta donde el DCO publica los indicadores del
+  mes y traer de ahí el FD (botón **"Traer FD"**). Las dos piezas de la ruta
+  salen del `archivo_de_configuracion.yaml` de `entradas_sscc.py`
+  (`ruta_fma_dco` y el nombre `SSCC_Disponibilidad_CSF_<Mes>_<AAAA>_<V>.zip`), y
+  la forma completa la muestra el comentario de la rutina de FMA CPF de ese
+  mismo script.
+- **Consume:**
+  `\\nas-cen1\DCO\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\…`
+  (`RAIZ_DCO_INDICADORES` — la tercera y última ruta del programa que apunta
+  fuera de la carpeta base del caso).
+- **Produce:** la copia del FD dentro de `<CARPETA_BASE>/FD y FMA/`, y los Excel
+  que venían dentro del `.zip`, sueltos en esa misma carpeta (que es donde
+  `buscar_archivo_sscc_desempeno()` los busca después).
+- **Expone:** `ErrorFd`; `carpeta_del_periodo(aamm, raiz=None)`,
+  `versiones_publicadas(...)`, `elegir_version(..., version=None)`,
+  `buscar_archivos_fd(carpeta_version, anio)`,
+  `traer_fd(carpeta_destino, aamm, version=None, raiz=None, registrar=print)` →
+  `(copiados, extraidos, carpeta_version)`.
+- **Depende de:** solo la biblioteca estándar. **No importa `nucleo`.**
+- **Decisiones que se tomaron acá** (no venían dadas):
+  - **qué versión usar**: la ventana no tiene selector Pre/Def, así que por
+    omisión se toma la **más alta publicada** (V2 = Definitivo le gana a
+    V1 = Preliminar) y se dice en el log. Se puede forzar con `version`.
+  - las carpetas del año/mes se buscan **comparando por nombre normalizado**
+    (sin tildes, sin importar mayúsculas), no con una ruta literal: las escribe
+    una persona todos los meses y `"03. Marzo"` y `"3. Marzo"` son la misma.
+  - la búsqueda del archivo es **recursiva** dentro de la carpeta de versión,
+    porque el DCO cambia de subcarpeta de un mes a otro; se filtra por prefijo
+    **y** por el año en el nombre, para que no se cuele un archivo de otro
+    período que haya quedado suelto ahí.
+  - al descomprimir se sacan **solo los Excel** y se dejan sueltos en la
+    carpeta; las entradas del zip con ruta absoluta o con `..` se ignoran.
 
 ---
 
