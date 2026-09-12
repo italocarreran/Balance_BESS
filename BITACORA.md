@@ -2607,3 +2607,34 @@ junio ni agosto), que el CTF salga de `06 Indices CTF` conservando la hora local
 salidas las lea despues `cargar_tablas_fma()` dando el 0,3201 esperado, y que el CSF funcione con
 el DCO caido. **Falta correrlo contra las carpetas reales**, sobre todo por el nombre de los
 archivos del AGC.
+
+---
+
+## 2026-09-12 (6) — La version del DCO es la mas alta QUE TENGA EL ARCHIVO
+
+Correccion del usuario sobre lo de la entrada anterior: no alcanza con quedarse con la carpeta de
+version mas alta, porque **puede existir la carpeta y no estar adentro el documento que se busca**
+(recien creada, a medio subir, o esa version no incluye esa entrega). Tiene que ser la mas alta
+**que tenga disponible el archivo**.
+
+`Indicadores_DCO.buscar_en_versiones(carpeta_publicacion, buscar, ...)` recorre las versiones **de
+mayor a menor** y devuelve la primera en la que la funcion `buscar` encuentre algo, junto con la
+lista de las que reviso (para poder decirlo en el error). Los tres usos pasan por ahi:
+
+- **FD**: busca los `SSCC_Disponibilidad_CSF*` / `SSCC_Desempeño*` del año.
+- **CPF** (`buscar_reportes_cpf`): no le alcanza con que exista la carpeta `*Respuesta_CPF*` —
+  exige que tenga adentro **al menos un `tabla_resumen` del periodo**. Ese "al menos uno" es
+  justo el caso que planteo el usuario.
+- **CTF** (`buscar_ctf`): busca el `CTF_<AAAA><MM>.csv` bajo `01 Respuesta/06 Indices CTF`.
+
+Consecuencia de diseño: **cada tipo elige su version por separado**. Puede pasar perfectamente que
+el CPF salga de V1 y el CTF de V2, asi que `generar_fma()` ya no devuelve una carpeta de version
+sino un **dict por tipo**, y el log de cierre dice de donde salio cada uno. El log tambien avisa
+cuando bajo de version ("se usa V1: en V3, V2 no estaba el archivo"), que es informacion que el
+usuario necesita ver: si esperaba la definitiva y salio la preliminar, tiene que enterarse.
+
+**Verificacion:** un arbol del DCO con tres versiones armado a proposito para esto — `V3` existe
+pero esta **vacia**, `V2` tiene la carpeta `Respuesta_CPF` **sin reportes adentro** y si tiene el
+CTF, y `V1` tiene los reportes de CPF y el FD. Resultado: el FD baja a V1, el CPF baja a V1
+(salteando la carpeta vacia de V2, que es el caso fino), el CTF se queda en V2, y forzar una
+version que no lo tiene da un error que nombra las versiones revisadas.

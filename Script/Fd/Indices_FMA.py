@@ -261,6 +261,53 @@ def buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia):
     return max(candidatos, key=lambda r: r.stat().st_mtime)
 
 
+def buscar_reportes_cpf(carpeta_version, aamm):
+    """
+    La carpeta de reportes de CPF de una version, PERO solo si de
+    verdad tiene adentro al menos un `tabla_resumen` del periodo.
+
+    Ese "solo si" es el punto: puede existir la carpeta V2 y estar
+    vacia (recien creada, a medio subir), y en ese caso hay que seguir
+    buscando en V1. Devuelve None si no sirve.
+    """
+
+    carpeta_respuesta = buscar_carpeta_respuesta_cpf(carpeta_version)
+
+    if carpeta_respuesta is None:
+        return None
+
+    anio, mes = dco.periodo_desde_aamm(aamm)
+
+    for dia in range(1, _dias_del_mes(anio, mes) + 1):
+        if buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia):
+            return carpeta_respuesta
+
+    return None
+
+
+def buscar_ctf(carpeta_version, aamm):
+    """
+    El `CTF_<AAAA><MM>.csv` de una version: primero por la ruta que dio
+    el usuario ('01 Respuesta/06 Indices CTF') y, si ahi no esta,
+    buscando recursivamente desde la carpeta de version. Devuelve None
+    si esa version no lo tiene.
+    """
+
+    anio, mes = dco.periodo_desde_aamm(aamm)
+    prefijo = PLANTILLA_CTF.format(anio=anio, mes=mes)
+
+    carpeta_ctf = bajar_por_subcarpetas(carpeta_version, SUBCARPETAS_CTF)
+
+    if carpeta_ctf is not None:
+        encontrado = _buscar_en(
+            [carpeta_ctf], prefijo, (".csv",), recursivo=True
+        )
+        if encontrado:
+            return encontrado
+
+    return _buscar_en([carpeta_version], prefijo, (".csv",), recursivo=True)
+
+
 def construir_fma_cpf(carpeta_respuesta, aamm, registrar=print):
     """
     Arma el equivalente de `fma_cpf_AAMM.xlsx` recorriendo los reportes
@@ -704,7 +751,8 @@ def generar_fma(
     (su origen es otro servidor), asi que pedir SOLO csf no obliga a
     que el DCO este publicado.
 
-    Devuelve (escritos, faltantes, carpeta_version).
+    Devuelve (escritos, faltantes, versiones), donde `versiones` dice
+    que version del DCO termino usando cada tipo (pueden ser distintas).
     """
 
     anio, mes = dco.periodo_desde_aamm(aamm)
@@ -719,31 +767,41 @@ def generar_fma(
     if desconocidos:
         raise ErrorIndicesFma(f"Tipo(s) de FMA desconocido(s): {desconocidos}")
 
-    carpeta_version = None
+    # La carpeta de publicacion se resuelve una sola vez, pero la
+    # VERSION la elige cada tipo por su cuenta: puede estar publicada V2
+    # y tener el CPF pero no el CTF (o al reves), y cada uno tiene que
+    # usar la version mas alta que tenga SU archivo -pedido explicito
+    # del usuario-. Por eso `versiones` es un dict por tipo.
+    carpeta_publicacion = None
 
     if tipos & {"cpf", "ctf"}:
         carpeta_publicacion = dco.carpeta_del_periodo(aamm, raiz=raiz)
-        carpeta_version = dco.elegir_version(carpeta_publicacion, version)
 
-        if version is None:
-            registrar(
-                f"  version publicada mas alta: {carpeta_version.name} "
-                f"(V1 = Preliminar, V2 = Definitivo)"
-            )
+    versiones = {}
 
     escritos, faltantes = {}, []
 
     # ---- CPF ----
     if "cpf" in tipos:
 
-        carpeta_respuesta = buscar_carpeta_respuesta_cpf(carpeta_version)
+        carpeta_version, carpeta_respuesta, revisadas = (
+            dco.buscar_en_versiones(
+                carpeta_publicacion,
+                lambda cv: buscar_reportes_cpf(cv, aamm),
+                version=version,
+                registrar=registrar,
+            )
+        )
 
         if carpeta_respuesta is None:
             faltantes.append(
-                f"CPF (no hay carpeta '*Respuesta_CPF*' bajo "
-                f"{'/'.join(SUBCARPETAS_CPF)} en {carpeta_version})"
+                f"CPF (ninguna de las versiones revisadas tiene reportes "
+                f"'tabla_resumen' del periodo bajo "
+                f"{'/'.join(SUBCARPETAS_CPF)}; revisada(s): "
+                f"{', '.join(revisadas)})"
             )
         else:
+            versiones["cpf"] = carpeta_version.name
             registrar(f"  reportes diarios de CPF: {carpeta_respuesta}")
             df_cpf = construir_fma_cpf(carpeta_respuesta, aamm, registrar)
             escritos["cpf"] = _escribir(
@@ -783,29 +841,30 @@ def generar_fma(
     if "ctf" in tipos:
 
         prefijo_ctf = PLANTILLA_CTF.format(anio=anio, mes=mes)
-        carpeta_ctf = bajar_por_subcarpetas(carpeta_version, SUBCARPETAS_CTF)
 
-        ruta_ctf = None
-
-        if carpeta_ctf is not None:
-            ruta_ctf = _buscar_en(
-                [carpeta_ctf], prefijo_ctf, (".csv",), recursivo=True
-            )
+        carpeta_version, ruta_ctf, revisadas = dco.buscar_en_versiones(
+            carpeta_publicacion,
+            lambda cv: buscar_ctf(cv, aamm),
+            version=version,
+            registrar=registrar,
+        )
 
         if ruta_ctf is None:
-            # Por si el DCO lo movio de rama, o si el usuario lo dejo a
-            # mano en la carpeta del caso.
-            ruta_ctf = _buscar_en(
-                [carpeta_version], prefijo_ctf, (".csv",), recursivo=True
-            ) or _buscar_en([carpeta_destino], prefijo_ctf, (".csv",))
+            # Ultimo intento: que el usuario lo haya dejado a mano en la
+            # carpeta del caso.
+            ruta_ctf = _buscar_en([carpeta_destino], prefijo_ctf, (".csv",))
 
         if ruta_ctf is None:
             faltantes.append(
-                f"CTF (no hay ningun '{prefijo_ctf}*.csv' bajo "
-                f"{'/'.join(SUBCARPETAS_CTF)} en {carpeta_version} ni en "
-                f"{carpeta_destino})"
+                f"CTF (ninguna de las versiones revisadas tiene "
+                f"'{prefijo_ctf}*.csv' bajo "
+                f"{'/'.join(SUBCARPETAS_CTF)}, ni esta en "
+                f"{carpeta_destino}; revisada(s): {', '.join(revisadas)})"
             )
         else:
+            if carpeta_version is not None:
+                versiones["ctf"] = carpeta_version.name
+
             registrar(f"  CTF: {ruta_ctf}")
 
             # Se copia a la carpeta del caso antes de usarlo, para que
@@ -836,7 +895,7 @@ def generar_fma(
             + "\n  - ".join(faltantes)
         )
 
-    return escritos, faltantes, carpeta_version
+    return escritos, faltantes, versiones
 
 
 def _escribir(df, ruta):

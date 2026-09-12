@@ -7648,7 +7648,7 @@ def generar_fma(
     registrar(f"Generando FMA {etiquetas} del periodo {aamm}...")
 
     try:
-        escritos, faltantes, carpeta_version = indices_fma.generar_fma(
+        escritos, faltantes, versiones = indices_fma.generar_fma(
             destino, aamm, tipos=tipos, version=version, registrar=registrar
         )
     except (indices_fma.ErrorIndicesFma, indicadores_dco.ErrorFd) as error:
@@ -7662,9 +7662,13 @@ def generar_fma(
     if progreso:
         progreso(100)
 
+    detalle_version = ", ".join(
+        f"{tipo.upper()} desde {nombre}" for tipo, nombre in sorted(versiones.items())
+    )
+
     registrar(
         f"Listo: {', '.join(escritos.values())} en {destino}"
-        + (f" (version {carpeta_version.name})" if carpeta_version else "")
+        + (f" ({detalle_version})" if detalle_version else "")
     )
 
     return destino

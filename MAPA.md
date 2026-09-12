@@ -234,14 +234,20 @@ importable como cualquier módulo.
   `buscar_archivo_sscc_desempeno()` los busca después).
 - **Expone:** `ErrorFd`; `carpeta_del_periodo(aamm, raiz=None)`,
   `versiones_publicadas(...)`, `elegir_version(..., version=None)`,
+  `buscar_en_versiones(carpeta_publicacion, buscar, version=None, registrar)` →
+  `(carpeta_version, resultado, revisadas)` — recorre las versiones de mayor a
+  menor hasta que `buscar` encuentre algo,
   `buscar_archivos_fd(carpeta_version, anio)`,
   `traer_fd(carpeta_destino, aamm, version=None, raiz=None, registrar=print)` →
   `(copiados, extraidos, carpeta_version)`.
 - **Depende de:** solo la biblioteca estándar. **No importa `nucleo`.**
 - **Decisiones que se tomaron acá** (no venían dadas):
   - **qué versión usar**: la ventana no tiene selector Pre/Def, así que por
-    omisión se toma la **más alta publicada** (V2 = Definitivo le gana a
-    V1 = Preliminar) y se dice en el log. Se puede forzar con `version`.
+    omisión se toma la **más alta que de verdad tenga el archivo**
+    (`buscar_en_versiones()`), no la más alta a secas: puede existir la carpeta
+    `V2` y no tener adentro lo que se busca (recién creada, a medio subir), y ahí
+    hay que caer a `V1`. El log dice cuál usó y en cuáles no estaba. Se puede
+    forzar con `version`.
   - las carpetas del año/mes se buscan **comparando por nombre normalizado**
     (sin tildes, sin importar mayúsculas), no con una ruta literal: las escribe
     una persona todos los meses y `"03. Marzo"` y `"3. Marzo"` son la misma.
@@ -278,8 +284,11 @@ importable como cualquier módulo.
 - **Expone:** `ErrorIndicesFma`; `nombre_salida(tipo, aamm)`,
   `buscar_carpeta_respuesta_cpf(...)`, `buscar_tabla_resumen(...)`,
   `construir_fma_cpf/csf/ctf(...)`, `traer_agc_face(...)`, `TIPOS_FMA`,
+  `buscar_reportes_cpf(...)`, `buscar_ctf(...)`,
   `generar_fma(carpeta_destino, aamm, tipos=None, version=None, raiz=None, raiz_agc=None, registrar=print)`
-  → `(escritos, faltantes, carpeta_version)`.
+  → `(escritos, faltantes, versiones)`, donde `versiones` es un dict por tipo:
+  **cada uno elige su versión por separado**, porque una puede tener el CPF y
+  otra el CTF.
 - **Depende de:** `pandas` y `Script/Fd/Indicadores_DCO.py` (comparte con él la
   resolución del árbol del DCO y la elección de versión). **No importa `nucleo`.**
 - **Detalles que importan:**

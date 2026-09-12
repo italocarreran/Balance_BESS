@@ -302,7 +302,9 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
   (`…\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\…`, constante
   `RAIZ_DCO_INDICADORES` de `Script/Fd/Indicadores_DCO.py`) y, si lo que publicaron es el `.zip`
   `SSCC_Disponibilidad_CSF_<Mes>_<AAAA>_<V>.zip`, lo descomprime ahí mismo. Por omisión toma la
-  versión **más alta publicada** (V2 = Definitivo, V1 = Preliminar).
+  versión **más alta que de verdad tenga el archivo** (V2 = Definitivo, V1 = Preliminar): puede
+  existir la carpeta de una versión y no tener adentro lo que se busca, y en ese caso se baja a la
+  anterior. Cada entrada (FD, CPF, CTF) elige su versión por separado.
 - **Patrón**: cualquier Excel cuyo nombre empiece con `SSCC_Desempeño_`. Si hay más de uno, el
   más reciente por fecha de modificación.
 - **Hojas**: `"CPF Horario"` y `"CSF Horario"` (las dos, obligatorias — si falta alguna, error).

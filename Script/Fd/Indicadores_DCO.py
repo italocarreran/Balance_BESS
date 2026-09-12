@@ -244,6 +244,69 @@ def elegir_version(carpeta_publicacion, version=None):
     )
 
 
+def buscar_en_versiones(
+    carpeta_publicacion, buscar, version=None, registrar=print
+):
+    """
+    Recorre las versiones publicadas **de mayor a menor** y devuelve la
+    primera en la que `buscar(carpeta_version)` encuentre algo.
+
+    No alcanza con quedarse con la carpeta de version mas alta: puede
+    existir la carpeta V2 y NO tener adentro el archivo que se busca
+    (recien publicada, a medio subir, o esa version no incluye esa
+    entrega). En ese caso hay que caer a V1. Esto es exactamente lo que
+    pidio el usuario: "debe ser el mayor que tenga disponible el
+    archivo".
+
+    buscar: funcion carpeta_version -> resultado (lo que sea, falsy si
+    no encontro).
+    version: para forzar una en particular; entonces se prueba solo esa.
+
+    Devuelve (carpeta_version, resultado, revisadas), con
+    carpeta_version y resultado en None si ninguna la tenia.
+    `revisadas` son los nombres de las versiones que se miraron, para
+    poder decirlo en el error.
+    """
+
+    versiones = versiones_publicadas(carpeta_publicacion)
+
+    if not versiones:
+        raise ErrorFd(
+            f"No hay ninguna carpeta de version (V1, V2, ...) en "
+            f"{carpeta_publicacion}"
+        )
+
+    if version is not None:
+        candidatas = [elegir_version(carpeta_publicacion, version)]
+    else:
+        candidatas = list(reversed(versiones))
+
+    revisadas = []
+
+    for carpeta in candidatas:
+
+        resultado = buscar(carpeta)
+
+        if resultado:
+
+            if revisadas:
+                registrar(
+                    f"  se usa {carpeta.name}: en "
+                    f"{', '.join(revisadas)} no estaba el archivo"
+                )
+            elif version is None:
+                registrar(
+                    f"  version mas alta con el archivo: {carpeta.name} "
+                    f"(V1 = Preliminar, V2 = Definitivo)"
+                )
+
+            return carpeta, resultado, revisadas
+
+        revisadas.append(carpeta.name)
+
+    return None, None, revisadas
+
+
 def _es_archivo_fd(ruta, anio):
     """
     Un archivo sirve si su nombre empieza con alguno de los prefijos de
@@ -353,21 +416,20 @@ def traer_fd(carpeta_destino, aamm, version=None, raiz=None, registrar=print):
         raise ErrorFd(f"No se encontro la carpeta {carpeta_destino}")
 
     carpeta_publicacion = carpeta_del_periodo(aamm, raiz=raiz)
-    carpeta_version = elegir_version(carpeta_publicacion, version)
 
-    if version is None:
-        registrar(
-            f"  version publicada mas alta: {carpeta_version.name} "
-            f"(V1 = Preliminar, V2 = Definitivo)"
-        )
-
-    archivos = buscar_archivos_fd(carpeta_version, anio)
+    carpeta_version, archivos, revisadas = buscar_en_versiones(
+        carpeta_publicacion,
+        lambda carpeta: buscar_archivos_fd(carpeta, anio),
+        version=version,
+        registrar=registrar,
+    )
 
     if not archivos:
         raise ErrorFd(
             f"No se encontro ningun archivo de FD "
             f"({' / '.join(p + '*' for p in PREFIJOS_FD)}) del año {anio} "
-            f"en {carpeta_version}."
+            f"en {carpeta_publicacion}.\n\n"
+            f"Version(es) revisada(s): {', '.join(revisadas)}"
         )
 
     copiados, extraidos = [], []
