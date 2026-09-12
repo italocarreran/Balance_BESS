@@ -12,6 +12,9 @@ suelto.
         Cmg/
             Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV
                                       15-minutal
+        Subastas/
+            Ofertas_Adjudicadas.py <- trae y lee los Access
+                                      OfertasSSCCAdj*.accdb
 
 Por ahora `nucleo.py` sigue siendo un solo archivo grande; la idea
 (conversada con el usuario) es ir sacando de ahi un modulo por etapa,

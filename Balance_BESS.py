@@ -29,16 +29,17 @@ unico-:
         SSCC_Desempeño/
             SSCC_Desempeño_<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Subastas/
-            3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (idem)
+            DB subastas/                   [Traer subastas]
+            3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (respaldo)
         Consolidado_entradas.xlsx          [Actualizar todo]
             hoja 'Medidores'               [Actualizar]
             hoja 'Ofertas SSCC'            [Actualizar]
             hoja 'CMg'                     [Actualizar]
             hoja 'FD'                      [Actualizar]
             hoja 'Subastas'                [Actualizar]
-        Pagos_BESS.xlsx                    [Actualizar todo]
-            hoja 'Calculo E Costos'        [Actualizar]
-            hoja 'Calculo RE545'           [Actualizar]
+        Pagos_BESS.xlsx                    [Calcular todo]
+            hoja 'Calculo E Costos'        [Calcular]
+            hoja 'Calculo RE545'           [Calcular]
 
 Las dos salidas se desglosan por hoja igual que Centrales.xlsx: cada
 hoja se actualiza sola, y lo que no se toca se conserva tal cual
@@ -446,11 +447,14 @@ def main():
         if id_fila == "cmg_xlsx":
             return ("Generar", generar_cmg)
 
+        if id_fila == "db_subastas":
+            return ("Traer subastas", traer_subastas)
+
         if id_fila == "consolidado":
             return ("Actualizar todo", lambda: actualizar_consolidado(None))
 
         if id_fila == "pagos":
-            return ("Actualizar todo", lambda: actualizar_pagos(None))
+            return ("Calcular todo", lambda: actualizar_pagos(None))
 
         if id_fila.startswith("consolidado:"):
             seccion = id_fila.split(":", 1)[1]
@@ -458,7 +462,7 @@ def main():
 
         if id_fila.startswith("pagos:"):
             seccion = id_fila.split(":", 1)[1]
-            return ("Actualizar", lambda s=seccion: actualizar_pagos({s}))
+            return ("Calcular", lambda s=seccion: actualizar_pagos({s}))
 
         return None
 
@@ -728,6 +732,31 @@ def main():
             nucleo.extrae_cmg.nombre_csv_15min(aamm),
         )
 
+    def traer_subastas():
+        """
+        Copia los Access de subastas del periodo
+        (OfertasSSCCAdj*.accdb) de la unidad de red a
+        <CARPETA_BASE>/Subastas/DB subastas/.
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
+            return
+
+        lanzar(
+            nucleo.traer_subastas,
+            dict(carpeta_base=ruta, aamm=aamm),
+            f"{nucleo.CARPETA_DB_SUBASTAS}/",
+        )
+
     def generar_cmg():
         """Arma cmg.xlsx con el CSV que ya esta en Cmg/."""
 
@@ -853,8 +882,10 @@ def main():
     log(
         "Selecciona la carpeta base del caso e ingresa el periodo "
         "(AAMM). Cada fila del diagrama de abajo trae su propio boton: "
-        "'Traer cmg_15min' y 'Generar' en Cmg/, y 'Actualizar' en cada "
-        "hoja de las dos salidas."
+        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer subastas' en "
+        "Subastas/DB subastas/, 'Actualizar' en cada hoja de "
+        "Consolidado_entradas.xlsx y 'Calcular' en cada hoja de "
+        "Pagos_BESS.xlsx."
     )
 
     if var_aamm.get():

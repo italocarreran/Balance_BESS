@@ -340,7 +340,41 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 
 ---
 
-### 7. `Subastas/3_REMUNERACIÓN_SUBASTAS_E_ID_*.xlsx`
+### 7a. `Subastas/DB subastas/OfertasSSCCAdj*.accdb` — **el origen real**
+
+- **Qué son**: los Access que publica el Coordinador con las ofertas SSCC adjudicadas. Son el
+  origen de todo: la planilla 3 (7b) también se arma pegando lo que sale de ellos, vía el script
+  suelto `entradas_sscc.py`.
+- **De dónde se copian**: `\\nas-cen1\Estadisticas\progdiar_adjudicaSEN\` (constante
+  `RAIZ_SUBASTAS_ORIGEN` de `Script/Subastas/Ofertas_Adjudicadas.py`; sale de
+  `path_subastas_origen` del `archivo_de_configuracion.yaml` del script original). Los copia el
+  botón **"Traer subastas"** a `<CARPETA_BASE>/Subastas/DB subastas/`, carpeta que el programa
+  crea solo si no existe.
+- **Nombres**: `OfertasSSCCAdj<AAAAMMDD>.accdb` (el PO del día) y `OfertasSSCCAdj<AAAAMMDD>_<HH>.accdb`
+  (el PID rehecho en la hora HH). Hasta 24 por día.
+- **Tablas**: `Config_List`, `AASS_List`, `AASS_Data`, unidas por la consulta `SQL_SUBASTAS`
+  (copiada tal cual de `entradas_sscc.py`), que devuelve `CONFIGURACIÓN`, `SERVICIO`, `AÑO`,
+  `MES`, `DIA`, `HORA`, `BANDA`, `CANTIDAD MW`, `PRECIO USD/MW`, `CANTIDAD PONDERADA MW`.
+- **Equivalencias con la salida** (`Subastas!B:Q` del consolidado): ver
+  `construir_subastas_desde_accdb()` en `Script/nucleo.py` — el documento de trazabilidad que
+  entregó el usuario (`subastas_AAMM.xlsx` → `DB!B:K`) confirma `B:K`; `L` (Propietario) sale de
+  `Centrales.xlsx`, `O` (Energía SSCC) de `CANTIDAD PONDERADA MW` (a confirmar) y `P`/`Q`
+  (FD/FMA) quedan **pendientes**: venían pegadas en `DB!Y`/`DB!V` y no existen en el Access.
+- **Funciones que lo leen**: `Script/Subastas/Ofertas_Adjudicadas.py` (traer + leer) y
+  `nucleo.construir_subastas_desde_accdb()` (transformar).
+- **Archivo real de referencia**: `docs/subastas_2603_salida_entradas_sscc.xlsx` ✅ (la salida real
+  de `entradas_sscc.py` para marzo 2026, 39.181 filas: sirve para probar la transformación sin
+  necesidad de tener Access instalado).
+- **Requisito de entorno**: `pyodbc` + *Microsoft Access Database Engine* (solo Windows). Es la
+  única dependencia del proyecto con esa restricción, por eso se importa dentro de la función.
+
+---
+
+### 7b. `Subastas/3_REMUNERACIÓN_SUBASTAS_E_ID_*.xlsx` — **respaldo, ya no es el origen**
+
+> Desde esta sesión esta planilla **solo se usa si `DB subastas/` no tiene ningún Access del
+> período**. Lo que sigue describe ese camino de respaldo, que no cambió.
+
 
 - **Patrón**: cualquier Excel cuyo nombre empiece con `3_REMUNERACIÓN_SUBASTAS_E_ID_`. Si hay más
   de uno, el más reciente por fecha de modificación.
@@ -395,6 +429,8 @@ resumen) y comparar celda a celda contra la hoja equivalente de nuestra salida.
 |---|---|---|
 | `docs/Pagos_BESS_comparacion_real.xlsx` | Hojas `Calculo E Costos`, `Calculo RE545` (nuestra salida en ese momento) + `Ecostos planilla 11` (pegada a mano por el usuario, real) | Primera comparación real vs Python que existió en el proyecto — origen del fix de Prorrata SSCC |
 | `docs/Calculo_RE545_reducido_para_IA.xlsx` | Hoja `Calculo RE545 reducido` (real, recortada) con **fórmulas** (no solo valores) + hoja `Mapa_Formulas` (rango de celdas → fórmula real, muy útil para confirmar un cálculo sin tener que pedir el `.xlsm` completo) | Fuente directa de varias correcciones de `Calculo RE545` (reservas AR:AT constante 1, cruce S/BI de BK:BL:BS) |
+| `docs/subastas_2603_salida_entradas_sscc.xlsx` | La salida real de `entradas_sscc.py` para marzo 2026 (39.181 filas, las mismas columnas que devuelve la consulta a los Access) | Caso de prueba de `construir_subastas_desde_accdb()` sin necesidad de Access instalado |
+| `docs/Trazabilidad_subastas_AAMM_a_DB_planilla3.md` | Documento del usuario: cómo se llega de `subastas_AAMM.xlsx` a `DB!B:K` de la planilla 3, fórmula por fórmula | Fuente de las equivalencias de `Concepto`, `Control`, `Sub_Baj`, `Fecha`, `Hora_mes` |
 | `docs/Libro1_Subastas_real.xlsx` | Hojas `FD`, `subastas`, `E COSTOS` (con los **merges reales** de Excel, `ws.merged_cells`), `Resumen` | Fuente de `NOMBRES_SUBASTAS`, `NOMBRES_FD_CSF/CPF`, y de `GRUPOS_CALCULO_E_COSTOS` (encabezados de grupo combinados) |
 | `docs/Centrales_real.xlsx` | Copia completa del `Centrales.xlsx` real (`Resumen BESS` + `Diccionario`) | Fuente de la corrección de `construir_homologacion()` y del índice VLOOKUP real de `Resumen BESS` |
 | `docs/SOC_real_2607.xlsx` | Copia completa de un `SOC_AAMM.xlsx` real | Fuente de la corrección de `detectar_fila_nombres()` (fila 2, no la 3) |
