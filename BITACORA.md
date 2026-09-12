@@ -2638,3 +2638,23 @@ pero esta **vacia**, `V2` tiene la carpeta `Respuesta_CPF` **sin reportes adentr
 CTF, y `V1` tiene los reportes de CPF y el FD. Resultado: el FD baja a V1, el CPF baja a V1
 (salteando la carpeta vacia de V2, que es el caso fino), el CTF se queda en V2, y forzar una
 version que no lo tiene da un error que nombra las versiones revisadas.
+
+---
+
+## 2026-09-12 (7) — El nombre de los reportes del AGC, confirmado
+
+El usuario confirmo el formato: **`csf_20260301`**, o sea `csf_<AAAA><MM><DD>` — exactamente el
+que espera el script original.
+
+Con eso **se saco el segundo criterio** que se habia dejado en la entrada anterior ("cualquier
+Excel cuyo nombre contenga la fecha"), que era una suposicion mientras no supieramos el nombre.
+Queda solo el criterio confirmado, que ademas es mas seguro: un archivo que apenas contenga la
+fecha en el medio del nombre ya no se cuela. Tambien se saco `PLANTILLA_FECHA_DIARIA`, que solo
+existia para ese respaldo, y el mensaje de error ahora dice que nombre se esta buscando
+(`'csf_20260301' y siguientes`), que es lo util si algun mes no aparece nada.
+
+**Verificacion:** una carpeta del SCADA con cinco archivos a proposito — dos de marzo con el
+nombre real, uno de abril, uno que **contiene** la fecha pero no empieza con `csf_`
+(`reporte_20260303.xlsx`) y uno con sufijo despues de la fecha (`csf_20260304_v2.xlsx`). Se copian
+los tres de marzo que empiezan con `csf_` (el del sufijo incluido), no se copia el de abril ni el
+que solo contenia la fecha, y el `fma_csf` resultante tiene las 72 filas de los tres dias.

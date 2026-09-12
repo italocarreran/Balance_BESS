@@ -364,7 +364,7 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
   | | Origen |
   |---|---|
   | CPF | `…\Indicadores Publicar\<V1\|V2>\01 Respuesta\01 Indices CPF\20AA.MM_Respuesta_CPF\Reporte diario D-M-20AA\tabla_resumen_D_M_20AA.xlsx` |
-  | CSF | `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10` — **están todos los meses juntos**: se eligen los del período y se copian a `FD y FMA/agcface/` |
+  | CSF | `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10` — **están todos los meses juntos**: se eligen los del período por su nombre (`csf_<AAAAMMDD>`, ej. `csf_20260301.xlsx`) y se copian a `FD y FMA/agcface/` |
   | CTF | `…\Indicadores Publicar\<V1\|V2>\01 Respuesta\06 Indices CTF\CTF_<AAAA><MM>.csv` |
 - **Patrón**: el nombre empieza con `fma_cpf` / `fma_csf` / `fma_cft` (o `fma_ctf`) y contiene el
   AAMM. Acepta `.xlsx`, `.xlsm`, `.xls` y `.csv`. Si hay varios, el más reciente. Todos traen a la

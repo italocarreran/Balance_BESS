@@ -14,8 +14,8 @@ hecho**, se construye. Cada una de las tres sale de un origen distinto:
             Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx
     Se lee **cada hoja menos "Resumen"** (una por central), se le pegan
     Año/Mes/Dia/Hora/Central y se agrupan las columnas de horas.
-  - **CSF**: de los reportes diarios del AGC, que viven TODOS JUNTOS
-    (todos los meses) en
+  - **CSF**: de los reportes diarios del AGC (`csf_<AAAA><MM><DD>`),
+    que viven TODOS JUNTOS (todos los meses) en
         \\\\nas-cen1\\D. Transferencias\\SCADA\\reporte_agc_face_NM10
     Se eligen los del mes, se copian a <CARPETA_BASE>/FD y FMA/agcface/
     y se concatenan, sin transformacion.
@@ -93,8 +93,9 @@ RAIZ_AGC_FACE = r"\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10"
 # Subcarpeta (dentro de "FD y FMA/") donde se copian los del mes. El
 # nombre lo eligio el usuario, sin guion bajo.
 CARPETA_AGC_FACE = "agcface"
+# Confirmado por el usuario: los reportes del AGC se llaman asi
+# (ej. csf_20260301.xlsx), el mismo nombre que espera el script original.
 PLANTILLA_CSF_DIARIO = "csf_{anio}{mes:02d}{dia:02d}"
-PLANTILLA_FECHA_DIARIA = "{anio}{mes:02d}{dia:02d}"
 PLANTILLA_CTF = "CTF_{anio}{mes:02d}"
 
 EXTENSIONES_EXCEL = (".xlsx", ".xlsm", ".xlsb", ".xls")
@@ -428,12 +429,8 @@ def traer_agc_face(carpeta_destino, aamm, raiz=None, registrar=print):
     periodo. En la carpeta de red estan TODOS los meses juntos, asi que
     la gracia es elegir los del mes que corresponde.
 
-    Se prueban dos criterios de nombre, en orden:
-      1) el del script original, `csf_<AAAA><MM><DD>`;
-      2) si con ese no aparece ninguno en todo el mes, cualquier Excel
-         cuyo nombre contenga la fecha `<AAAA><MM><DD>`.
-    El segundo esta porque el nombre de esos archivos en la carpeta de
-    red no lo vimos nunca; el log dice con cual de los dos encontro.
+    El nombre es `csf_<AAAA><MM><DD>` (confirmado por el usuario: p.ej.
+    `csf_20260301`), el mismo que espera el script original.
 
     Devuelve (copiados, salteados, carpeta_destino_agcface).
     """
@@ -468,36 +465,29 @@ def traer_agc_face(carpeta_destino, aamm, raiz=None, registrar=print):
 
     dias_del_mes = _dias_del_mes(anio, mes)
 
-    fechas = {
-        PLANTILLA_FECHA_DIARIA.format(anio=anio, mes=mes, dia=dia)
+    prefijos = {
+        dco._normalizar(
+            PLANTILLA_CSF_DIARIO.format(anio=anio, mes=mes, dia=dia)
+        )
         for dia in range(1, dias_del_mes + 1)
     }
 
     del_mes = [
         a for a in archivos
         if a.suffix.lower() in EXTENSIONES_EXCEL
-        and any(
-            dco._normalizar(a.stem).startswith(f"csf_{fecha}")
-            for fecha in fechas
-        )
+        and any(dco._normalizar(a.stem).startswith(p) for p in prefijos)
     ]
-    criterio = "csf_<AAAAMMDD>"
-
-    if not del_mes:
-        del_mes = [
-            a for a in archivos
-            if a.suffix.lower() in EXTENSIONES_EXCEL
-            and any(fecha in a.stem for fecha in fechas)
-        ]
-        criterio = "el nombre contiene <AAAAMMDD>"
 
     if not del_mes:
         raise ErrorIndicesFma(
             f"No se encontro ningun reporte del AGC de {anio}-{mes:02d} "
-            f"en {origen}."
+            f"en {origen}.\n\n"
+            f"Se buscan los que se llaman "
+            f"'{PLANTILLA_CSF_DIARIO.format(anio=anio, mes=mes, dia=1)}' "
+            f"y siguientes."
         )
 
-    registrar(f"  reportes del AGC del periodo ({criterio}): {len(del_mes)}")
+    registrar(f"  reportes del AGC del periodo: {len(del_mes)}")
 
     copiados, salteados = [], []
 
@@ -548,18 +538,12 @@ def construir_fma_csf(carpeta_csf, aamm, registrar=print):
         prefijo = dco._normalizar(
             PLANTILLA_CSF_DIARIO.format(anio=anio, mes=mes, dia=dia)
         )
-        fecha = PLANTILLA_FECHA_DIARIA.format(anio=anio, mes=mes, dia=dia)
 
-        # Igual que al copiarlos: primero el nombre del script original
-        # y, si no, cualquier Excel del dia.
         candidatos = [
             r for r in carpeta_csf.iterdir()
             if r.is_file()
             and r.suffix.lower() in EXTENSIONES_EXCEL
-            and (
-                dco._normalizar(r.stem).startswith(prefijo)
-                or fecha in r.stem
-            )
+            and dco._normalizar(r.stem).startswith(prefijo)
         ] if carpeta_csf.is_dir() else []
 
         if not candidatos:

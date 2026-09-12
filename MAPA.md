@@ -272,7 +272,8 @@ importable como cualquier módulo.
     "Resumen"** (una por central).
   - **CSF**: `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10`
     (`RAIZ_AGC_FACE`), donde están **todos los meses juntos**: se eligen los del
-    período, se copian a `<CARPETA_BASE>/FD y FMA/agcface/` y se concatenan.
+    período por su nombre (`csf_<AAAAMMDD>`), se copian a
+    `<CARPETA_BASE>/FD y FMA/agcface/` y se concatenan.
   - **CTF**: `<versión>/01 Respuesta/06 Indices CTF/CTF_<AAAA><MM>.csv` — otra
     rama del mismo árbol del DCO. Se copia a la carpeta del caso antes de usarlo,
     para que quede registrado con qué archivo se armó la salida.
@@ -307,10 +308,10 @@ importable como cualquier módulo.
     origen de una, las otras se arman igual.
   - **el CSF no necesita el DCO publicado** (su origen es otro servidor), así que
     su botón funciona aunque el mes todavía no tenga indicadores publicados.
-  - los nombres de los reportes del AGC se buscan primero como
-    `csf_<AAAAMMDD>` (el del script original) y, si en todo el mes no aparece
-    ninguno, como "cualquier Excel cuyo nombre contenga `<AAAAMMDD>`" — el log
-    dice con cuál de los dos criterios los encontró.
+  - los reportes del AGC se llaman **`csf_<AAAAMMDD>`** (confirmado por el
+    usuario, ej. `csf_20260301.xlsx` — el mismo nombre que espera el script
+    original). Se acepta un sufijo después de la fecha, pero **no** un archivo
+    que solo la contenga en el medio del nombre.
 
 ---
 
