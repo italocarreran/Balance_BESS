@@ -354,10 +354,16 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 
 ### 6b. `FD y FMA/fma_cpf_*.xlsx`, `fma_csf_*.xlsx`, `fma_cft_*.xlsx` — de donde sale `Subastas!FMA`
 
-- **Qué son**: las tres salidas de FMA de `entradas_sscc.py`. **Las arma el propio programa** con
-  el botón **"Traer FMA"** (`Script/Fd/Indices_FMA.py`), que replica las tres rutinas de ese
-  script: el CPF sale de los reportes diarios del DCO, el CSF de los `csf_20AAMMDD.xlsx` y el CTF
-  del `CTF_20AAMM.csv`. También se pueden dejar a mano en la carpeta, si ya se generaron aparte.
+- **Qué son**: las tres salidas de FMA de `entradas_sscc.py`. **Las arma el propio programa**, cada
+  una con su botón **"Generar"** (`Script/Fd/Indices_FMA.py`), que replica las tres rutinas de ese
+  script. También se pueden dejar a mano en la carpeta, si ya se generaron aparte.
+- **De dónde sale cada una** (rutas confirmadas por el usuario):
+
+  | | Origen |
+  |---|---|
+  | CPF | `…\Indicadores Publicar\<V1\|V2>\01 Respuesta\01 Indices CPF\20AA.MM_Respuesta_CPF\Reporte diario D-M-20AA\tabla_resumen_D_M_20AA.xlsx` |
+  | CSF | `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10` — **están todos los meses juntos**: se eligen los del período y se copian a `FD y FMA/agcface/` |
+  | CTF | `…\Indicadores Publicar\<V1\|V2>\01 Respuesta\06 Indices CTF\CTF_<AAAA><MM>.csv` |
 - **Patrón**: el nombre empieza con `fma_cpf` / `fma_csf` / `fma_cft` (o `fma_ctf`) y contiene el
   AAMM. Acepta `.xlsx`, `.xlsm`, `.xls` y `.csv`. Si hay varios, el más reciente. Todos traen a la
   izquierda la columna índice que deja pandas al escribir (`Unnamed: 0`), que se descarta.

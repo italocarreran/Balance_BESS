@@ -14,10 +14,15 @@ hecho**, se construye. Cada una de las tres sale de un origen distinto:
             Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx
     Se lee **cada hoja menos "Resumen"** (una por central), se le pegan
     Año/Mes/Dia/Hora/Central y se agrupan las columnas de horas.
-  - **CSF**: de los archivos diarios `csf_20AAMMDD.xlsx` (los del
-    agc_face). Es una concatenacion, sin transformacion.
-  - **CTF**: del `CTF_20AAMM.csv`, al que solo se le saca la zona
-    horaria de t0/tfin.
+  - **CSF**: de los reportes diarios del AGC, que viven TODOS JUNTOS
+    (todos los meses) en
+        \\\\nas-cen1\\D. Transferencias\\SCADA\\reporte_agc_face_NM10
+    Se eligen los del mes, se copian a <CARPETA_BASE>/FD y FMA/agcface/
+    y se concatenan, sin transformacion.
+  - **CTF**: del `CTF_20AAMM.csv`, que esta en el mismo arbol del DCO
+    que el CPF pero en otra rama:
+        <version>/01 Respuesta/06 Indices CTF/
+    Se le saca la zona horaria de t0/tfin.
 
 Las tres se escriben en <CARPETA_BASE>/FD y FMA/ con los nombres que
 usa entradas_sscc.py (`fma_cpf_AAMM.xlsx`, `fma_csf_AAMM.xlsx`,
@@ -40,6 +45,7 @@ salen como ErrorIndicesFma.
 """
 
 import re
+import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -61,15 +67,34 @@ PLANTILLAS_SALIDA = {
     "ctf": "fma_cft_{aamm}.xlsx",
 }
 
-# Donde cuelgan los reportes diarios de CPF dentro de la carpeta de
-# version del DCO. Se busca por nombre, no por ruta literal.
+# Las dos ramas del arbol del DCO (la raiz y la carpeta de version las
+# resuelve Indicadores_DCO, que es la misma del FD):
+#
+#   <version>/01 Respuesta/01 Indices CPF/20AA.MM_Respuesta_CPF/
+#       Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx
+#   <version>/01 Respuesta/06 Indices CTF/CTF_<AAAA><MM>.csv
+#
+# Son las rutas que dio el usuario. Igual que con las carpetas de año y
+# mes, se recorren comparando por nombre normalizado y, si alguna no
+# aparece, se cae a una busqueda recursiva desde la carpeta de version:
+# el DCO cambia de anidamiento cada tanto y no vale la pena que eso
+# rompa el boton.
+SUBCARPETAS_CPF = ("01 Respuesta", "01 Indices CPF")
+SUBCARPETAS_CTF = ("01 Respuesta", "06 Indices CTF")
+
 PATRON_CARPETA_RESPUESTA_CPF = "respuesta_cpf"
 PLANTILLA_TABLA_RESUMEN = "tabla_resumen_{dia}_{mes}_{anio}"
 
-# Subcarpeta (dentro de "FD y FMA/") donde se esperan los csf_ diarios.
-# En el script original era `input/agc_face`.
-CARPETA_AGC_FACE = "agc_face"
+# Los reportes del AGC no estan en el arbol del DCO: viven todos juntos
+# (todos los meses) en esta carpeta, y de ahi hay que elegir los del
+# periodo. Cuarta y ultima ruta de red del programa.
+RAIZ_AGC_FACE = r"\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10"
+
+# Subcarpeta (dentro de "FD y FMA/") donde se copian los del mes. El
+# nombre lo eligio el usuario, sin guion bajo.
+CARPETA_AGC_FACE = "agcface"
 PLANTILLA_CSF_DIARIO = "csf_{anio}{mes:02d}{dia:02d}"
+PLANTILLA_FECHA_DIARIA = "{anio}{mes:02d}{dia:02d}"
 PLANTILLA_CTF = "CTF_{anio}{mes:02d}"
 
 EXTENSIONES_EXCEL = (".xlsx", ".xlsm", ".xlsb", ".xls")
@@ -141,15 +166,40 @@ def nombre_salida(tipo, aamm):
 # CPF
 # ============================================================
 
+def bajar_por_subcarpetas(carpeta, subcarpetas):
+    """
+    Baja por los nombres dados uno tras otro, comparando por nombre
+    normalizado. Devuelve None si en algun escalon no esta.
+    """
+
+    actual = Path(carpeta)
+
+    for nombre in subcarpetas:
+        actual = dco._subcarpeta(actual, nombre)
+        if actual is None:
+            return None
+
+    return actual
+
+
 def buscar_carpeta_respuesta_cpf(carpeta_version):
     """
-    Ubica, dentro de la carpeta de version del DCO, la carpeta
-    '20AA.MM_Respuesta_CPF' (la que tiene adentro un "Reporte diario"
-    por dia). Se busca recursivamente y por nombre normalizado, porque
-    el DCO le cambia el nivel de anidamiento de un mes a otro.
+    Ubica la carpeta '20AA.MM_Respuesta_CPF' (la que tiene adentro un
+    "Reporte diario" por dia). Primero por la ruta que dio el usuario
+    ('01 Respuesta/01 Indices CPF') y, si ahi no esta, buscando
+    recursivamente desde la carpeta de version.
     """
 
     carpeta_version = Path(carpeta_version)
+
+    indices_cpf = bajar_por_subcarpetas(carpeta_version, SUBCARPETAS_CPF)
+
+    if indices_cpf is not None:
+        for hijo in sorted(indices_cpf.iterdir()):
+            if hijo.is_dir() and PATRON_CARPETA_RESPUESTA_CPF in (
+                dco._normalizar(hijo.name).replace(" ", "_")
+            ):
+                return hijo
 
     try:
         for ruta in carpeta_version.rglob("*"):
@@ -313,6 +363,126 @@ def construir_fma_cpf(carpeta_respuesta, aamm, registrar=print):
 # CSF
 # ============================================================
 
+def ruta_agc_face(raiz=None):
+    """Carpeta de red donde estan TODOS los reportes del AGC."""
+
+    return Path(raiz or RAIZ_AGC_FACE)
+
+
+def carpeta_agcface(carpeta_destino):
+    """<CARPETA_BASE>/FD y FMA/ -> <...>/FD y FMA/agcface/"""
+
+    return Path(carpeta_destino) / CARPETA_AGC_FACE
+
+
+def traer_agc_face(carpeta_destino, aamm, raiz=None, registrar=print):
+    """
+    Copia a <CARPETA_BASE>/FD y FMA/agcface/ los reportes del AGC del
+    periodo. En la carpeta de red estan TODOS los meses juntos, asi que
+    la gracia es elegir los del mes que corresponde.
+
+    Se prueban dos criterios de nombre, en orden:
+      1) el del script original, `csf_<AAAA><MM><DD>`;
+      2) si con ese no aparece ninguno en todo el mes, cualquier Excel
+         cuyo nombre contenga la fecha `<AAAA><MM><DD>`.
+    El segundo esta porque el nombre de esos archivos en la carpeta de
+    red no lo vimos nunca; el log dice con cual de los dos encontro.
+
+    Devuelve (copiados, salteados, carpeta_destino_agcface).
+    """
+
+    anio, mes = dco.periodo_desde_aamm(aamm)
+    origen = ruta_agc_face(raiz)
+
+    if not origen.is_dir():
+        raise ErrorIndicesFma(
+            f"No se puede leer la carpeta de los reportes del AGC:\n"
+            f"  {origen}\n\n"
+            f"Revisa que tengas conexion y permiso sobre ese servidor. "
+            f"Si la ruta cambio, se cambia en RAIZ_AGC_FACE "
+            f"(Script/Fd/Indices_FMA.py)."
+        )
+
+    destino = carpeta_agcface(carpeta_destino)
+
+    try:
+        destino.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ErrorIndicesFma(
+            f"No se pudo crear {destino}: {error}"
+        ) from error
+
+    try:
+        archivos = [a for a in origen.iterdir() if a.is_file()]
+    except OSError as error:
+        raise ErrorIndicesFma(
+            f"No se pudo leer {origen}: {error}"
+        ) from error
+
+    dias_del_mes = _dias_del_mes(anio, mes)
+
+    fechas = {
+        PLANTILLA_FECHA_DIARIA.format(anio=anio, mes=mes, dia=dia)
+        for dia in range(1, dias_del_mes + 1)
+    }
+
+    del_mes = [
+        a for a in archivos
+        if a.suffix.lower() in EXTENSIONES_EXCEL
+        and any(
+            dco._normalizar(a.stem).startswith(f"csf_{fecha}")
+            for fecha in fechas
+        )
+    ]
+    criterio = "csf_<AAAAMMDD>"
+
+    if not del_mes:
+        del_mes = [
+            a for a in archivos
+            if a.suffix.lower() in EXTENSIONES_EXCEL
+            and any(fecha in a.stem for fecha in fechas)
+        ]
+        criterio = "el nombre contiene <AAAAMMDD>"
+
+    if not del_mes:
+        raise ErrorIndicesFma(
+            f"No se encontro ningun reporte del AGC de {anio}-{mes:02d} "
+            f"en {origen}."
+        )
+
+    registrar(f"  reportes del AGC del periodo ({criterio}): {len(del_mes)}")
+
+    copiados, salteados = [], []
+
+    for ruta in sorted(del_mes, key=lambda r: r.name):
+
+        ruta_destino = destino / ruta.name
+
+        if (
+            ruta_destino.is_file()
+            and ruta_destino.stat().st_size == ruta.stat().st_size
+            and int(ruta_destino.stat().st_mtime) == int(ruta.stat().st_mtime)
+        ):
+            salteados.append(ruta.name)
+            continue
+
+        try:
+            shutil.copy2(ruta, ruta_destino)
+        except OSError as error:
+            raise ErrorIndicesFma(
+                f"No se pudo copiar {ruta.name}: {error}"
+            ) from error
+
+        copiados.append(ruta.name)
+
+    registrar(
+        f"  {len(copiados)} copiado(s), {len(salteados)} ya estaban al dia "
+        f"en {destino}"
+    )
+
+    return copiados, salteados, destino
+
+
 def construir_fma_csf(carpeta_csf, aamm, registrar=print):
     """
     Concatena los `csf_20AAMMDD.xlsx` del mes. Replica calc_fmacsf de
@@ -331,12 +501,18 @@ def construir_fma_csf(carpeta_csf, aamm, registrar=print):
         prefijo = dco._normalizar(
             PLANTILLA_CSF_DIARIO.format(anio=anio, mes=mes, dia=dia)
         )
+        fecha = PLANTILLA_FECHA_DIARIA.format(anio=anio, mes=mes, dia=dia)
 
+        # Igual que al copiarlos: primero el nombre del script original
+        # y, si no, cualquier Excel del dia.
         candidatos = [
             r for r in carpeta_csf.iterdir()
             if r.is_file()
             and r.suffix.lower() in EXTENSIONES_EXCEL
-            and dco._normalizar(r.stem).startswith(prefijo)
+            and (
+                dco._normalizar(r.stem).startswith(prefijo)
+                or fecha in r.stem
+            )
         ] if carpeta_csf.is_dir() else []
 
         if not candidatos:
@@ -498,23 +674,37 @@ def _buscar_en(carpetas, prefijo, extensiones, recursivo=False):
     return None
 
 
-def traer_fma(
-    carpeta_destino, aamm, version=None, raiz=None, registrar=print
+TIPOS_FMA = ("cpf", "csf", "ctf")
+
+
+def generar_fma(
+    carpeta_destino,
+    aamm,
+    tipos=None,
+    version=None,
+    raiz=None,
+    raiz_agc=None,
+    registrar=print,
 ):
     """
-    Arma las tres salidas de FMA del periodo y las escribe en
-    <CARPETA_BASE>/FD y FMA/ (boton "Traer FMA").
+    Arma las salidas de FMA pedidas y las escribe en
+    <CARPETA_BASE>/FD y FMA/. Cada una tiene su propio boton "Generar"
+    en la ventana, asi que lo normal es que venga un solo tipo.
 
-    De donde sale cada una:
-      - CPF: de los reportes diarios del DCO (carpeta de version del
-        periodo, la misma de la que sale el FD);
-      - CSF: de los `csf_20AAMMDD.xlsx`, que se buscan en
-        'FD y FMA/agc_face/', en 'FD y FMA/' y, si no, en la carpeta de
-        version del DCO;
-      - CTF: del `CTF_20AAMM.csv`, con el mismo orden de busqueda.
+    tipos: subconjunto de TIPOS_FMA; None = las tres.
 
-    Si falta el origen de alguna, las otras se arman igual. Devuelve
-    (escritos, faltantes, carpeta_version).
+    De donde sale cada una (rutas confirmadas por el usuario):
+      - cpf: <version>/01 Respuesta/01 Indices CPF/
+                 20AA.MM_Respuesta_CPF/Reporte diario .../tabla_resumen_...
+      - csf: los reportes del AGC de RAIZ_AGC_FACE, copiados primero a
+             'FD y FMA/agcface/'
+      - ctf: <version>/01 Respuesta/06 Indices CTF/CTF_<AAAA><MM>.csv
+
+    El CPF y el CTF necesitan la carpeta de version del DCO; el CSF no
+    (su origen es otro servidor), asi que pedir SOLO csf no obliga a
+    que el DCO este publicado.
+
+    Devuelve (escritos, faltantes, carpeta_version).
     """
 
     anio, mes = dco.periodo_desde_aamm(aamm)
@@ -523,122 +713,130 @@ def traer_fma(
     if not carpeta_destino.is_dir():
         raise ErrorIndicesFma(f"No se encontro la carpeta {carpeta_destino}")
 
-    carpeta_publicacion = dco.carpeta_del_periodo(aamm, raiz=raiz)
-    carpeta_version = dco.elegir_version(carpeta_publicacion, version)
+    tipos = set(tipos or TIPOS_FMA)
+    desconocidos = tipos - set(TIPOS_FMA)
 
-    if version is None:
-        registrar(
-            f"  version publicada mas alta: {carpeta_version.name} "
-            f"(V1 = Preliminar, V2 = Definitivo)"
-        )
+    if desconocidos:
+        raise ErrorIndicesFma(f"Tipo(s) de FMA desconocido(s): {desconocidos}")
 
-    # Donde se buscan los insumos de CSF y CTF, en orden.
-    carpetas_locales = [
-        carpeta_destino / CARPETA_AGC_FACE,
-        carpeta_destino,
-    ]
+    carpeta_version = None
+
+    if tipos & {"cpf", "ctf"}:
+        carpeta_publicacion = dco.carpeta_del_periodo(aamm, raiz=raiz)
+        carpeta_version = dco.elegir_version(carpeta_publicacion, version)
+
+        if version is None:
+            registrar(
+                f"  version publicada mas alta: {carpeta_version.name} "
+                f"(V1 = Preliminar, V2 = Definitivo)"
+            )
 
     escritos, faltantes = {}, []
 
     # ---- CPF ----
-    carpeta_respuesta = buscar_carpeta_respuesta_cpf(carpeta_version)
+    if "cpf" in tipos:
 
-    if carpeta_respuesta is None:
-        faltantes.append(
-            f"CPF (no hay carpeta '*Respuesta_CPF*' en "
-            f"{carpeta_version})"
-        )
-    else:
-        registrar(f"  reportes diarios de CPF: {carpeta_respuesta}")
-        df_cpf = construir_fma_cpf(carpeta_respuesta, aamm, registrar)
-        escritos["cpf"] = _escribir(
-            df_cpf, carpeta_destino / nombre_salida("cpf", aamm)
-        )
+        carpeta_respuesta = buscar_carpeta_respuesta_cpf(carpeta_version)
+
+        if carpeta_respuesta is None:
+            faltantes.append(
+                f"CPF (no hay carpeta '*Respuesta_CPF*' bajo "
+                f"{'/'.join(SUBCARPETAS_CPF)} en {carpeta_version})"
+            )
+        else:
+            registrar(f"  reportes diarios de CPF: {carpeta_respuesta}")
+            df_cpf = construir_fma_cpf(carpeta_respuesta, aamm, registrar)
+            escritos["cpf"] = _escribir(
+                df_cpf, carpeta_destino / nombre_salida("cpf", aamm)
+            )
 
     # ---- CSF ----
-    carpeta_csf = None
+    if "csf" in tipos:
 
-    for carpeta in carpetas_locales:
-        if _buscar_en(
-            [carpeta],
-            PLANTILLA_CSF_DIARIO.format(anio=anio, mes=mes, dia=1)[:-2],
-            EXTENSIONES_EXCEL,
-        ):
-            carpeta_csf = carpeta
-            break
+        try:
+            _, _, carpeta_csf = traer_agc_face(
+                carpeta_destino, aamm, raiz=raiz_agc, registrar=registrar
+            )
+        except ErrorIndicesFma as error:
+            # Si no se pudo traer de la red, se intenta igual con lo que
+            # ya haya copiado en agcface/: puede ser una corrida
+            # anterior, o archivos puestos a mano.
+            carpeta_csf = carpeta_agcface(carpeta_destino)
 
-    if carpeta_csf is None:
-        carpeta_csf = _carpeta_con_csf_en_dco(carpeta_version, anio, mes)
+            if not carpeta_csf.is_dir():
+                faltantes.append(f"CSF ({error})")
+                carpeta_csf = None
+            else:
+                registrar(
+                    f"  [AVISO] no se pudieron traer los reportes del "
+                    f"AGC ({error}); se usa lo que ya hay en "
+                    f"{carpeta_csf}"
+                )
 
-    if carpeta_csf is None:
-        faltantes.append(
-            f"CSF (no hay ningun 'csf_{anio}{mes:02d}*' en "
-            f"{carpeta_destino / CARPETA_AGC_FACE}, en {carpeta_destino} "
-            f"ni en {carpeta_version})"
-        )
-    else:
-        registrar(f"  csf_ diarios: {carpeta_csf}")
-        df_csf = construir_fma_csf(carpeta_csf, aamm, registrar)
-        escritos["csf"] = _escribir(
-            df_csf, carpeta_destino / nombre_salida("csf", aamm)
-        )
+        if carpeta_csf is not None:
+            df_csf = construir_fma_csf(carpeta_csf, aamm, registrar)
+            escritos["csf"] = _escribir(
+                df_csf, carpeta_destino / nombre_salida("csf", aamm)
+            )
 
     # ---- CTF ----
-    prefijo_ctf = PLANTILLA_CTF.format(anio=anio, mes=mes)
+    if "ctf" in tipos:
 
-    ruta_ctf = _buscar_en(carpetas_locales, prefijo_ctf, (".csv",))
+        prefijo_ctf = PLANTILLA_CTF.format(anio=anio, mes=mes)
+        carpeta_ctf = bajar_por_subcarpetas(carpeta_version, SUBCARPETAS_CTF)
 
-    if ruta_ctf is None:
-        ruta_ctf = _buscar_en(
-            [carpeta_version], prefijo_ctf, (".csv",), recursivo=True
-        )
+        ruta_ctf = None
 
-    if ruta_ctf is None:
-        faltantes.append(
-            f"CTF (no hay ningun '{prefijo_ctf}.csv' en "
-            f"{carpeta_destino} ni en {carpeta_version})"
-        )
-    else:
-        df_ctf = construir_fma_ctf(ruta_ctf, registrar)
-        escritos["ctf"] = _escribir(
-            df_ctf, carpeta_destino / nombre_salida("ctf", aamm)
-        )
-        # El script original tambien deja el csv al lado.
-        df_ctf.to_csv(
-            carpeta_destino / (nombre_salida("ctf", aamm)[:-5] + ".csv"),
-            sep=",",
-            index=False,
-        )
+        if carpeta_ctf is not None:
+            ruta_ctf = _buscar_en(
+                [carpeta_ctf], prefijo_ctf, (".csv",), recursivo=True
+            )
+
+        if ruta_ctf is None:
+            # Por si el DCO lo movio de rama, o si el usuario lo dejo a
+            # mano en la carpeta del caso.
+            ruta_ctf = _buscar_en(
+                [carpeta_version], prefijo_ctf, (".csv",), recursivo=True
+            ) or _buscar_en([carpeta_destino], prefijo_ctf, (".csv",))
+
+        if ruta_ctf is None:
+            faltantes.append(
+                f"CTF (no hay ningun '{prefijo_ctf}*.csv' bajo "
+                f"{'/'.join(SUBCARPETAS_CTF)} en {carpeta_version} ni en "
+                f"{carpeta_destino})"
+            )
+        else:
+            registrar(f"  CTF: {ruta_ctf}")
+
+            # Se copia a la carpeta del caso antes de usarlo, para que
+            # quede registrado con que archivo se armo la salida.
+            if ruta_ctf.parent != carpeta_destino:
+                try:
+                    shutil.copy2(ruta_ctf, carpeta_destino / ruta_ctf.name)
+                except OSError as error:
+                    registrar(
+                        f"  [AVISO] no se pudo copiar {ruta_ctf.name} a la "
+                        f"carpeta del caso: {error}"
+                    )
+
+            df_ctf = construir_fma_ctf(ruta_ctf, registrar)
+            escritos["ctf"] = _escribir(
+                df_ctf, carpeta_destino / nombre_salida("ctf", aamm)
+            )
+            # El script original tambien deja el csv al lado.
+            df_ctf.to_csv(
+                carpeta_destino / (nombre_salida("ctf", aamm)[:-5] + ".csv"),
+                sep=",",
+                index=False,
+            )
 
     if not escritos:
         raise ErrorIndicesFma(
-            "No se pudo armar ninguna de las tres salidas de FMA:\n  - "
+            "No se pudo armar ninguna de las salidas de FMA pedidas:\n  - "
             + "\n  - ".join(faltantes)
         )
 
     return escritos, faltantes, carpeta_version
-
-
-def _carpeta_con_csf_en_dco(carpeta_version, anio, mes):
-    """
-    Busca, dentro de la carpeta de version del DCO, alguna subcarpeta
-    que tenga los `csf_` del mes, y devuelve esa subcarpeta.
-    """
-
-    prefijo = dco._normalizar(f"csf_{anio}{mes:02d}")
-
-    try:
-        for ruta in Path(carpeta_version).rglob("*"):
-            if (
-                ruta.is_file()
-                and ruta.suffix.lower() in EXTENSIONES_EXCEL
-                and dco._normalizar(ruta.stem).startswith(prefijo)
-            ):
-                return ruta.parent
-    except OSError:
-        return None
-
-    return None
 
 
 def _escribir(df, ruta):

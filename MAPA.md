@@ -69,7 +69,9 @@ importable como cualquier módulo.
   | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
   | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
   | `FD y FMA/SSCC_Desempeño_*` | **Traer FD** | `nucleo.traer_fd` — baja el FD del período del árbol de indicadores del DCO y descomprime el zip |
-  | `FD y FMA/fma_cpf_<AAMM>.xlsx` | **Traer FMA** | `nucleo.traer_fma` — arma **las tres** salidas de FMA del período (CPF, CSF y CTF) |
+  | `FD y FMA/fma_cpf_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"cpf"}` — desde los reportes diarios del DCO |
+  | `FD y FMA/fma_csf_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"csf"}` — trae los reportes del AGC a `agcface/` y los concatena |
+  | `FD y FMA/fma_cft_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"ctf"}` — desde el `CTF_<AAAA><MM>.csv` del DCO |
   | `Subastas/DB subastas/` | **Traer subastas** | `nucleo.traer_subastas` — copia los `OfertasSSCCAdj*.accdb` del período desde la unidad de red |
   | `Consolidado_entradas.xlsx` | **Actualizar todo** | `generar_consolidado` con todas las secciones |
   | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
@@ -254,19 +256,20 @@ importable como cualquier módulo.
 
 ## `Script/Fd/Indices_FMA.py`
 
-- **Qué hace:** arma las tres salidas de FMA del período (botón **"Traer FMA"**),
-  replicando `calc_fmacpf`, `calc_fmacsf` y `calc_fmactf` de `entradas_sscc.py`.
-  **Ojo con la palabra "traer"**: el FMA no se copia ya hecho de ningún lado, se
-  **construye**, y cada una de las tres sale de un origen distinto.
-- **Consume:**
-  - **CPF**: los reportes diarios que publica el DCO, dentro del mismo árbol del
-    que sale el FD —
-    `<versión>/01 Respuesta/01 Indices CPF/20AA.MM_Respuesta_CPF/Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx`.
-    Se lee **cada hoja menos "Resumen"** (una por central).
-  - **CSF**: los `csf_20AAMMDD.xlsx` diarios (los del `agc_face`), que se buscan
-    en `FD y FMA/agc_face/`, en `FD y FMA/` y, si no, en la carpeta de versión
-    del DCO.
-  - **CTF**: el `CTF_20AAMM.csv`, con el mismo orden de búsqueda.
+- **Qué hace:** arma las tres salidas de FMA del período, **una por botón
+  "Generar"**, replicando `calc_fmacpf`, `calc_fmacsf` y `calc_fmactf` de
+  `entradas_sscc.py`. **Ojo con la palabra "traer"**: el FMA no se copia ya hecho
+  de ningún lado, se **construye**, y cada una sale de un origen distinto.
+- **Consume** (las tres rutas las confirmó el usuario):
+  - **CPF**: `<versión>/01 Respuesta/01 Indices CPF/20AA.MM_Respuesta_CPF/Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx`
+    — dentro del mismo árbol del DCO del que sale el FD. Se lee **cada hoja menos
+    "Resumen"** (una por central).
+  - **CSF**: `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10`
+    (`RAIZ_AGC_FACE`), donde están **todos los meses juntos**: se eligen los del
+    período, se copian a `<CARPETA_BASE>/FD y FMA/agcface/` y se concatenan.
+  - **CTF**: `<versión>/01 Respuesta/06 Indices CTF/CTF_<AAAA><MM>.csv` — otra
+    rama del mismo árbol del DCO. Se copia a la carpeta del caso antes de usarlo,
+    para que quede registrado con qué archivo se armó la salida.
 - **Produce:** `fma_cpf_<AAMM>.xlsx`, `fma_csf_<AAMM>.xlsx` y
   `fma_cft_<AAMM>.xlsx` (+ su `.csv`) en `<CARPETA_BASE>/FD y FMA/` — con los
   nombres exactos de `entradas_sscc.py` ("cft" incluido), que son los que después
@@ -274,9 +277,9 @@ importable como cualquier módulo.
   escribe este módulo lo lee aquel sin tocar nada.
 - **Expone:** `ErrorIndicesFma`; `nombre_salida(tipo, aamm)`,
   `buscar_carpeta_respuesta_cpf(...)`, `buscar_tabla_resumen(...)`,
-  `construir_fma_cpf/csf/ctf(...)`,
-  `traer_fma(carpeta_destino, aamm, version=None, raiz=None, registrar=print)` →
-  `(escritos, faltantes, carpeta_version)`.
+  `construir_fma_cpf/csf/ctf(...)`, `traer_agc_face(...)`, `TIPOS_FMA`,
+  `generar_fma(carpeta_destino, aamm, tipos=None, version=None, raiz=None, raiz_agc=None, registrar=print)`
+  → `(escritos, faltantes, carpeta_version)`.
 - **Depende de:** `pandas` y `Script/Fd/Indicadores_DCO.py` (comparte con él la
   resolución del árbol del DCO y la elección de versión). **No importa `nucleo`.**
 - **Detalles que importan:**
@@ -292,7 +295,13 @@ importable como cualquier módulo.
     en las 07:00. Convertir a UTC corría todas las horas del CTF — se detectó
     justamente en la prueba.
   - un día sin archivo se saltea con aviso (el original revienta), y si falta el
-    origen de una de las tres, las otras dos se arman igual.
+    origen de una, las otras se arman igual.
+  - **el CSF no necesita el DCO publicado** (su origen es otro servidor), así que
+    su botón funciona aunque el mes todavía no tenga indicadores publicados.
+  - los nombres de los reportes del AGC se buscan primero como
+    `csf_<AAAAMMDD>` (el del script original) y, si en todo el mes no aparece
+    ninguno, como "cualquier Excel cuyo nombre contenga `<AAAAMMDD>`" — el log
+    dice con cuál de los dos criterios los encontró.
 
 ---
 

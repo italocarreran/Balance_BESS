@@ -2557,3 +2557,53 @@ reales; mas los insumos de CSF y CTF en la carpeta del caso. Se comprobo que sal
 CTF conserva la hora local, y que `cargar_tablas_fma()` lee las tres salidas y da el numero
 esperado. **Falta correrlo contra el DCO real**, que es donde se va a ver si los reportes estan
 donde dice el script y si el reporte sigue teniendo 29 columnas.
+
+---
+
+## 2026-09-12 (5) — Las rutas reales de los FMA y un boton "Generar" por cada uno
+
+El usuario paso las tres rutas de entrada que faltaban y pidio que **cada FMA tenga su propio
+boton "Generar"** en vez del unico "Traer FMA" de la entrada anterior.
+
+**Las tres rutas** (confirmadas por el usuario, ya no inferidas):
+
+| | Origen |
+|---|---|
+| CPF | `...\Indicadores Publicar\<V1/V2>\01 Respuesta\01 Indices CPF\20AA.MM_Respuesta_CPF\Reporte diario D-M-20AA\tabla_resumen_D_M_20AA.xlsx` (confirma lo que ya estaba) |
+| CSF | `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10` |
+| CTF | `...\Indicadores Publicar\<V1/V2>\01 Respuesta\06 Indices CTF\CTF_<AAAA><MM>.csv` |
+
+La del CPF confirma la que ya se habia deducido del comentario del script. Las otras dos son
+nuevas: el **CTF esta en el mismo arbol del DCO pero en otra rama** (`06 Indices CTF` en vez de
+`01 Indices CPF`), y el **CSF no esta en el DCO en absoluto** -vive en otro servidor, en una
+carpeta donde estan TODOS los meses juntos-.
+
+**Lo que cambio en el codigo:**
+
+- `SUBCARPETAS_CPF` y `SUBCARPETAS_CTF`: ahora se baja por los nombres reales en vez de buscar a
+  ciegas. Se mantiene la busqueda recursiva **como respaldo** por si el DCO cambia el anidamiento:
+  primero la ruta que dio el usuario, y si ahi no esta, se busca desde la carpeta de version.
+- `traer_agc_face()`: copia a `FD y FMA/agcface/` **solo los archivos del mes** (en la carpeta de
+  red estan todos), salteando los que ya estan al dia. El nombre de la subcarpeta es `agcface`,
+  sin guion bajo, tal cual lo escribio el usuario -ojo, el script original usaba `agc_face`-.
+- El nombre de los reportes del AGC en esa carpeta de red no lo vimos nunca, asi que se prueban
+  dos criterios en orden: primero `csf_<AAAAMMDD>` (el del script original) y, si en todo el mes
+  no aparece ninguno, cualquier Excel cuyo nombre **contenga** `<AAAAMMDD>`. El log dice con cual
+  de los dos los encontro. **Es lo unico de esta entrada que puede necesitar un ajuste al correrlo
+  contra la carpeta real.**
+- `traer_fma()` paso a ser **`generar_fma(..., tipos=...)`**, que arma solo las pedidas. Los tres
+  botones "Generar" del arbol mandan un tipo cada uno. Consecuencia util: **el CSF no necesita que
+  el DCO tenga el mes publicado** (su origen es otro servidor), asi que su boton anda igual aunque
+  todavia no haya indicadores; se probo explicitamente apuntando la raiz del DCO a una carpeta
+  inexistente.
+- El CTF ademas se **copia a la carpeta del caso** antes de usarlo, para que quede registrado con
+  que archivo se armo la salida (igual que se hace con los Access de subastas y con el FD).
+
+**Verificacion:** un arbol del DCO simulado con las **dos ramas reales** (`01 Indices CPF` y
+`06 Indices CTF`) y una carpeta del SCADA con archivos de junio, julio y agosto mezclados. Se
+genero **de a un tipo por vez**, como lo van a hacer los botones, y se comprobo: que el CPF
+encuentre los reportes por la ruta nombrada, que a `agcface/` lleguen **solo los de julio** (no
+junio ni agosto), que el CTF salga de `06 Indices CTF` conservando la hora local, que las tres
+salidas las lea despues `cargar_tablas_fma()` dando el 0,3201 esperado, y que el CSF funcione con
+el DCO caido. **Falta correrlo contra las carpetas reales**, sobre todo por el nombre de los
+archivos del AGC.

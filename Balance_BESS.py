@@ -28,9 +28,9 @@ unico-:
             cmg.xlsx                       [Generar]
         FD y FMA/
             SSCC_Desempeño_<algo>.xlsx     [Traer FD]
-            fma_cpf_<AAMM>.xlsx            [Traer FMA]  <- arma las tres
-            fma_csf_<AAMM>.xlsx
-            fma_cft_<AAMM>.xlsx
+            fma_cpf_<AAMM>.xlsx            [Generar]
+            fma_csf_<AAMM>.xlsx            [Generar]
+            fma_cft_<AAMM>.xlsx            [Generar]
         Subastas/
             DB subastas/                   [Traer subastas]
             3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (respaldo)
@@ -456,8 +456,9 @@ def main():
         if id_fila == "sscc":
             return ("Traer FD", traer_fd)
 
-        if id_fila == "fma_cpf":
-            return ("Traer FMA", traer_fma)
+        if id_fila.startswith("fma_"):
+            tipo = id_fila.split("_", 1)[1]
+            return ("Generar", lambda t=tipo: generar_fma(t))
 
         if id_fila == "db_subastas":
             return ("Traer subastas", traer_subastas)
@@ -769,10 +770,10 @@ def main():
             f"{nucleo.CARPETA_FD_FMA}/",
         )
 
-    def traer_fma():
+    def generar_fma(tipo):
         """
-        Arma las tres salidas de FMA del periodo en
-        <CARPETA_BASE>/FD y FMA/.
+        Arma una de las tres salidas de FMA del periodo en
+        <CARPETA_BASE>/FD y FMA/. Cada una tiene su propio boton.
         """
 
         ruta = caso_listo()
@@ -788,9 +789,9 @@ def main():
             return
 
         lanzar(
-            nucleo.traer_fma,
-            dict(carpeta_base=ruta, aamm=aamm),
-            f"FMA en {nucleo.CARPETA_FD_FMA}/",
+            nucleo.generar_fma,
+            dict(carpeta_base=ruta, aamm=aamm, tipos={tipo}),
+            f"fma_{tipo}_{aamm}",
         )
 
     def traer_subastas():
@@ -943,8 +944,8 @@ def main():
     log(
         "Selecciona la carpeta base del caso e ingresa el periodo "
         "(AAMM). Cada fila del diagrama de abajo trae su propio boton: "
-        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer FD' y 'Traer "
-        "FMA' en 'FD y FMA/', 'Traer subastas' en "
+        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer FD' y un "
+        "'Generar' por cada FMA en 'FD y FMA/', 'Traer subastas' en "
         "Subastas/DB subastas/, 'Actualizar' en cada hoja de "
         "Consolidado_entradas.xlsx y 'Calcular' en cada hoja de "
         "Pagos_BESS.xlsx."
