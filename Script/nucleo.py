@@ -28,6 +28,7 @@ try:
     from .Subastas import Fma as fma_subastas
     from .Fd import Indicadores_DCO as indicadores_dco
     from .Fd import Indices_FMA as indices_fma
+    from .Fd import Desempeno_Horario as desempeno_fd
 except ImportError:  # pragma: no cover - depende de como se importe
     from Cmg import Extrae_CMG_barras as extrae_cmg
     from Medidas import Homologacion, Descarga_PRMTE, Claves_Balance
@@ -37,6 +38,7 @@ except ImportError:  # pragma: no cover - depende de como se importe
     from Subastas import Fma as fma_subastas
     from Fd import Indicadores_DCO as indicadores_dco
     from Fd import Indices_FMA as indices_fma
+    from Fd import Desempeno_Horario as desempeno_fd
 
 
 # ============================================================
@@ -2652,12 +2654,11 @@ def construir_subastas(ruta_subastas, registrar=print):
 # para poder cambiarla de un lado si el usuario confirma la otra.
 COLUMNA_ENERGIA_SSCC_ACCDB = "CANTIDAD PONDERADA MW"
 
-# Columnas de Subastas que quedan PENDIENTES al leer desde el Access.
-# El Access no las tiene: en la planilla 3 venian pegadas en DB!Y (FD) y
-# DB!V (FMA). El FMA ya se calcula (calcular_fma_subastas, mas abajo,
-# desde las tres salidas de FD y FMA/); la unica que sigue pendiente es
-# FD, que espera su propio documento de trazabilidad.
-COLUMNAS_SUBASTAS_PENDIENTES = ("P",)
+# El Access no trae ni el FD ni el FMA: en la planilla 3 venian pegados
+# en DB!Y y DB!V. Los dos se calculan ahora desde la carpeta "FD y FMA"
+# -el FMA con calcular_fma_subastas() y el FD con calcular_fd_subastas(),
+# mas abajo-, asi que ya no queda ninguna columna de Subastas sin
+# origen.
 
 
 def construir_mapa_propietario(resumen_bess):
@@ -2748,6 +2749,8 @@ def construir_subastas_desde_accdb(
     dia_cambio_hora=None,
     tablas_fma=None,
     dic_cpf=None,
+    tablas_fd=None,
+    dic_unidad_fd=None,
     registrar=print,
 ):
     """
@@ -2828,20 +2831,29 @@ def construir_subastas_desde_accdb(
         filtrado[COLUMNA_ENERGIA_SSCC_ACCDB], errors="coerce"
     )
 
-    for letra in COLUMNAS_SUBASTAS_PENDIENTES:
-        df[letra] = pd.NA
-
+    df["P"] = pd.NA
     df["Q"] = pd.NA
 
     df = df[list("BCDEFGHIJKLMNOPQ")]
     df = df.rename(columns=NOMBRES_SUBASTAS)
     df = _ordenar_subastas_por_hora_mes(df)
 
-    # FMA (Q): se calcula aca, con la hoja ya ordenada, para que la
-    # columna quede alineada fila a fila con lo que se escribe.
+    # FD (P) y FMA (Q): se calculan aca, con la hoja ya ordenada, para
+    # que queden alineadas fila a fila con lo que se escribe.
+    if tablas_fd:
+        df[NOMBRES_SUBASTAS["P"]] = calcular_fd_subastas(
+            df, tablas_fd, dic_unidad_fd=dic_unidad_fd, registrar=registrar
+        )
+    else:
+        registrar(
+            f"  [AVISO] sin archivo SSCC_Desempeño_* en "
+            f"{CARPETA_FD_FMA}/: la columna FD queda vacia."
+        )
+
     if tablas_fma:
         df[NOMBRES_SUBASTAS["Q"]] = calcular_fma_subastas(
-            df, tablas_fma, dic_cpf=dic_cpf, registrar=registrar
+            df, tablas_fma, dic_cpf=dic_cpf, tablas_fd=tablas_fd,
+            dic_unidad_fd=dic_unidad_fd, registrar=registrar,
         )
     else:
         registrar(
@@ -2907,12 +2919,20 @@ def construir_subastas_desde_accdb(
 # existe, se prueba igual con el nombre tal cual y se avisa.
 TITULO_BLOQUE_FMA_CPF = "fma cpf"
 
-# El Vector de Participacion CSF (DB!AC) sale de la hoja CSF_FD de la
-# planilla 3, que es parte de la trazabilidad de FD -- todavia sin
-# documentar. Hasta entonces el FMA de CSF queda en su valor BASE, que
-# es lo mismo que multiplicar por 1. Queda en una constante para que se
-# vea que es un supuesto y no un olvido.
-VECTOR_PARTICIPACION_CSF_PENDIENTE = 1.0
+# El Vector de Participacion CSF (DB!AC) YA NO ES UN PENDIENTE: sale de
+# la hoja "CSF Horario" del archivo SSCC_Desempeño_* (ver
+# Script/Fd/Desempeno_Horario.py y el documento de trazabilidad de FD,
+# secciones 26 y 27). Este valor se usa solo cuando esa fila no
+# aparece en el archivo: la formula original no tiene respaldo para ese
+# caso -daria #N/A-, y dejar el FMA en su valor base es mas prudente
+# que ponerlo en 0, que seria no pagar. Se avisa en el log cada vez.
+VECTOR_PARTICIPACION_CSF_SIN_DATO = 1.0
+
+# Titulo del bloque de la hoja Diccionario con la equivalencia
+# Configuración -> unidad como la nombra el archivo de desempeño. Es el
+# bloque "FD" que esa hoja ya tenia (el mismo que usa Calculo E
+# Costos!AM:AR via construir_dic_mapeo_diccionario).
+TITULO_BLOQUE_FD = "fd"
 
 # La formula real de DB!V tiene dos bloques consecutivos para "CTF(+)"
 # y, por como estan anidados los SI, el segundo nunca se llega a
@@ -3051,7 +3071,10 @@ def _clave_numerica_o_texto(valor):
         return normalizar(valor)
 
 
-def calcular_fma_subastas(df_subastas, tablas, dic_cpf=None, registrar=print):
+def calcular_fma_subastas(
+    df_subastas, tablas, dic_cpf=None, tablas_fd=None, dic_unidad_fd=None,
+    registrar=print,
+):
     """
     Devuelve la columna FMA (Subastas!Q) para cada fila de Subastas,
     replicando la formula de DB!V (ver el comentario de arriba).
@@ -3059,9 +3082,17 @@ def calcular_fma_subastas(df_subastas, tablas, dic_cpf=None, registrar=print):
     dic_cpf: Configuración -> nombre de la central como aparece en
     fma_cpf (la equivalencia de nomenclatura). Si no esta, se prueba
     con la Configuración tal cual.
+
+    tablas_fd / dic_unidad_fd: lo que devuelve
+    desempeno_fd.construir_tablas_fd() y la equivalencia
+    Configuración -> unidad del archivo de desempeño. Se usan para el
+    **Vector de Participacion CSF**, que multiplica al FMA de las filas
+    CSF (DB!AC). Sin ellos, ese factor queda en 1 y se avisa.
     """
 
     dic_cpf = dic_cpf or {}
+    dic_unidad_fd = dic_unidad_fd or {}
+    sin_participacion = 0
 
     columna_concepto = NOMBRES_SUBASTAS["B"]
     columna_anio = NOMBRES_SUBASTAS["F"]
@@ -3135,10 +3166,20 @@ def calcular_fma_subastas(df_subastas, tablas, dic_cpf=None, registrar=print):
                 sin_dato["CSF"] += 1
                 valores.append(0.0)
             else:
-                valores.append(
-                    _numero_o_cero(par[indice])
-                    * VECTOR_PARTICIPACION_CSF_PENDIENTE
-                )
+                vector = None
+
+                if tablas_fd:
+                    unidad = dic_unidad_fd.get(config_norm, config)
+                    vector = desempeno_fd.buscar_participacion_csf(
+                        tablas_fd, unidad, datos[NOMBRES_SUBASTAS["J"]]
+                    )
+
+                if vector is None:
+                    vector = VECTOR_PARTICIPACION_CSF_SIN_DATO
+                    if tablas_fd:
+                        sin_participacion += 1
+
+                valores.append(_numero_o_cero(par[indice]) * float(vector))
 
         elif concepto.startswith("CTF"):
 
@@ -3181,7 +3222,93 @@ def calcular_fma_subastas(df_subastas, tablas, dic_cpf=None, registrar=print):
                 f"formula original)."
             )
 
+    if sin_participacion:
+        registrar(
+            f"  [AVISO] FMA: {sin_participacion:,} fila(s) CSF sin "
+            f"Vector de Participacion en el archivo de desempeño: se "
+            f"uso {VECTOR_PARTICIPACION_CSF_SIN_DATO:g}."
+        )
+
+    if not tablas_fd:
+        registrar(
+            "  [AVISO] sin archivo SSCC_Desempeño_*: el FMA de las filas "
+            "CSF queda en su valor base (Vector de Participacion = 1)."
+        )
+
     return pd.Series(valores, index=df_subastas.index, dtype="float64")
+
+
+def calcular_fd_subastas(
+    df_subastas, tablas_fd, dic_unidad_fd=None, registrar=print
+):
+    """
+    Devuelve la columna FD (Subastas!P, antes DB!Y) para cada fila,
+    siguiendo el documento de trazabilidad de FD:
+
+      CPF -> Fd_CPF de 'CPF Horario'   (probando la alternativa TG/TV)
+      CSF -> Fd_CSF de 'CSF Horario'
+      CTF -> Fd_CTF de 'CTF Horario'
+
+    buscando por Control + Unidad + Hora_mes. La unidad sale de
+    homologar la Configuración contra el bloque "FD" del Diccionario de
+    Centrales.xlsx (el mismo que ya usa Calculo E Costos!AM:AR); si no
+    esta en el Diccionario se prueba con la Configuración tal cual.
+
+    Lo que no se encuentra queda **vacio** y se cuenta en el log. La
+    formula original escribe ahi el texto "ERRORCPF"/"ERRORCSF"/
+    "ERRORCTF"; se prefirio dejarlo vacio para no meter texto en una
+    columna numerica, pero el log dice cuantas filas fueron.
+    """
+
+    dic_unidad_fd = dic_unidad_fd or {}
+
+    columna_control = NOMBRES_SUBASTAS["C"]
+    columna_hora_mes = NOMBRES_SUBASTAS["J"]
+    columna_config = NOMBRES_SUBASTAS["K"]
+
+    valores = []
+    sin_dato = {}
+    sin_equivalencia = set()
+
+    for fila in df_subastas.itertuples(index=False):
+        datos = fila._asdict()
+
+        control = _texto_seguro(datos[columna_control]).upper()
+        config = _texto_seguro(datos[columna_config])
+        config_norm = normalizar(config)
+
+        unidad = dic_unidad_fd.get(config_norm)
+
+        if unidad is None:
+            unidad = config
+            if dic_unidad_fd:
+                sin_equivalencia.add(config)
+
+        valor = desempeno_fd.buscar_fd(
+            tablas_fd, control, unidad, datos[columna_hora_mes]
+        )
+
+        if valor is None:
+            sin_dato[control] = sin_dato.get(control, 0) + 1
+            valores.append(pd.NA)
+        else:
+            valores.append(valor)
+
+    for central in sorted(sin_equivalencia):
+        registrar(
+            f"  [AVISO] sin equivalencia de nomenclatura FD para "
+            f"'{central}' (bloque '{TITULO_BLOQUE_FD}' de "
+            f"{HOJA_DICCIONARIO} en {ARCHIVO_CENTRALES}): se probo con "
+            f"el nombre tal cual."
+        )
+
+    for control, cuenta in sorted(sin_dato.items()):
+        registrar(
+            f"  [AVISO] FD: {cuenta:,} fila(s) {control} sin dato en el "
+            f"archivo de desempeño, quedan vacias."
+        )
+
+    return pd.Series(valores, index=df_subastas.index, dtype="Float64")
 
 
 def _numero_o_cero(valor):
@@ -6960,10 +7087,11 @@ SECCIONES_CONSOLIDADO = (
         "subastas",
         "Subastas",
         f"Usa los Access de {CARPETA_SUBASTAS}/{CARPETA_DB_SUBASTAS}/ "
-        f"(su origen real), las salidas de FMA de {CARPETA_FD_FMA}/ "
-        f"(fma_cpf/fma_csf/fma_cft) y {ARCHIVO_CENTRALES} (Propietario "
-        f"+ nomenclatura CPF). Si esa carpeta no tiene Access del "
-        f"periodo, cae al respaldo 3_REMUNERACIÓN_SUBASTAS_E_ID_*.",
+        f"(su origen real), y de {CARPETA_FD_FMA}/ las salidas de FMA "
+        f"(fma_cpf/fma_csf/fma_cft) y el SSCC_Desempeño_* (columna FD y "
+        f"Vector de Participacion CSF), mas {ARCHIVO_CENTRALES} "
+        f"(Propietario + nomenclaturas). Si esa carpeta no tiene Access "
+        f"del periodo, cae al respaldo 3_REMUNERACIÓN_SUBASTAS_E_ID_*.",
         ("Subastas",),
     ),
 )
@@ -7148,6 +7276,7 @@ def generar_consolidado(
             # subastas son los Access, no la planilla 3.
             mapa_propietarios = {}
             dic_cpf = {}
+            diccionario_centrales = None
 
             if rutas["centrales"].is_file():
                 resumen_bess, diccionario_centrales = leer_centrales(
@@ -7170,6 +7299,36 @@ def generar_consolidado(
                 rutas["sscc_desempeno_dir"], aamm_val, registrar=registrar
             )
 
+            # El FD (Subastas!P) y el Vector de Participacion CSF que
+            # necesita el FMA salen los dos del archivo SSCC_Desempeño_*.
+            tablas_fd = None
+            dic_unidad_fd = {}
+
+            archivo_sscc_fd = buscar_archivo_sscc_desempeno(
+                rutas["sscc_desempeno_dir"]
+            )
+
+            if archivo_sscc_fd:
+                registrar(f"Leyendo el FD de {archivo_sscc_fd.name}...")
+                try:
+                    tablas_fd = desempeno_fd.construir_tablas_fd(
+                        archivo_sscc_fd, registrar=registrar
+                    )
+                except desempeno_fd.ErrorDesempeno as error:
+                    raise ErrorEntrada(str(error)) from error
+
+                if rutas["centrales"].is_file():
+                    dic_unidad_fd = construir_dic_bloque_diccionario(
+                        diccionario_centrales, TITULO_BLOQUE_FD
+                    ) or construir_dic_mapeo_diccionario(diccionario_centrales)
+            else:
+                registrar(
+                    f"  [AVISO] no hay ningun SSCC_Desempeño_* en "
+                    f"{CARPETA_FD_FMA}/ (se baja con el boton 'Traer "
+                    f"FD'): las columnas FD y el Vector de Participacion "
+                    f"CSF quedan sin dato."
+                )
+
             if not dic_cpf:
                 registrar(
                     f"  [AVISO] {ARCHIVO_CENTRALES} no tiene el bloque "
@@ -7189,6 +7348,8 @@ def generar_consolidado(
                 mapa_propietarios=mapa_propietarios,
                 tablas_fma=tablas_fma,
                 dic_cpf=dic_cpf,
+                tablas_fd=tablas_fd,
+                dic_unidad_fd=dic_unidad_fd,
                 registrar=registrar,
             )
 

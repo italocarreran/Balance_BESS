@@ -143,20 +143,20 @@ estado, no un historial.
   `fma_cft_*`) que ahora se guardan en `FD y FMA/`, siguiendo el
   documento de trazabilidad del usuario. Falta validarlo contra un
   `DB!V` real.
-- **`FD` de `Subastas` (`P`) sigue pendiente.** Venía pegada en `DB!Y`
-  de la planilla 3 y **no existe en el Access**. Sospecha a confirmar:
-  podría salir homologando central+hora contra la hoja `FD` del propio
-  consolidado (la que ya se arma desde `SSCC_Desempeño_*`), igual que
-  `Calculo E Costos!AM:AR`. Es el próximo documento de trazabilidad que
-  el usuario va a preparar.
-- **Vector de Participación CSF**: el FMA de las filas `CSF(+)`/`CSF(-)`
-  es `FMA_base × Vector de Participación CSF` (`DB!AC`), y ese vector
-  vive en la hoja `CSF_FD` de la planilla 3 — parte de la trazabilidad
-  de FD, todavía sin documentar. Hasta entonces se usa **1**
-  (`VECTOR_PARTICIPACION_CSF_PENDIENTE`), o sea el FMA de CSF queda en
-  su valor base. **Es el único supuesto que hoy puede dar un número
-  distinto del de la planilla sin avisar**, así que conviene resolverlo
-  junto con FD.
+- ~~`FD` de `Subastas` (`P`) pendiente~~ — **resuelto**: sale del
+  `SSCC_Desempeño_*`, hoja por familia, cruzando Control + Unidad +
+  Hora_mes (`calcular_fd_subastas()`). Falta validarlo contra un `DB!Y`
+  real.
+- ~~Vector de Participación CSF~~ — **resuelto**: es el "Indicador de
+  participación" que se deriva de la columna `Respuesta CSF` de la hoja
+  `CSF Horario` del mismo archivo. Ya multiplica al FMA de las filas
+  CSF. Falta validarlo contra un `DB!AC` real.
+- **Agregar/confirmar el bloque `FD` de la hoja `Diccionario`**:
+  `Configuración` → unidad como la nombra el `SSCC_Desempeño_*`. Ese
+  bloque ya existía (es el que usa `Calculo E Costos!AM:AR`) y ahora lo
+  usa también `Subastas!FD`; hay que revisar que cubra todas las
+  centrales que aparecen en subastas, porque las que falten se buscan
+  con el nombre tal cual y quedan avisadas en el log.
 - **Agregar el bloque `FMA CPF` a la hoja `Diccionario` de
   `Centrales.xlsx`**: dos columnas, `Configuración` → central como la
   nombra `fma_cpf` (ej. `SAE-DEL-DESIERTO` → `BESS DEL DESIERTO`). Es
@@ -2686,3 +2686,65 @@ el segundo es el de mas abajo); en `Indices_FMA` quedo reexportado para no tocar
 corrigio en la entrada anterior), lo copia, lo descomprime y el Excel queda donde la etapa FD lo
 busca. Y renombrando el archivo a algo que no matchea, el error muestra
 `V1: Factores_desempeno_agosto.zip`, que es exactamente el dato que haria falta para corregirlo.
+
+---
+
+## 2026-09-12 (9) — FD y Vector de Participación CSF: se cierran los dos pendientes
+
+Con el documento de trazabilidad de FD (`docs/Trazabilidad_FD_a_DB_Y_planilla3.md`) se cerraron
+**los dos** pendientes que quedaban de la hoja `Subastas`, porque los dos salen del mismo archivo,
+el `SSCC_Desempeño_*` que ya trae el boton "Traer FD":
+
+- **`Subastas!FD`** (columna `P`, antes `DB!Y`), y
+- el **Vector de Participación CSF** (antes `DB!AC`), que multiplica al FMA de las filas CSF y era
+  el unico supuesto que podia dar un numero distinto del de la planilla sin avisar.
+
+**`Script/Fd/Desempeno_Horario.py`** (modulo nuevo) normaliza las tres hojas horarias:
+
+| Hoja | Columnas | El FD es |
+|---|---|---|
+| `CPF Horario` | B:J | `I` (Fd_CPF) |
+| `CSF Horario` | B:H | `H` (Fd_CSF) |
+| `CTF Horario` | B:I | `I` (Fd_CTF) |
+
+Encabezados en la fila 11 y datos desde la 12, que es **el mismo criterio que ya usaba
+`nucleo.construir_fd()`** para armar la hoja `FD` del consolidado desde las dos primeras (la
+tercera, `CTF Horario`, no la leia nadie hasta ahora). Se dejaron las dos lecturas separadas
+a proposito: arman cosas distintas y la de `construir_fd` ademas filtra por BESS/SAE.
+
+**Tres detalles del documento que no son deducibles mirando el archivo:**
+
+- la `Hora` de estas hojas va de **0 a 23**, asi que `Hora_Mes = (dia-1)*24 + hora + 1`. Ese "+1"
+  es lo que la deja en la misma escala 1..24 por dia que usa `Subastas` — sin el, el cruce entero
+  se corre una hora;
+- **CPF prueba una segunda nomenclatura**: si no encuentra la unidad, intercambia el sufijo
+  `TG` <-> `TV` y busca de nuevo. CSF y CTF buscan una sola vez (asi es la formula original, y asi
+  quedo: se probo que CSF NO cae a la alternativa);
+- el **Indicador de Participación CSF** es 0 solo si la unidad figura como `"No Participó"` **y**
+  su alternativa TG/TV tampoco participo. No alcanza con mirar la propia fila.
+
+Y una que importa aunque parezca menor (§25 del documento): **el FD no se recalcula** a partir de
+las respuestas, se toma tal cual viene. Puede venir `Respuesta = "No Participó"` con `FD = 1`, y
+asi tiene que quedar.
+
+**La nomenclatura** (`Configuración` -> unidad del archivo de desempeño) NO necesito un bloque
+nuevo en el `Diccionario`: es el bloque **`FD`** que esa hoja ya tenia, el mismo que usa
+`Calculo E Costos!AM:AR`. Se reusa `construir_dic_bloque_diccionario()` con respaldo a
+`construir_dic_mapeo_diccionario()` (columnas A:B).
+
+**Una diferencia deliberada con la planilla:** cuando la busqueda no encuentra nada, la formula
+original escribe el texto `"ERRORCPF"` / `"ERRORCSF"` / `"ERRORCTF"` en la celda. Aca la columna
+queda **vacia** y el log dice cuantas filas fueron, por familia: meter texto en una columna
+numerica rompe cualquier cuenta posterior. Para el Vector de Participación, si la fila no aparece
+se usa **1** (`VECTOR_PARTICIPACION_CSF_SIN_DATO`) y se avisa: la formula original ahi daria #N/A,
+y dejar el FMA en su valor base es mas prudente que ponerlo en 0, que seria no pagar.
+
+**Verificación:** un `SSCC_Desempeño_*` sintetico con las tres hojas en su layout real (columna A
+vacia, encabezados en la fila 11), una unidad que solo existe como `TV` para probar el salto
+`TG`<->`TV`, y una central con `"No Participó"`. Se comprobo: las tres tablas toman la columna de
+FD que corresponde, `Hora_Mes` da 1 para el dia 1 hora 0 y 25 para el dia 2 hora 0, el CPF
+encuentra por la alternativa y el CSF **no**, la columna FD sale por familia y la hora inexistente
+queda vacia, y el FMA de la central que no participo queda en 0 mientras la que si participo
+conserva su valor base. Ademas, un caso end-to-end que escribe `Consolidado_entradas.xlsx` con las
+seis filas completas: `FD` con dato en todas y `FMA` = 0,3201 / 0,5 / 0 segun corresponda.
+**Falta compararlo contra un `DB!Y` y un `DB!AC` reales** (§30 del documento).

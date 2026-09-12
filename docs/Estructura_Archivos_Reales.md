@@ -348,7 +348,10 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
   `Hora Mes` duplicada, `CSF(+)`/`CSF(-)`/`CPF(+)`/`CPF(-)` copiadas de la respuesta) — ver
   `NOMBRES_FD_CSF`/`NOMBRES_FD_CPF` en `Script/nucleo.py` para el detalle exacto de esa hoja de salida
   (no confundir con la estructura del archivo de ENTRADA de arriba, que es distinta).
-- **Función que lo lee**: `construir_fd(ruta_sscc)`.
+- **Funciones que lo leen**: `construir_fd(ruta_sscc)` para la hoja `FD` del consolidado, y
+  `Script/Fd/Desempeno_Horario.construir_tablas_fd()` para `Subastas!FD` y el **Vector de
+  Participación CSF** — esta segunda lee además la hoja `CTF Horario`, que la primera no usa.
+  Las dos leen desde la fila 12 con los mismos rangos (CPF `B:J`, CSF `B:H`).
 - **Archivo real de referencia**: `docs/Libro1_Subastas_real.xlsx`, hoja `"FD"` ✅ (encabezados
   reales confirmados, sin datos de fila).
 
@@ -480,6 +483,7 @@ resumen) y comparar celda a celda contra la hoja equivalente de nuestra salida.
 |---|---|---|
 | `docs/Pagos_BESS_comparacion_real.xlsx` | Hojas `Calculo E Costos`, `Calculo RE545` (nuestra salida en ese momento) + `Ecostos planilla 11` (pegada a mano por el usuario, real) | Primera comparación real vs Python que existió en el proyecto — origen del fix de Prorrata SSCC |
 | `docs/Calculo_RE545_reducido_para_IA.xlsx` | Hoja `Calculo RE545 reducido` (real, recortada) con **fórmulas** (no solo valores) + hoja `Mapa_Formulas` (rango de celdas → fórmula real, muy útil para confirmar un cálculo sin tener que pedir el `.xlsm` completo) | Fuente directa de varias correcciones de `Calculo RE545` (reservas AR:AT constante 1, cruce S/BI de BK:BL:BS) |
+| `docs/Trazabilidad_FD_a_DB_Y_planilla3.md` | Documento del usuario: cómo se llega del `SSCC_Desempeño_*` a `DB!Y` (FD) y, de paso, a `DB!AC` (Vector de Participación CSF) | Fuente de `Script/Fd/Desempeno_Horario.py` y de `calcular_fd_subastas()` |
 | `docs/Trazabilidad_FMA_a_DB_V_planilla3.md` | Documento del usuario: cómo se llega de las tres salidas de FMA a `DB!V`, fórmula por fórmula | Fuente de todo lo que hace `Script/Subastas/Fma.py` y `calcular_fma_subastas()` |
 | `docs/subastas_2603_salida_entradas_sscc.xlsx` | La salida real de `entradas_sscc.py` para marzo 2026 (39.181 filas, las mismas columnas que devuelve la consulta a los Access) | Caso de prueba de `construir_subastas_desde_accdb()` sin necesidad de Access instalado |
 | `docs/Trazabilidad_subastas_AAMM_a_DB_planilla3.md` | Documento del usuario: cómo se llega de `subastas_AAMM.xlsx` a `DB!B:K` de la planilla 3, fórmula por fórmula | Fuente de las equivalencias de `Concepto`, `Control`, `Sub_Baj`, `Fecha`, `Hora_mes` |

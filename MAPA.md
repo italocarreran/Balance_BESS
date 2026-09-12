@@ -20,6 +20,7 @@ Script/
         __init__.py
         Indicadores_DCO.py     <- trae el FD del arbol del DCO
         Indices_FMA.py         <- arma las tres salidas de FMA
+        Desempeno_Horario.py   <- el FD por unidad y hora
     Subastas/
         __init__.py
         Ofertas_Adjudicadas.py <- trae y lee los Access de subastas
@@ -314,6 +315,40 @@ importable como cualquier módulo.
 
 ---
 
+## `Script/Fd/Desempeno_Horario.py`
+
+- **Qué hace:** saca del `SSCC_Desempeño_*` las **dos** cosas que dependían de
+  él: la columna **`Subastas!FD`** (antes `DB!Y`) y el **Vector de Participación
+  CSF** (antes `DB!AC`), que multiplica al FMA de las filas CSF y era lo único
+  que faltaba para cerrar `Subastas!FMA`.
+- **Consume:** las tres hojas horarias de `<CARPETA_BASE>/FD y FMA/SSCC_Desempeño_*`
+  — `CPF Horario` (B:J, el FD es `I`), `CSF Horario` (B:H, el FD es `H`) y
+  `CTF Horario` (B:I, el FD es `I`); encabezados en la fila 11, datos desde la 12
+  (mismo criterio que `nucleo.construir_fd`, que lee estas mismas hojas para la
+  hoja `FD` del consolidado).
+- **Produce:** un dict con tres diccionarios `(unidad, hora_mes) → FD` más
+  `participacion_csf` con `(unidad, hora_mes) → 0|1`.
+- **Expone:** `ErrorDesempeno`; `unidad_alternativa(unidad)`,
+  `calcular_hora_mes(...)`, `leer_hoja(ruta, control)`,
+  `construir_tablas_fd(ruta_sscc, dia_cambio_hora=None, registrar)`,
+  `buscar_fd(tablas, control, unidad, hora_mes)`,
+  `buscar_participacion_csf(tablas, unidad, hora_mes)`.
+- **Depende de:** solo `pandas`. **No importa `nucleo`.**
+- **Tres detalles que no son obvios** (salen del documento de trazabilidad de FD):
+  1. la `Hora` de estas hojas va de **0 a 23**, así que
+     `Hora_Mes = (día - 1) × 24 + hora + 1` — la misma escala 1..24 por día que
+     usa `Subastas`, que es lo que permite cruzarlas;
+  2. **CPF prueba una segunda nomenclatura**: si no encuentra la unidad,
+     intercambia el sufijo `TG` ↔ `TV` y busca de nuevo. CSF y CTF buscan una
+     sola vez (así es la fórmula original);
+  3. el **Indicador de Participación CSF** es 0 solo si la unidad figura como
+     `"No Participó"` **y** su alternativa TG/TV tampoco participó.
+- **El FD no se recalcula** a partir de las respuestas: se toma tal cual viene en
+  el archivo (§25 del documento — puede venir `Respuesta = "No Participó"` con
+  `FD = 1`, y así queda).
+
+---
+
 ## `Script/Subastas/Fma.py`
 
 - **Qué hace:** normaliza las tres salidas de FMA de `entradas_sscc.py`
@@ -421,9 +456,12 @@ importable como cualquier módulo.
   pendiente); `Propietario` sale de la columna nueva de
   `Centrales.xlsx`/`Resumen BESS` (`construir_mapa_propietario()`);
   `Energía SSCC` = `CANTIDAD PONDERADA MW`
-  (`COLUMNA_ENERGIA_SSCC_ACCDB`, a confirmar); `Ciclo`, `FD` y `FMA` quedan
-  vacías (`FD`/`FMA` venían pegadas en `DB!Y`/`DB!V` y **no existen en el
-  Access**: pendientes por pedido explícito del usuario).
+  (`COLUMNA_ENERGIA_SSCC_ACCDB`, a confirmar). `FD` (`calcular_fd_subastas()`) y
+  `FMA` (`calcular_fma_subastas()`) **no existen en el Access** —venían pegadas
+  en `DB!Y`/`DB!V`— y se calculan desde la carpeta `FD y FMA/`: el FD del
+  `SSCC_Desempeño_*` y el FMA de las tres salidas `fma_*`, con el Vector de
+  Participación CSF que también sale del `SSCC_Desempeño_*`. La única que
+  queda vacía es `Ciclo`, que se calcula después en `Calculo E Costos`.
 
   **CMg**, **FD**, **Subastas** (plan §23): replican únicamente las macros
   de *carga* (`Cargar_CMg_Desde_Archivo`, `Cargar_SSCC_Desempeno_En_FD`,
