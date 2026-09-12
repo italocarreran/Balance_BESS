@@ -19,6 +19,7 @@ Script/
     Subastas/
         __init__.py
         Ofertas_Adjudicadas.py <- trae y lee los Access de subastas
+        Fma.py                 <- normaliza las tres salidas de FMA
     Medidas/
         __init__.py
         comun.py               <- ErrorMedidas + helpers de texto
@@ -205,6 +206,42 @@ importable como cualquier módulo.
   se pone en 0 fuera de la banda 1, `CANTIDAD PONDERADA MW` vacía se completa
   con `CANTIDAD MW` y se eliminan duplicados: exactamente lo que hacía
   `entradas_sscc.py`, verificado con un caso sintético.
+
+---
+
+## `Script/Subastas/Fma.py`
+
+- **Qué hace:** normaliza las tres salidas de FMA de `entradas_sscc.py`
+  (`fma_cpf_<AAMM>.xlsx`, `fma_csf_<AAMM>.xlsx`, `fma_cft_<AAMM>.xlsx` o `.csv` —
+  "cft" está así en el script original, se aceptan las dos grafías) para que
+  `nucleo` pueda calcular `Subastas!FMA`. En la planilla 3 esas tres salidas se
+  pegaban en las hojas `FMA_CPF`/`FMA_CSF`/`FMA_CTF` y la columna `DB!V` las
+  buscaba con `BUSCARV`; acá se hace el mismo cálculo sin la planilla.
+- **Consume:** los tres archivos, desde `<CARPETA_BASE>/FD y FMA/` (el usuario le
+  cambió el nombre a esa carpeta, antes `SSCC_Desempeño/`, justamente para que
+  guarde las dos cosas). Se buscan por patrón (prefijo + el AAMM en el nombre),
+  no por nombre literal.
+- **Produce:** tres tablas normalizadas: CPF
+  (`Central, Año, Mes, Dia, Hora, FMA_CPF_mas, FMA_CPF_menos`), CSF
+  (`Año, Mes, Dia, Hora, FMA_CSF_mas_base, FMA_CSF_menos_base`) y CTF (dos
+  resúmenes, uno por `unidad` y otro por `Configuracion`).
+- **Expone:** `ErrorFma`; `buscar_archivos_fma(carpeta, aamm)`,
+  `tabla_cpf(ruta)`, `tabla_csf(ruta)`, `tablas_ctf(ruta)`.
+- **Depende de:** solo `pandas`. **No importa `nucleo`.**
+- **Tres detalles que no son obvios** (salen del documento de trazabilidad del
+  usuario, no de una suposición):
+  1. **CPF:** se suman las 7 columnas de horas y, **si la suma llega a 0,98, pasa
+     a ser 1**. `FMA CPF(+) = suma × Tiempo f<49.975` y
+     `FMA CPF(-) = suma × Tiempo f>50.025`. Esos dos tiempos **ya vienen como
+     fracción** (0,33 = 33 %): no se vuelven a dividir por 100.
+  2. **CSF:** la hora del archivo va de **0 a 23** y la de las subastas de **1 a
+     24**, así que se le suma 1. Y se usan las columnas **`-m`/`+m`**
+     (`FMA CSF-m [%]`, `FMA CSF+m [%]`) divididas por 100, **no** las que se
+     llaman igual sin la "m".
+  3. **CTF:** la duración de cada activación es `(tfin - t0)` en horas, se reparte
+     según el signo de `variacion`, y las activaciones **que caen en la misma hora
+     se suman**. Se arman dos resúmenes porque la fórmula original busca primero
+     por una nomenclatura y después por la otra.
 
 ---
 
