@@ -21,9 +21,10 @@ o sea, la carpeta del periodo es
 
     <RAIZ>\\<AAAA>\\<MM>. <Mes>\\Indicadores Publicar\\<version>
 
-y adentro de esa cuelga todo lo que el DCO publica de ese mes. El boton
-"Traer FD" busca ahi (recursivamente) los archivos de FD del periodo y
-los copia a <CARPETA_BASE>/FD y FMA/; si lo que encuentra es el .zip, lo
+y adentro de esa, el FD (los "factores de desempeño") cuelga de
+'04 Desempeño para transferencias' -ruta confirmada por el usuario-. El
+boton "Traer FD" busca ahi los archivos del periodo y los copia a
+<CARPETA_BASE>/FD y FMA/; si lo que encuentra es el .zip, lo
 descomprime ahi mismo, porque lo que la etapa FD lee despues es el Excel
 SSCC_Desempeño_* que viene adentro.
 
@@ -57,6 +58,16 @@ RAIZ_DCO_INDICADORES = (
 )
 
 CARPETA_PUBLICACION = "Indicadores Publicar"
+
+# Dentro de la carpeta de version, el FD (los "factores de desempeño")
+# cuelga de esta subcarpeta -ruta confirmada por el usuario-:
+#
+#   <version>/04 Desempeño para transferencias/
+#
+# Se busca ahi primero y, si no aparece, se cae a una busqueda
+# recursiva desde la carpeta de version: el DCO cambia de anidamiento
+# cada tanto y no vale la pena que eso rompa el boton.
+SUBCARPETAS_FD = ("04 Desempeño para transferencias",)
 
 # Los dos nombres con los que puede aparecer el FD: el zip que publica
 # el DCO y el Excel que viene adentro (que es el que lee la etapa FD).
@@ -140,6 +151,22 @@ def _subcarpeta(padre, *alternativas):
         return None
 
     return None
+
+
+def bajar_por_subcarpetas(carpeta, subcarpetas):
+    """
+    Baja por los nombres dados uno tras otro, comparando por nombre
+    normalizado. Devuelve None si en algun escalon no esta.
+    """
+
+    actual = Path(carpeta)
+
+    for nombre in subcarpetas:
+        actual = _subcarpeta(actual, nombre)
+        if actual is None:
+            return None
+
+    return actual
 
 
 def carpeta_del_periodo(aamm, raiz=None):
@@ -327,24 +354,73 @@ def _es_archivo_fd(ruta, anio):
 
 def buscar_archivos_fd(carpeta_version, anio):
     """
-    Busca (recursivamente, porque el DCO cambia de subcarpeta de un mes
-    a otro) los archivos de FD del periodo dentro de la carpeta de
-    version. Devuelve la lista ordenada por nombre.
+    Los archivos de FD del periodo dentro de una carpeta de version:
+    primero en '04 Desempeño para transferencias' (la ruta que dio el
+    usuario) y, si ahi no hay, buscando recursivamente desde la carpeta
+    de version. Devuelve la lista ordenada por nombre.
     """
 
     carpeta_version = Path(carpeta_version)
+
+    carpeta_fd = bajar_por_subcarpetas(carpeta_version, SUBCARPETAS_FD)
+
+    if carpeta_fd is not None:
+        encontrados = _archivos_fd_en(carpeta_fd, anio, recursivo=True)
+        if encontrados:
+            return encontrados
+
+    return _archivos_fd_en(carpeta_version, anio, recursivo=True)
+
+
+def _archivos_fd_en(carpeta, anio, recursivo=False):
+    """Los archivos de FD del año que haya en una carpeta."""
+
+    carpeta = Path(carpeta)
     encontrados = []
 
     try:
-        for ruta in carpeta_version.rglob("*"):
+        rutas = carpeta.rglob("*") if recursivo else carpeta.iterdir()
+        for ruta in rutas:
             if ruta.is_file() and _es_archivo_fd(ruta, anio):
                 encontrados.append(ruta)
     except OSError as error:
-        raise ErrorFd(
-            f"No se pudo recorrer {carpeta_version}: {error}"
-        ) from error
+        raise ErrorFd(f"No se pudo recorrer {carpeta}: {error}") from error
 
     return sorted(encontrados, key=lambda r: r.name)
+
+
+def _contenido_de_la_carpeta_fd(carpeta_publicacion):
+    """
+    Que hay en las carpetas '04 Desempeño para transferencias' de cada
+    version. Se usa SOLO para el mensaje de error: si el archivo no se
+    encontro por su nombre, lo mas util es mostrar que si hay ahi, para
+    poder corregir el patron de una.
+    """
+
+    lineas = []
+
+    for carpeta_version in reversed(versiones_publicadas(carpeta_publicacion)):
+
+        carpeta_fd = bajar_por_subcarpetas(carpeta_version, SUBCARPETAS_FD)
+
+        if carpeta_fd is None:
+            lineas.append(
+                f"  {carpeta_version.name}: no tiene "
+                f"'{SUBCARPETAS_FD[0]}'"
+            )
+            continue
+
+        try:
+            nombres = sorted(r.name for r in carpeta_fd.iterdir() if r.is_file())
+        except OSError:
+            nombres = []
+
+        lineas.append(
+            f"  {carpeta_version.name}: "
+            + (", ".join(nombres) if nombres else "(vacia)")
+        )
+
+    return lineas
 
 
 def _extraer_zip(ruta_zip, destino, registrar=print):
@@ -425,11 +501,15 @@ def traer_fd(carpeta_destino, aamm, version=None, raiz=None, registrar=print):
     )
 
     if not archivos:
+        detalle = _contenido_de_la_carpeta_fd(carpeta_publicacion)
+
         raise ErrorFd(
             f"No se encontro ningun archivo de FD "
             f"({' / '.join(p + '*' for p in PREFIJOS_FD)}) del año {anio} "
             f"en {carpeta_publicacion}.\n\n"
-            f"Version(es) revisada(s): {', '.join(revisadas)}"
+            f"Version(es) revisada(s): {', '.join(revisadas)}\n\n"
+            f"Lo que hay en '{SUBCARPETAS_FD[0]}':\n"
+            + "\n".join(detalle)
         )
 
     copiados, extraidos = [], []

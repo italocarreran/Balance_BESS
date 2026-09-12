@@ -226,9 +226,8 @@ importable como cualquier módulo.
   la forma completa la muestra el comentario de la rutina de FMA CPF de ese
   mismo script.
 - **Consume:**
-  `\\nas-cen1\DCO\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\…`
-  (`RAIZ_DCO_INDICADORES` — la tercera y última ruta del programa que apunta
-  fuera de la carpeta base del caso).
+  `\\nas-cen1\DCO\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\04 Desempeño para transferencias`
+  (`RAIZ_DCO_INDICADORES` + `SUBCARPETAS_FD` — ruta confirmada por el usuario).
 - **Produce:** la copia del FD dentro de `<CARPETA_BASE>/FD y FMA/`, y los Excel
   que venían dentro del `.zip`, sueltos en esa misma carpeta (que es donde
   `buscar_archivo_sscc_desempeno()` los busca después).

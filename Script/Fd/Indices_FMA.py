@@ -167,20 +167,9 @@ def nombre_salida(tipo, aamm):
 # CPF
 # ============================================================
 
-def bajar_por_subcarpetas(carpeta, subcarpetas):
-    """
-    Baja por los nombres dados uno tras otro, comparando por nombre
-    normalizado. Devuelve None si en algun escalon no esta.
-    """
-
-    actual = Path(carpeta)
-
-    for nombre in subcarpetas:
-        actual = dco._subcarpeta(actual, nombre)
-        if actual is None:
-            return None
-
-    return actual
+# Vive en Indicadores_DCO (lo usan los dos modulos); se reexporta aca
+# para no cambiar los llamados de este archivo.
+bajar_por_subcarpetas = dco.bajar_por_subcarpetas
 
 
 def buscar_carpeta_respuesta_cpf(carpeta_version):

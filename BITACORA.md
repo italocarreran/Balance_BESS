@@ -2658,3 +2658,31 @@ nombre real, uno de abril, uno que **contiene** la fecha pero no empieza con `cs
 (`reporte_20260303.xlsx`) y uno con sufijo despues de la fecha (`csf_20260304_v2.xlsx`). Se copian
 los tres de marzo que empiezan con `csf_` (el del sufijo incluido), no se copia el de abril ni el
 que solo contenia la fecha, y el `fma_csf` resultante tiene las 72 filas de los tres dias.
+
+---
+
+## 2026-09-12 (8) — La subcarpeta del FD dentro del arbol del DCO
+
+El usuario paso la ruta que faltaba: los **factores de desempeño** (el FD) estan en
+
+    <version>\04 Desempeño para transferencias
+
+Hasta ahora el boton "Traer FD" los buscaba **recursivamente** desde la carpeta de version, que
+funcionaba pero recorria todo el arbol publicado del mes -que tiene adentro los reportes diarios
+de CPF, o sea cientos de carpetas- para encontrar un archivo que esta en una sola. Ahora se busca
+primero en la subcarpeta nombrada (`SUBCARPETAS_FD`) y la busqueda recursiva queda solo como
+respaldo, mismo criterio que ya se habia usado para el CPF y el CTF.
+
+Se agrego algo util para el unico caso que puede fallar: si en ninguna version aparece un archivo
+con los nombres conocidos (`SSCC_Disponibilidad_CSF*` / `SSCC_Desempeño*`), el error **lista lo que
+si hay** en esa carpeta, version por version. Si algun mes le cambian el nombre al archivo, se ve
+de una y se corrige el patron sin tener que ir a mirar el servidor.
+
+`bajar_por_subcarpetas()` se mudo de `Indices_FMA` a `Indicadores_DCO` (lo usan los dos modulos, y
+el segundo es el de mas abajo); en `Indices_FMA` quedo reexportado para no tocar sus llamados.
+
+**Verificacion:** un arbol con `V2` que tiene la carpeta `04 Desempeño para transferencias` pero
+**vacia** y `V1` que si tiene el zip. Baja a V1 (la version mas alta que TIENE el archivo, como se
+corrigio en la entrada anterior), lo copia, lo descomprime y el Excel queda donde la etapa FD lo
+busca. Y renombrando el archivo a algo que no matchea, el error muestra
+`V1: Factores_desempeno_agosto.zip`, que es exactamente el dato que haria falta para corregirlo.
