@@ -143,20 +143,20 @@ estado, no un historial.
   `fma_cft_*`) que ahora se guardan en `FD y FMA/`, siguiendo el
   documento de trazabilidad del usuario. Falta validarlo contra un
   `DB!V` real.
-- **`FD` de `Subastas` (`P`) sigue pendiente.** Venía pegada en `DB!Y`
-  de la planilla 3 y **no existe en el Access**. Sospecha a confirmar:
-  podría salir homologando central+hora contra la hoja `FD` del propio
-  consolidado (la que ya se arma desde `SSCC_Desempeño_*`), igual que
-  `Calculo E Costos!AM:AR`. Es el próximo documento de trazabilidad que
-  el usuario va a preparar.
-- **Vector de Participación CSF**: el FMA de las filas `CSF(+)`/`CSF(-)`
-  es `FMA_base × Vector de Participación CSF` (`DB!AC`), y ese vector
-  vive en la hoja `CSF_FD` de la planilla 3 — parte de la trazabilidad
-  de FD, todavía sin documentar. Hasta entonces se usa **1**
-  (`VECTOR_PARTICIPACION_CSF_PENDIENTE`), o sea el FMA de CSF queda en
-  su valor base. **Es el único supuesto que hoy puede dar un número
-  distinto del de la planilla sin avisar**, así que conviene resolverlo
-  junto con FD.
+- ~~`FD` de `Subastas` (`P`) pendiente~~ — **resuelto**: sale del
+  `SSCC_Desempeño_*`, hoja por familia, cruzando Control + Unidad +
+  Hora_mes (`calcular_fd_subastas()`). Falta validarlo contra un `DB!Y`
+  real.
+- ~~Vector de Participación CSF~~ — **resuelto**: es el "Indicador de
+  participación" que se deriva de la columna `Respuesta CSF` de la hoja
+  `CSF Horario` del mismo archivo. Ya multiplica al FMA de las filas
+  CSF. Falta validarlo contra un `DB!AC` real.
+- **Agregar/confirmar el bloque `FD` de la hoja `Diccionario`**:
+  `Configuración` → unidad como la nombra el `SSCC_Desempeño_*`. Ese
+  bloque ya existía (es el que usa `Calculo E Costos!AM:AR`) y ahora lo
+  usa también `Subastas!FD`; hay que revisar que cubra todas las
+  centrales que aparecen en subastas, porque las que falten se buscan
+  con el nombre tal cual y quedan avisadas en el log.
 - **Agregar el bloque `FMA CPF` a la hoja `Diccionario` de
   `Centrales.xlsx`**: dos columnas, `Configuración` → central como la
   nombra `fma_cpf` (ej. `SAE-DEL-DESIERTO` → `BESS DEL DESIERTO`). Es
@@ -2455,3 +2455,296 @@ tabla y un concepto raro (→ 0): las 10 dieron el valor esperado. Y un caso end
 `Consolidado_entradas.xlsx` con la carpeta nueva, verifica el orden por `Hora_mes` y que el
 programa siga aceptando la carpeta con el nombre viejo. **Falta compararlo contra un `DB!V` real**
 (el documento propone justamente esa validación, §24).
+
+---
+
+## 2026-09-12 (3) — Boton "Traer FD"
+
+El usuario pidio un boton que baje el FD, apuntando a que en `entradas_sscc.py` y su
+`archivo_de_configuracion.yaml` esta como se llega a el.
+
+**Precision importante:** el script **no copia** el FD de ningun lado. Lo que hay ahi son dos
+piezas sueltas: el nombre del archivo
+(`SSCC_Disponibilidad_CSF_<Mes>_20<AA>_<version_fd>.zip`, con `version_fd` = V1 para el Preliminar
+y V2 para el Definitivo) y la raiz `ruta_fma_dco`. La ruta completa aparece en el comentario de la
+rutina de FMA CPF:
+
+    ...\02 Cálculo indicadores\2021\12. Diciembre\Indicadores Publicar\V1\01 Respuesta\...
+
+de donde sale que la carpeta del periodo es
+`<RAIZ>\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<version>`. Eso es lo que se armo.
+
+**`Script/Fd/Indicadores_DCO.py`** (paquete nuevo, mismo patron que los otros: no importa
+`nucleo`, solo biblioteca estandar). `nucleo.traer_fd()` lo llama desde el boton **"Traer FD"**,
+que cuelga de la fila de la carpeta `FD y FMA/`. Copia lo que encuentra a esa carpeta y, si lo
+publicado es el `.zip`, lo descomprime ahi mismo: lo que la etapa FD lee despues es el Excel
+`SSCC_Desempeño_*` que viene adentro, y asi queda justo donde `buscar_archivo_sscc_desempeno()` lo
+busca.
+
+**Cuatro decisiones que hubo que tomar** (ninguna venia dada, todas estan en el codigo comentadas
+y son de una linea si se quiere cambiarlas):
+
+- **Que version bajar.** La ventana no tiene selector Pre/Def, asi que se toma la **mas alta
+  publicada** (V2 le gana a V1) y se dice en el log cual uso. La funcion acepta `version` por si
+  despues se quiere elegir a mano.
+- **Las carpetas de año y mes se buscan comparando por nombre normalizado**, no con una ruta
+  literal: las escribe una persona todos los meses, y `"03. Marzo"` y `"3. Marzo"` tienen que ser
+  la misma (se probo que lo son).
+- **La busqueda del archivo es recursiva** dentro de la carpeta de version, porque el DCO cambia
+  de subcarpeta de un mes a otro. Se filtra por prefijo **y** por el año en el nombre, para no
+  llevarse un archivo de otro periodo que haya quedado suelto ahi (se probo con uno de febrero de
+  2025 puesto a proposito en la misma carpeta: no se copia).
+- **Al descomprimir se sacan solo los Excel**, sueltos en la carpeta (sin recrear el arbol del
+  zip), y se ignoran las entradas con ruta absoluta o con `..`: un zip no tiene por que poder
+  escribir fuera de la carpeta a la que se lo descomprime.
+
+**Verificacion:** un arbol del DCO simulado con las dos versiones publicadas, un zip con un Excel
+y un `.txt` adentro, y ruido de otro periodo en la misma carpeta. Se comprobo la resolucion de la
+ruta, que elija V2, que se pueda forzar V1, que copie y descomprima, que el `.txt` NO salga, que
+el archivo de otro mes NO se copie, que lo que queda lo encuentre despues
+`buscar_archivo_sscc_desempeno()`, y los mensajes de error de los dos casos que de verdad van a
+pasar (mes todavia sin publicar y servidor sin conectar). **Falta correrlo una vez contra el DCO
+real**, que es donde se va a ver si el FD esta en esa carpeta de version o mas adentro con otro
+nombre.
+
+---
+
+## 2026-09-12 (4) — Boton "Traer FMA"
+
+Mismo pedido que el del FD, ahora para el FMA. Y **la misma precision, mas fuerte todavia**: en
+`entradas_sscc.py` el FMA no se copia de ningun lado, se **construye**, y cada una de las tres sale
+de un origen distinto:
+
+| | De donde | Que se le hace |
+|---|---|---|
+| CPF | reportes diarios del DCO, en el MISMO arbol del que sale el FD (`<version>/01 Respuesta/01 Indices CPF/20AA.MM_Respuesta_CPF/Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx`) | se lee cada hoja menos "Resumen" (una por central), se le pegan Año/Mes/Dia/Hora/Central y se agrupan las columnas de horas |
+| CSF | los `csf_20AAMMDD.xlsx` diarios (los del `agc_face`) | concatenacion, sin transformacion |
+| CTF | el `CTF_20AAMM.csv` | se le saca la zona horaria a `t0`/`tfin` |
+
+**`Script/Fd/Indices_FMA.py`** (modulo nuevo, al lado de `Indicadores_DCO.py` porque comparten la
+raiz de red y el destino). `nucleo.traer_fma()` lo llama desde el boton **"Traer FMA"**. Escribe
+las tres con los nombres exactos de `entradas_sscc.py` (`fma_cpf_AAMM.xlsx`, `fma_csf_AAMM.xlsx`,
+`fma_cft_AAMM.xlsx` -- "cft" incluido) en `FD y FMA/`, que son justo los que busca
+`Script/Subastas/Fma.py` para armar `Subastas!FMA`. **Las dos mitades quedaron probadas juntas**:
+lo que escribe este modulo lo lee el otro sin tocar nada, y el FMA CPF de una fila dio el 0,3201
+esperado a mano.
+
+**Los botones en la ventana.** Como cada fila del arbol lleva un solo boton, quedaron asi: "Traer
+FD" en la fila del `SSCC_Desempeño_*` (que es lo que trae) y "Traer FMA" en la fila de
+`fma_cpf_<AAMM>.xlsx`, con las otras dos filas de FMA diciendo en su detalle que las arma ese
+mismo boton. Un boton por cosa que produce, sin repetir el mismo tres veces.
+
+**Un error que aparecio en la prueba y vale la pena dejar escrito:** al sacarle la zona horaria al
+CTF, la primera version uso `pd.to_datetime(..., utc=True).dt.tz_localize(None)`, que **convierte**
+a UTC: `04:00-03:00` terminaba en las 07:00 y eso corria TODAS las horas del CTF (se vio como
+horas 8 y 10 donde tenian que ser 5 y 7). Lo correcto es lo que hace el script original -dejar la
+hora tal como esta escrita y solo sacar el ofset-, que es lo que ahora hace
+`_sacar_zona_horaria()`, contemplando ademas el caso de ofsets mezclados en la misma columna (el
+dia del cambio de hora, donde pandas ya no devuelve una columna tz-aware).
+
+De paso, `buscar_archivos_fma()` ahora prefiere el `.xlsx` sobre el `.csv` cuando estan los dos
+(el CTF se escribe en los dos formatos): antes ganaba el mas reciente, que es no determinista.
+
+**Otras decisiones:** un dia sin reporte se saltea con aviso en vez de cortar todo (el original
+revienta con la excepcion de pandas); si falta el origen de una de las tres, las otras dos se
+arman igual y se avisa cual falto; y no se uso `chardet` para la codificacion del CSV de CTF -se
+prueban en orden las que de verdad aparecen-, para no sumar una dependencia por eso.
+
+**Verificacion:** un arbol del DCO simulado con reportes diarios de dos dias, cada uno con la hoja
+"Resumen" (que se saltea) y dos centrales, con el encabezado en la fila 5 y las 29 columnas
+reales; mas los insumos de CSF y CTF en la carpeta del caso. Se comprobo que salen las tres, que
+"Resumen" no queda como central, que las horas van de 1 a 24, que los `"-"` quedan en 0, que el
+CTF conserva la hora local, y que `cargar_tablas_fma()` lee las tres salidas y da el numero
+esperado. **Falta correrlo contra el DCO real**, que es donde se va a ver si los reportes estan
+donde dice el script y si el reporte sigue teniendo 29 columnas.
+
+---
+
+## 2026-09-12 (5) — Las rutas reales de los FMA y un boton "Generar" por cada uno
+
+El usuario paso las tres rutas de entrada que faltaban y pidio que **cada FMA tenga su propio
+boton "Generar"** en vez del unico "Traer FMA" de la entrada anterior.
+
+**Las tres rutas** (confirmadas por el usuario, ya no inferidas):
+
+| | Origen |
+|---|---|
+| CPF | `...\Indicadores Publicar\<V1/V2>\01 Respuesta\01 Indices CPF\20AA.MM_Respuesta_CPF\Reporte diario D-M-20AA\tabla_resumen_D_M_20AA.xlsx` (confirma lo que ya estaba) |
+| CSF | `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10` |
+| CTF | `...\Indicadores Publicar\<V1/V2>\01 Respuesta\06 Indices CTF\CTF_<AAAA><MM>.csv` |
+
+La del CPF confirma la que ya se habia deducido del comentario del script. Las otras dos son
+nuevas: el **CTF esta en el mismo arbol del DCO pero en otra rama** (`06 Indices CTF` en vez de
+`01 Indices CPF`), y el **CSF no esta en el DCO en absoluto** -vive en otro servidor, en una
+carpeta donde estan TODOS los meses juntos-.
+
+**Lo que cambio en el codigo:**
+
+- `SUBCARPETAS_CPF` y `SUBCARPETAS_CTF`: ahora se baja por los nombres reales en vez de buscar a
+  ciegas. Se mantiene la busqueda recursiva **como respaldo** por si el DCO cambia el anidamiento:
+  primero la ruta que dio el usuario, y si ahi no esta, se busca desde la carpeta de version.
+- `traer_agc_face()`: copia a `FD y FMA/agcface/` **solo los archivos del mes** (en la carpeta de
+  red estan todos), salteando los que ya estan al dia. El nombre de la subcarpeta es `agcface`,
+  sin guion bajo, tal cual lo escribio el usuario -ojo, el script original usaba `agc_face`-.
+- El nombre de los reportes del AGC en esa carpeta de red no lo vimos nunca, asi que se prueban
+  dos criterios en orden: primero `csf_<AAAAMMDD>` (el del script original) y, si en todo el mes
+  no aparece ninguno, cualquier Excel cuyo nombre **contenga** `<AAAAMMDD>`. El log dice con cual
+  de los dos los encontro. **Es lo unico de esta entrada que puede necesitar un ajuste al correrlo
+  contra la carpeta real.**
+- `traer_fma()` paso a ser **`generar_fma(..., tipos=...)`**, que arma solo las pedidas. Los tres
+  botones "Generar" del arbol mandan un tipo cada uno. Consecuencia util: **el CSF no necesita que
+  el DCO tenga el mes publicado** (su origen es otro servidor), asi que su boton anda igual aunque
+  todavia no haya indicadores; se probo explicitamente apuntando la raiz del DCO a una carpeta
+  inexistente.
+- El CTF ademas se **copia a la carpeta del caso** antes de usarlo, para que quede registrado con
+  que archivo se armo la salida (igual que se hace con los Access de subastas y con el FD).
+
+**Verificacion:** un arbol del DCO simulado con las **dos ramas reales** (`01 Indices CPF` y
+`06 Indices CTF`) y una carpeta del SCADA con archivos de junio, julio y agosto mezclados. Se
+genero **de a un tipo por vez**, como lo van a hacer los botones, y se comprobo: que el CPF
+encuentre los reportes por la ruta nombrada, que a `agcface/` lleguen **solo los de julio** (no
+junio ni agosto), que el CTF salga de `06 Indices CTF` conservando la hora local, que las tres
+salidas las lea despues `cargar_tablas_fma()` dando el 0,3201 esperado, y que el CSF funcione con
+el DCO caido. **Falta correrlo contra las carpetas reales**, sobre todo por el nombre de los
+archivos del AGC.
+
+---
+
+## 2026-09-12 (6) — La version del DCO es la mas alta QUE TENGA EL ARCHIVO
+
+Correccion del usuario sobre lo de la entrada anterior: no alcanza con quedarse con la carpeta de
+version mas alta, porque **puede existir la carpeta y no estar adentro el documento que se busca**
+(recien creada, a medio subir, o esa version no incluye esa entrega). Tiene que ser la mas alta
+**que tenga disponible el archivo**.
+
+`Indicadores_DCO.buscar_en_versiones(carpeta_publicacion, buscar, ...)` recorre las versiones **de
+mayor a menor** y devuelve la primera en la que la funcion `buscar` encuentre algo, junto con la
+lista de las que reviso (para poder decirlo en el error). Los tres usos pasan por ahi:
+
+- **FD**: busca los `SSCC_Disponibilidad_CSF*` / `SSCC_Desempeño*` del año.
+- **CPF** (`buscar_reportes_cpf`): no le alcanza con que exista la carpeta `*Respuesta_CPF*` —
+  exige que tenga adentro **al menos un `tabla_resumen` del periodo**. Ese "al menos uno" es
+  justo el caso que planteo el usuario.
+- **CTF** (`buscar_ctf`): busca el `CTF_<AAAA><MM>.csv` bajo `01 Respuesta/06 Indices CTF`.
+
+Consecuencia de diseño: **cada tipo elige su version por separado**. Puede pasar perfectamente que
+el CPF salga de V1 y el CTF de V2, asi que `generar_fma()` ya no devuelve una carpeta de version
+sino un **dict por tipo**, y el log de cierre dice de donde salio cada uno. El log tambien avisa
+cuando bajo de version ("se usa V1: en V3, V2 no estaba el archivo"), que es informacion que el
+usuario necesita ver: si esperaba la definitiva y salio la preliminar, tiene que enterarse.
+
+**Verificacion:** un arbol del DCO con tres versiones armado a proposito para esto — `V3` existe
+pero esta **vacia**, `V2` tiene la carpeta `Respuesta_CPF` **sin reportes adentro** y si tiene el
+CTF, y `V1` tiene los reportes de CPF y el FD. Resultado: el FD baja a V1, el CPF baja a V1
+(salteando la carpeta vacia de V2, que es el caso fino), el CTF se queda en V2, y forzar una
+version que no lo tiene da un error que nombra las versiones revisadas.
+
+---
+
+## 2026-09-12 (7) — El nombre de los reportes del AGC, confirmado
+
+El usuario confirmo el formato: **`csf_20260301`**, o sea `csf_<AAAA><MM><DD>` — exactamente el
+que espera el script original.
+
+Con eso **se saco el segundo criterio** que se habia dejado en la entrada anterior ("cualquier
+Excel cuyo nombre contenga la fecha"), que era una suposicion mientras no supieramos el nombre.
+Queda solo el criterio confirmado, que ademas es mas seguro: un archivo que apenas contenga la
+fecha en el medio del nombre ya no se cuela. Tambien se saco `PLANTILLA_FECHA_DIARIA`, que solo
+existia para ese respaldo, y el mensaje de error ahora dice que nombre se esta buscando
+(`'csf_20260301' y siguientes`), que es lo util si algun mes no aparece nada.
+
+**Verificacion:** una carpeta del SCADA con cinco archivos a proposito — dos de marzo con el
+nombre real, uno de abril, uno que **contiene** la fecha pero no empieza con `csf_`
+(`reporte_20260303.xlsx`) y uno con sufijo despues de la fecha (`csf_20260304_v2.xlsx`). Se copian
+los tres de marzo que empiezan con `csf_` (el del sufijo incluido), no se copia el de abril ni el
+que solo contenia la fecha, y el `fma_csf` resultante tiene las 72 filas de los tres dias.
+
+---
+
+## 2026-09-12 (8) — La subcarpeta del FD dentro del arbol del DCO
+
+El usuario paso la ruta que faltaba: los **factores de desempeño** (el FD) estan en
+
+    <version>\04 Desempeño para transferencias
+
+Hasta ahora el boton "Traer FD" los buscaba **recursivamente** desde la carpeta de version, que
+funcionaba pero recorria todo el arbol publicado del mes -que tiene adentro los reportes diarios
+de CPF, o sea cientos de carpetas- para encontrar un archivo que esta en una sola. Ahora se busca
+primero en la subcarpeta nombrada (`SUBCARPETAS_FD`) y la busqueda recursiva queda solo como
+respaldo, mismo criterio que ya se habia usado para el CPF y el CTF.
+
+Se agrego algo util para el unico caso que puede fallar: si en ninguna version aparece un archivo
+con los nombres conocidos (`SSCC_Disponibilidad_CSF*` / `SSCC_Desempeño*`), el error **lista lo que
+si hay** en esa carpeta, version por version. Si algun mes le cambian el nombre al archivo, se ve
+de una y se corrige el patron sin tener que ir a mirar el servidor.
+
+`bajar_por_subcarpetas()` se mudo de `Indices_FMA` a `Indicadores_DCO` (lo usan los dos modulos, y
+el segundo es el de mas abajo); en `Indices_FMA` quedo reexportado para no tocar sus llamados.
+
+**Verificacion:** un arbol con `V2` que tiene la carpeta `04 Desempeño para transferencias` pero
+**vacia** y `V1` que si tiene el zip. Baja a V1 (la version mas alta que TIENE el archivo, como se
+corrigio en la entrada anterior), lo copia, lo descomprime y el Excel queda donde la etapa FD lo
+busca. Y renombrando el archivo a algo que no matchea, el error muestra
+`V1: Factores_desempeno_agosto.zip`, que es exactamente el dato que haria falta para corregirlo.
+
+---
+
+## 2026-09-12 (9) — FD y Vector de Participación CSF: se cierran los dos pendientes
+
+Con el documento de trazabilidad de FD (`docs/Trazabilidad_FD_a_DB_Y_planilla3.md`) se cerraron
+**los dos** pendientes que quedaban de la hoja `Subastas`, porque los dos salen del mismo archivo,
+el `SSCC_Desempeño_*` que ya trae el boton "Traer FD":
+
+- **`Subastas!FD`** (columna `P`, antes `DB!Y`), y
+- el **Vector de Participación CSF** (antes `DB!AC`), que multiplica al FMA de las filas CSF y era
+  el unico supuesto que podia dar un numero distinto del de la planilla sin avisar.
+
+**`Script/Fd/Desempeno_Horario.py`** (modulo nuevo) normaliza las tres hojas horarias:
+
+| Hoja | Columnas | El FD es |
+|---|---|---|
+| `CPF Horario` | B:J | `I` (Fd_CPF) |
+| `CSF Horario` | B:H | `H` (Fd_CSF) |
+| `CTF Horario` | B:I | `I` (Fd_CTF) |
+
+Encabezados en la fila 11 y datos desde la 12, que es **el mismo criterio que ya usaba
+`nucleo.construir_fd()`** para armar la hoja `FD` del consolidado desde las dos primeras (la
+tercera, `CTF Horario`, no la leia nadie hasta ahora). Se dejaron las dos lecturas separadas
+a proposito: arman cosas distintas y la de `construir_fd` ademas filtra por BESS/SAE.
+
+**Tres detalles del documento que no son deducibles mirando el archivo:**
+
+- la `Hora` de estas hojas va de **0 a 23**, asi que `Hora_Mes = (dia-1)*24 + hora + 1`. Ese "+1"
+  es lo que la deja en la misma escala 1..24 por dia que usa `Subastas` — sin el, el cruce entero
+  se corre una hora;
+- **CPF prueba una segunda nomenclatura**: si no encuentra la unidad, intercambia el sufijo
+  `TG` <-> `TV` y busca de nuevo. CSF y CTF buscan una sola vez (asi es la formula original, y asi
+  quedo: se probo que CSF NO cae a la alternativa);
+- el **Indicador de Participación CSF** es 0 solo si la unidad figura como `"No Participó"` **y**
+  su alternativa TG/TV tampoco participo. No alcanza con mirar la propia fila.
+
+Y una que importa aunque parezca menor (§25 del documento): **el FD no se recalcula** a partir de
+las respuestas, se toma tal cual viene. Puede venir `Respuesta = "No Participó"` con `FD = 1`, y
+asi tiene que quedar.
+
+**La nomenclatura** (`Configuración` -> unidad del archivo de desempeño) NO necesito un bloque
+nuevo en el `Diccionario`: es el bloque **`FD`** que esa hoja ya tenia, el mismo que usa
+`Calculo E Costos!AM:AR`. Se reusa `construir_dic_bloque_diccionario()` con respaldo a
+`construir_dic_mapeo_diccionario()` (columnas A:B).
+
+**Una diferencia deliberada con la planilla:** cuando la busqueda no encuentra nada, la formula
+original escribe el texto `"ERRORCPF"` / `"ERRORCSF"` / `"ERRORCTF"` en la celda. Aca la columna
+queda **vacia** y el log dice cuantas filas fueron, por familia: meter texto en una columna
+numerica rompe cualquier cuenta posterior. Para el Vector de Participación, si la fila no aparece
+se usa **1** (`VECTOR_PARTICIPACION_CSF_SIN_DATO`) y se avisa: la formula original ahi daria #N/A,
+y dejar el FMA en su valor base es mas prudente que ponerlo en 0, que seria no pagar.
+
+**Verificación:** un `SSCC_Desempeño_*` sintetico con las tres hojas en su layout real (columna A
+vacia, encabezados en la fila 11), una unidad que solo existe como `TV` para probar el salto
+`TG`<->`TV`, y una central con `"No Participó"`. Se comprobo: las tres tablas toman la columna de
+FD que corresponde, `Hora_Mes` da 1 para el dia 1 hora 0 y 25 para el dia 2 hora 0, el CPF
+encuentra por la alternativa y el CSF **no**, la columna FD sale por familia y la hora inexistente
+queda vacia, y el FMA de la central que no participo queda en 0 mientras la que si participo
+conserva su valor base. Ademas, un caso end-to-end que escribe `Consolidado_entradas.xlsx` con las
+seis filas completas: `FD` con dato en todas y `FMA` = 0,3201 / 0,5 / 0 segun corresponda.
+**Falta compararlo contra un `DB!Y` y un `DB!AC` reales** (§30 del documento).

@@ -16,6 +16,11 @@ Script/
     Cmg/
         __init__.py
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
+    Fd/
+        __init__.py
+        Indicadores_DCO.py     <- trae el FD del arbol del DCO
+        Indices_FMA.py         <- arma las tres salidas de FMA
+        Desempeno_Horario.py   <- el FD por unidad y hora
     Subastas/
         __init__.py
         Ofertas_Adjudicadas.py <- trae y lee los Access de subastas
@@ -64,6 +69,10 @@ importable como cualquier módulo.
   | `Medidas/Medidas_SAE.xlsx` | **Actualizar** | `nucleo.generar_medidas_sae` — corre los cuatro pasos de Medidas de un viaje |
   | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
   | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
+  | `FD y FMA/SSCC_Desempeño_*` | **Traer FD** | `nucleo.traer_fd` — baja el FD del período del árbol de indicadores del DCO y descomprime el zip |
+  | `FD y FMA/fma_cpf_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"cpf"}` — desde los reportes diarios del DCO |
+  | `FD y FMA/fma_csf_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"csf"}` — trae los reportes del AGC a `agcface/` y los concatena |
+  | `FD y FMA/fma_cft_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"ctf"}` — desde el `CTF_<AAAA><MM>.csv` del DCO |
   | `Subastas/DB subastas/` | **Traer subastas** | `nucleo.traer_subastas` — copia los `OfertasSSCCAdj*.accdb` del período desde la unidad de red |
   | `Consolidado_entradas.xlsx` | **Actualizar todo** | `generar_consolidado` con todas las secciones |
   | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
@@ -209,6 +218,137 @@ importable como cualquier módulo.
 
 ---
 
+## `Script/Fd/Indicadores_DCO.py`
+
+- **Qué hace:** sabe llegar a la carpeta donde el DCO publica los indicadores del
+  mes y traer de ahí el FD (botón **"Traer FD"**). Las dos piezas de la ruta
+  salen del `archivo_de_configuracion.yaml` de `entradas_sscc.py`
+  (`ruta_fma_dco` y el nombre `SSCC_Disponibilidad_CSF_<Mes>_<AAAA>_<V>.zip`), y
+  la forma completa la muestra el comentario de la rutina de FMA CPF de ese
+  mismo script.
+- **Consume:**
+  `\\nas-cen1\DCO\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\04 Desempeño para transferencias`
+  (`RAIZ_DCO_INDICADORES` + `SUBCARPETAS_FD` — ruta confirmada por el usuario).
+- **Produce:** la copia del FD dentro de `<CARPETA_BASE>/FD y FMA/`, y los Excel
+  que venían dentro del `.zip`, sueltos en esa misma carpeta (que es donde
+  `buscar_archivo_sscc_desempeno()` los busca después).
+- **Expone:** `ErrorFd`; `carpeta_del_periodo(aamm, raiz=None)`,
+  `versiones_publicadas(...)`, `elegir_version(..., version=None)`,
+  `buscar_en_versiones(carpeta_publicacion, buscar, version=None, registrar)` →
+  `(carpeta_version, resultado, revisadas)` — recorre las versiones de mayor a
+  menor hasta que `buscar` encuentre algo,
+  `buscar_archivos_fd(carpeta_version, anio)`,
+  `traer_fd(carpeta_destino, aamm, version=None, raiz=None, registrar=print)` →
+  `(copiados, extraidos, carpeta_version)`.
+- **Depende de:** solo la biblioteca estándar. **No importa `nucleo`.**
+- **Decisiones que se tomaron acá** (no venían dadas):
+  - **qué versión usar**: la ventana no tiene selector Pre/Def, así que por
+    omisión se toma la **más alta que de verdad tenga el archivo**
+    (`buscar_en_versiones()`), no la más alta a secas: puede existir la carpeta
+    `V2` y no tener adentro lo que se busca (recién creada, a medio subir), y ahí
+    hay que caer a `V1`. El log dice cuál usó y en cuáles no estaba. Se puede
+    forzar con `version`.
+  - las carpetas del año/mes se buscan **comparando por nombre normalizado**
+    (sin tildes, sin importar mayúsculas), no con una ruta literal: las escribe
+    una persona todos los meses y `"03. Marzo"` y `"3. Marzo"` son la misma.
+  - la búsqueda del archivo es **recursiva** dentro de la carpeta de versión,
+    porque el DCO cambia de subcarpeta de un mes a otro; se filtra por prefijo
+    **y** por el año en el nombre, para que no se cuele un archivo de otro
+    período que haya quedado suelto ahí.
+  - al descomprimir se sacan **solo los Excel** y se dejan sueltos en la
+    carpeta; las entradas del zip con ruta absoluta o con `..` se ignoran.
+
+---
+
+## `Script/Fd/Indices_FMA.py`
+
+- **Qué hace:** arma las tres salidas de FMA del período, **una por botón
+  "Generar"**, replicando `calc_fmacpf`, `calc_fmacsf` y `calc_fmactf` de
+  `entradas_sscc.py`. **Ojo con la palabra "traer"**: el FMA no se copia ya hecho
+  de ningún lado, se **construye**, y cada una sale de un origen distinto.
+- **Consume** (las tres rutas las confirmó el usuario):
+  - **CPF**: `<versión>/01 Respuesta/01 Indices CPF/20AA.MM_Respuesta_CPF/Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx`
+    — dentro del mismo árbol del DCO del que sale el FD. Se lee **cada hoja menos
+    "Resumen"** (una por central).
+  - **CSF**: `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10`
+    (`RAIZ_AGC_FACE`), donde están **todos los meses juntos**: se eligen los del
+    período por su nombre (`csf_<AAAAMMDD>`), se copian a
+    `<CARPETA_BASE>/FD y FMA/agcface/` y se concatenan.
+  - **CTF**: `<versión>/01 Respuesta/06 Indices CTF/CTF_<AAAA><MM>.csv` — otra
+    rama del mismo árbol del DCO. Se copia a la carpeta del caso antes de usarlo,
+    para que quede registrado con qué archivo se armó la salida.
+- **Produce:** `fma_cpf_<AAMM>.xlsx`, `fma_csf_<AAMM>.xlsx` y
+  `fma_cft_<AAMM>.xlsx` (+ su `.csv`) en `<CARPETA_BASE>/FD y FMA/` — con los
+  nombres exactos de `entradas_sscc.py` ("cft" incluido), que son los que después
+  busca `Script/Subastas/Fma.py`. Las dos mitades están probadas juntas: lo que
+  escribe este módulo lo lee aquel sin tocar nada.
+- **Expone:** `ErrorIndicesFma`; `nombre_salida(tipo, aamm)`,
+  `buscar_carpeta_respuesta_cpf(...)`, `buscar_tabla_resumen(...)`,
+  `construir_fma_cpf/csf/ctf(...)`, `traer_agc_face(...)`, `TIPOS_FMA`,
+  `buscar_reportes_cpf(...)`, `buscar_ctf(...)`,
+  `generar_fma(carpeta_destino, aamm, tipos=None, version=None, raiz=None, raiz_agc=None, registrar=print)`
+  → `(escritos, faltantes, versiones)`, donde `versiones` es un dict por tipo:
+  **cada uno elige su versión por separado**, porque una puede tener el CPF y
+  otra el CTF.
+- **Depende de:** `pandas` y `Script/Fd/Indicadores_DCO.py` (comparte con él la
+  resolución del árbol del DCO y la elección de versión). **No importa `nucleo`.**
+- **Detalles que importan:**
+  - el reporte diario de CPF trae **29 columnas** y el encabezado en la fila 5
+    (`header=4`); el script les pone 34 nombres (`NOMBRES_CPF`) contando las 5
+    que agrega. Si el DCO le cambia el formato, se levanta un error que lo dice
+    en vez de correr las columnas en silencio.
+  - la **hora** del CPF sale del índice de fila del reporte + 1 (queda 1..24, ya
+    alineada con las subastas).
+  - los `"-"` de los dos `Tiempo f…` se reemplazan por 0.
+  - al CTF se le saca la zona horaria **conservando la hora tal como está
+    escrita** (`_sacar_zona_horaria`): `04:00-03:00` queda en las 04:00, **no**
+    en las 07:00. Convertir a UTC corría todas las horas del CTF — se detectó
+    justamente en la prueba.
+  - un día sin archivo se saltea con aviso (el original revienta), y si falta el
+    origen de una, las otras se arman igual.
+  - **el CSF no necesita el DCO publicado** (su origen es otro servidor), así que
+    su botón funciona aunque el mes todavía no tenga indicadores publicados.
+  - los reportes del AGC se llaman **`csf_<AAAAMMDD>`** (confirmado por el
+    usuario, ej. `csf_20260301.xlsx` — el mismo nombre que espera el script
+    original). Se acepta un sufijo después de la fecha, pero **no** un archivo
+    que solo la contenga en el medio del nombre.
+
+---
+
+## `Script/Fd/Desempeno_Horario.py`
+
+- **Qué hace:** saca del `SSCC_Desempeño_*` las **dos** cosas que dependían de
+  él: la columna **`Subastas!FD`** (antes `DB!Y`) y el **Vector de Participación
+  CSF** (antes `DB!AC`), que multiplica al FMA de las filas CSF y era lo único
+  que faltaba para cerrar `Subastas!FMA`.
+- **Consume:** las tres hojas horarias de `<CARPETA_BASE>/FD y FMA/SSCC_Desempeño_*`
+  — `CPF Horario` (B:J, el FD es `I`), `CSF Horario` (B:H, el FD es `H`) y
+  `CTF Horario` (B:I, el FD es `I`); encabezados en la fila 11, datos desde la 12
+  (mismo criterio que `nucleo.construir_fd`, que lee estas mismas hojas para la
+  hoja `FD` del consolidado).
+- **Produce:** un dict con tres diccionarios `(unidad, hora_mes) → FD` más
+  `participacion_csf` con `(unidad, hora_mes) → 0|1`.
+- **Expone:** `ErrorDesempeno`; `unidad_alternativa(unidad)`,
+  `calcular_hora_mes(...)`, `leer_hoja(ruta, control)`,
+  `construir_tablas_fd(ruta_sscc, dia_cambio_hora=None, registrar)`,
+  `buscar_fd(tablas, control, unidad, hora_mes)`,
+  `buscar_participacion_csf(tablas, unidad, hora_mes)`.
+- **Depende de:** solo `pandas`. **No importa `nucleo`.**
+- **Tres detalles que no son obvios** (salen del documento de trazabilidad de FD):
+  1. la `Hora` de estas hojas va de **0 a 23**, así que
+     `Hora_Mes = (día - 1) × 24 + hora + 1` — la misma escala 1..24 por día que
+     usa `Subastas`, que es lo que permite cruzarlas;
+  2. **CPF prueba una segunda nomenclatura**: si no encuentra la unidad,
+     intercambia el sufijo `TG` ↔ `TV` y busca de nuevo. CSF y CTF buscan una
+     sola vez (así es la fórmula original);
+  3. el **Indicador de Participación CSF** es 0 solo si la unidad figura como
+     `"No Participó"` **y** su alternativa TG/TV tampoco participó.
+- **El FD no se recalcula** a partir de las respuestas: se toma tal cual viene en
+  el archivo (§25 del documento — puede venir `Respuesta = "No Participó"` con
+  `FD = 1`, y así queda).
+
+---
+
 ## `Script/Subastas/Fma.py`
 
 - **Qué hace:** normaliza las tres salidas de FMA de `entradas_sscc.py`
@@ -316,9 +456,12 @@ importable como cualquier módulo.
   pendiente); `Propietario` sale de la columna nueva de
   `Centrales.xlsx`/`Resumen BESS` (`construir_mapa_propietario()`);
   `Energía SSCC` = `CANTIDAD PONDERADA MW`
-  (`COLUMNA_ENERGIA_SSCC_ACCDB`, a confirmar); `Ciclo`, `FD` y `FMA` quedan
-  vacías (`FD`/`FMA` venían pegadas en `DB!Y`/`DB!V` y **no existen en el
-  Access**: pendientes por pedido explícito del usuario).
+  (`COLUMNA_ENERGIA_SSCC_ACCDB`, a confirmar). `FD` (`calcular_fd_subastas()`) y
+  `FMA` (`calcular_fma_subastas()`) **no existen en el Access** —venían pegadas
+  en `DB!Y`/`DB!V`— y se calculan desde la carpeta `FD y FMA/`: el FD del
+  `SSCC_Desempeño_*` y el FMA de las tres salidas `fma_*`, con el Vector de
+  Participación CSF que también sale del `SSCC_Desempeño_*`. La única que
+  queda vacía es `Ciclo`, que se calcula después en `Calculo E Costos`.
 
   **CMg**, **FD**, **Subastas** (plan §23): replican únicamente las macros
   de *carga* (`Cargar_CMg_Desde_Archivo`, `Cargar_SSCC_Desempeno_En_FD`,
