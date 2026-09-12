@@ -16,6 +16,9 @@ Script/
     Cmg/
         __init__.py
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
+    Subastas/
+        __init__.py
+        Ofertas_Adjudicadas.py <- trae y lee los Access de subastas
     Medidas/
         __init__.py
         comun.py               <- ErrorMedidas + helpers de texto
@@ -60,10 +63,11 @@ importable como cualquier módulo.
   | `Medidas/Medidas_SAE.xlsx` | **Actualizar** | `nucleo.generar_medidas_sae` — corre los cuatro pasos de Medidas de un viaje |
   | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
   | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
+  | `Subastas/DB subastas/` | **Traer subastas** | `nucleo.traer_subastas` — copia los `OfertasSSCCAdj*.accdb` del período desde la unidad de red |
   | `Consolidado_entradas.xlsx` | **Actualizar todo** | `generar_consolidado` con todas las secciones |
   | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
-  | `Pagos_BESS.xlsx` | **Actualizar todo** | `generar_pagos_bess` con todas |
-  | cada `hoja '...'` de esa salida | **Actualizar** | `generar_pagos_bess` con esa sola |
+  | `Pagos_BESS.xlsx` | **Calcular todo** | `generar_pagos_bess` con todas |
+  | cada `hoja '...'` de esa salida | **Calcular** | `generar_pagos_bess` con esa sola |
 
   Las dos salidas se desglosan por hoja igual que `Centrales.xlsx`: lo que
   no se actualiza se **conserva** tal cual estaba en el archivo (no se
@@ -159,6 +163,51 @@ importable como cualquier módulo.
 
 ---
 
+## `Script/Subastas/Ofertas_Adjudicadas.py`
+
+- **Qué hace:** todo lo que sabe de los Access de subastas, que son el
+  **origen real** de la hoja `Subastas`. Hasta esta sesión las subastas se
+  leían de la hoja `DB` de la planilla 3
+  (`3_REMUNERACIÓN_SUBASTAS_E_ID_*`), pero esa planilla no es el origen:
+  ella misma se arma pegando la salida de `entradas_sscc.py` (script suelto,
+  autor original Gerardo.Vieyra), que lee los `OfertasSSCCAdj*.accdb`. Este
+  módulo replica esa rutina (`calc_subastas`) con tres cambios pedidos por el
+  usuario: los `.accdb` se copian primero a la carpeta del caso y de ahí se
+  leen (mismo patrón que el CSV de CMg), el período sale del AAMM de la
+  ventana y no de un `.yaml`, y no escribe ningún Excel (devuelve DataFrames).
+- **Consume:**
+  `\\nas-cen1\Estadisticas\progdiar_adjudicaSEN\OfertasSSCCAdj<AAAAMMDD>[_HH].accdb`
+  (`RAIZ_SUBASTAS_ORIGEN` + `PREFIJO_ACCDB` — sale de `path_subastas_origen`
+  y `archivo_subasta_prefix` del `archivo_de_configuracion.yaml` del script
+  original; es la segunda y última ruta del programa que apunta fuera de la
+  carpeta base del caso), y después esos mismos archivos ya copiados en
+  `<CARPETA_BASE>/Subastas/DB subastas/`.
+- **Produce:** las copias locales de los `.accdb`; el DataFrame crudo
+  equivalente a `subastas_AAMM.xlsx` (la salida del script viejo), que
+  `nucleo.construir_subastas_desde_accdb()` transforma en la hoja `Subastas`.
+- **Expone:** `ErrorSubastas`; `CARPETA_DB_SUBASTAS`; `nombre_accdb(aamm, dia,
+  hora)`, `nombres_del_periodo(aamm)`, `ruta_origen(raiz=None)`,
+  `carpeta_db_subastas(...)`, `asegurar_carpeta_db(...)`,
+  `accdb_presentes(carpeta_subastas, aamm)`,
+  `traer_accdb(carpeta_subastas, aamm, raiz=None, registrar=print)` →
+  `(copiados, salteados, faltantes)`,
+  `leer_accdb(ruta)`, `construir_crudo(carpeta_subastas, aamm, registrar)` →
+  `(df_crudo, resumen)`.
+- **Depende de:** `pandas` y, solo al leer, `pyodbc` + el *Microsoft Access
+  Database Engine*. **No importa `nucleo`** (misma regla que `Cmg/` y
+  `Medidas/`). `pyodbc` se importa **dentro** de las funciones que leen, no
+  arriba: es la única dependencia que solo existe en Windows y no tiene por
+  qué romper el import de todo el programa donde no esté.
+- **Detalle que importa:** por cada día se parte del Access del PO (hora 0,
+  sin sufijo) y cada PID de la hora `HH` **reemplaza las horas >= HH** — las
+  anteriores quedan como estaban. De qué archivo salió cada fila queda en
+  `Hora_PID`. Después se descartan las filas con `CANTIDAD MW = 0`, el precio
+  se pone en 0 fuera de la banda 1, `CANTIDAD PONDERADA MW` vacía se completa
+  con `CANTIDAD MW` y se eliminan duplicados: exactamente lo que hacía
+  `entradas_sscc.py`, verificado con un caso sintético.
+
+---
+
 ## `Script/Cmg/Extrae_CMG_barras.py`
 
 - **Qué hace:** todo lo que sabe del CSV 15-minutal de CMg. Viene del
@@ -216,6 +265,23 @@ importable como cualquier módulo.
   resumen intermedio equivalente a la hoja "Resumen Ofertas SSCC" del
   `.xlsm` original es puramente auxiliar para construir la tabla W:Y: no se
   persiste.
+
+  **Subastas desde su origen real** (esta sesión): `Subastas` ya no sale de
+  la planilla 3 sino de los Access. `construir_subastas_desde_accdb()` arma
+  las MISMAS columnas `B:Q` a partir del DataFrame crudo que devuelve
+  `Script/Subastas/`: `Concepto` = `SERVICIO` tal cual; `Control` =
+  `SERVICIO[:3]` y `Sub_Baj` = el signo del penúltimo carácter (las dos
+  fórmulas reales de la planilla, `=LEFT(C,3)` e
+  `=IF(LEFT(RIGHT(C,2),1)="+","SUBIDA","BAJADA")`); `Fecha` =
+  `DATE(Año,Mes,Dia)`; `Hora_dia` = `HORA` sin corrección; `Hora_mes` =
+  `(Dia-1)*24 + Hora_dia` (`calcular_hora_mes_subastas()`, con el ajuste de
+  cambio de hora de la planilla como parámetro opcional, hoy apagado —
+  pendiente); `Propietario` sale de la columna nueva de
+  `Centrales.xlsx`/`Resumen BESS` (`construir_mapa_propietario()`);
+  `Energía SSCC` = `CANTIDAD PONDERADA MW`
+  (`COLUMNA_ENERGIA_SSCC_ACCDB`, a confirmar); `Ciclo`, `FD` y `FMA` quedan
+  vacías (`FD`/`FMA` venían pegadas en `DB!Y`/`DB!V` y **no existen en el
+  Access**: pendientes por pedido explícito del usuario).
 
   **CMg**, **FD**, **Subastas** (plan §23): replican únicamente las macros
   de *carga* (`Cargar_CMg_Desde_Archivo`, `Cargar_SSCC_Desempeno_En_FD`,
@@ -340,10 +406,14 @@ importable como cualquier módulo.
   - Un archivo Excel dentro de `<CARPETA_BASE>/SSCC_Desempeño/` cuyo nombre
     empiece con "SSCC_Desempeño_" (más reciente si hay varios), hojas `CPF
     Horario` y `CSF Horario`
+  - Los Access `OfertasSSCCAdj<AAAAMMDD>[_HH].accdb` del período que estén
+    en `<CARPETA_BASE>/Subastas/DB subastas/` — **el origen real de la hoja
+    `Subastas` desde esta sesión** (ver `Script/Subastas/`). La carpeta la
+    crea el programa si no existe y se llena con el botón "Traer subastas".
   - Un archivo Excel dentro de `<CARPETA_BASE>/Subastas/` cuyo nombre
     empiece con "3_REMUNERACIÓN_SUBASTAS_E_ID_" (más reciente si hay
-    varios; carpeta propia — la macro original lo buscaba junto al .xlsm,
-    ver plan §23.3), hoja `DB`
+    varios), hoja `DB`: **solo como respaldo**, se usa únicamente si
+    `DB subastas/` no tiene ningún Access del período. Ya no es el origen
 - **Produce:**
   - `<CARPETA_BASE>/Consolidado_entradas.xlsx`, hojas: `Medidores`, `Ofertas
     SSCC` (las tablas W:Y y AB:AE equivalentes, una al lado de la otra — ver

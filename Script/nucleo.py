@@ -24,11 +24,13 @@ try:
     from .Medidas import Homologacion, Descarga_PRMTE, Claves_Balance
     from .Medidas import Generacion_Real
     from .Medidas.comun import ErrorMedidas
+    from .Subastas import Ofertas_Adjudicadas as ofertas_adj
 except ImportError:  # pragma: no cover - depende de como se importe
     from Cmg import Extrae_CMG_barras as extrae_cmg
     from Medidas import Homologacion, Descarga_PRMTE, Claves_Balance
     from Medidas import Generacion_Real
     from Medidas.comun import ErrorMedidas
+    from Subastas import Ofertas_Adjudicadas as ofertas_adj
 
 
 # ============================================================
@@ -82,6 +84,15 @@ HOJA_CPF_HORARIO = "CPF Horario"
 HOJA_CSF_HORARIO = "CSF Horario"
 
 HOJA_SUBASTAS_ORIGEN = "DB"
+
+# Las subastas ya no salen de la planilla 3: salen de los Access
+# OfertasSSCCAdj*.accdb, que son su origen real (la planilla 3 tambien
+# se arma pegando lo que sale de ellos). Se copian de la unidad de red
+# a <CARPETA_BASE>/Subastas/DB subastas/ con el boton "Traer
+# subastas". El nombre de la carpeta, la ruta de red, los nombres de
+# archivo y la consulta SQL los conoce Script/Subastas/
+# Ofertas_Adjudicadas.py, no este modulo.
+CARPETA_DB_SUBASTAS = ofertas_adj.CARPETA_DB_SUBASTAS
 
 ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
 
@@ -232,6 +243,7 @@ def resolver_rutas(carpeta_base):
         "cmg_dir": cmg_dir,
         "sscc_desempeno_dir": sscc_desempeno_dir,
         "subastas_dir": subastas_dir,
+        "db_subastas_dir": subastas_dir / CARPETA_DB_SUBASTAS,
         "medidas_sae": medidas_dir / ARCHIVO_MEDIDAS_SAE,
         "trabajo_medidas": medidas_dir / CARPETA_TRABAJO_MEDIDAS,
         "centrales": auxiliares_dir / ARCHIVO_CENTRALES,
@@ -791,23 +803,69 @@ def revisar_estructura(carpeta_base, aamm=None):
         rutas["subastas_dir"].is_dir(),
     )
 
+    # Los Access son AHORA el origen de la hoja Subastas. La carpeta la
+    # crea el programa (pedido del usuario), no la persona.
+    if rutas["subastas_dir"].is_dir():
+        ofertas_adj.asegurar_carpeta_db(rutas["subastas_dir"])
+
+    accdb = (
+        ofertas_adj.accdb_presentes(rutas["subastas_dir"], aamm_valido)
+        if aamm_valido and rutas["db_subastas_dir"].is_dir()
+        else []
+    )
+    rutas["accdb_subastas"] = [ruta for _, _, ruta in accdb]
+
+    if not rutas["db_subastas_dir"].is_dir():
+        detalle_db = "no se pudo crear; revisa permisos"
+        estado_db = "falta"
+    elif accdb:
+        dias = len({dia for dia, _, _ in accdb})
+        detalle_db = (
+            f"{len(accdb)} Access del periodo, {dias} dia(s) - "
+            f"se refrescan con el boton ->"
+        )
+        estado_db = "ok"
+    elif not aamm_valido:
+        detalle_db = "ingresa el periodo (AAMM) para revisar que hay"
+        estado_db = "pendiente"
+    else:
+        detalle_db = (
+            f"vacia para el periodo: se traen de la unidad de red con "
+            f"el boton ->"
+        )
+        estado_db = "pendiente"
+
+    filas.append(
+        _fila("db_subastas", f"{CARPETA_DB_SUBASTAS}/", 1, estado_db,
+              detalle_db)
+    )
+
     archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
     rutas["subastas"] = archivo_subastas
 
+    # La planilla 3 dejo de ser el origen: queda solo como respaldo
+    # para los casos que todavia no tienen los Access copiados, asi
+    # que su ausencia ya no es un "falta" que bloquee nada.
     if archivo_subastas:
         filas.append(
             _fila(
                 "subastas", archivo_subastas.name, 1, "ok",
-                f"en {CARPETA_SUBASTAS}/",
+                f"respaldo en {CARPETA_SUBASTAS}/ (solo se usa si "
+                f"'{CARPETA_DB_SUBASTAS}/' esta vacia)",
             )
         )
     else:
         filas.append(
             _fila(
                 "subastas", "Archivo 3_REMUNERACIÓN_SUBASTAS_E_ID_*", 1,
-                "falta",
-                f"ningun archivo en {CARPETA_SUBASTAS}/ empieza con "
-                f"'3_REMUNERACIÓN_SUBASTAS_E_ID_'",
+                "ok" if accdb else "pendiente",
+                (
+                    f"no esta, y ya no hace falta: las subastas salen "
+                    f"de '{CARPETA_DB_SUBASTAS}/'"
+                    if accdb else
+                    f"no esta: seria el respaldo si "
+                    f"'{CARPETA_DB_SUBASTAS}/' queda vacia"
+                ),
             )
         )
 
@@ -2440,6 +2498,271 @@ def construir_subastas(ruta_subastas, registrar=print):
     )
 
     return df
+
+
+# ============================================================
+# SUBASTAS DESDE SU ORIGEN REAL (los Access OfertasSSCCAdj*)
+#
+# La hoja "Subastas" del consolidado se armaba leyendo la hoja "DB" de
+# la planilla 3 (construir_subastas, arriba). Pero la planilla 3 no es
+# el origen: ella misma se arma pegando la salida de entradas_sscc.py,
+# que lee los Access OfertasSSCCAdj*.accdb. Lo que sigue corta ese
+# intermediario y arma las MISMAS columnas B:Q directamente desde los
+# Access, siguiendo el documento de trazabilidad que entrego el
+# usuario (subastas_AAMM.xlsx -> DB!B:K) mas lo que ya sabiamos de
+# DB!L:Q.
+#
+# Equivalencias (columna de Subastas <- de donde sale ahora):
+#
+#   B Concepto      <- SERVICIO tal cual ("CSF(-)", "CPF(+)", ...)
+#   C Control       <- SERVICIO[:3]            (formula real =LEFT(C,3))
+#   D Sub_Baj       <- signo de SERVICIO       (=IF(LEFT(RIGHT(C,2),1)="+",...))
+#   E Fecha         <- DATE(AÑO, MES, DIA)
+#   F Año           <- AÑO
+#   G Mes           <- MES
+#   H Dia           <- DIA
+#   I Hora_dia      <- HORA                    (sin sumar ni restar 1)
+#   J Hora_mes      <- (DIA-1)*24 + HORA       (+ ajuste de cambio de hora)
+#   K Configuración <- CONFIGURACIÓN
+#   L Propietario   <- Centrales.xlsx, "Resumen BESS", columna
+#                      "Propietario" (el usuario la agrego en la B y
+#                      corrio el resto de la hoja una columna)
+#   M Clave horaria <- Configuración & Dia & Hora_dia (igual que antes)
+#   N Ciclo         <- vacia (se calcula en Calculo E Costos)
+#   O Energía SSCC  <- CANTIDAD PONDERADA MW
+#   P FD            <- PENDIENTE (era DB!Y; no existe en el Access)
+#   Q FMA           <- PENDIENTE (era DB!V; no existe en el Access)
+# ============================================================
+
+# De que columna del Access sale "Energía SSCC" (Subastas!O). El
+# Access trae las dos cantidades: la cruda (Quantity -> "CANTIDAD MW")
+# y la ponderada (Quantity2 -> "CANTIDAD PONDERADA MW", que
+# entradas_sscc.py completa con la cruda cuando viene vacia). Se eligio
+# la ponderada porque es la que se remunera; esta en una constante
+# para poder cambiarla de un lado si el usuario confirma la otra.
+COLUMNA_ENERGIA_SSCC_ACCDB = "CANTIDAD PONDERADA MW"
+
+# Columnas de Subastas que quedan PENDIENTES al leer desde el Access
+# (pedido explicito del usuario: "la columna V e Y FD y FMA quedan
+# pendientes por ahora"). En la planilla 3 venian ya pegadas en DB!Y y
+# DB!V; el Access no las tiene.
+COLUMNAS_SUBASTAS_PENDIENTES = ("P", "Q")
+
+
+def construir_mapa_propietario(resumen_bess):
+    """
+    central normalizada -> Propietario, desde la hoja "Resumen BESS"
+    de Centrales.xlsx.
+
+    El usuario agrego la columna "Propietario" en la B de esa hoja y
+    corrio todo lo demas una columna a la derecha. Como esta hoja
+    siempre se leyo por NOMBRE de columna (ver _leer_resumen_bess y
+    _mapa_resumen_bess_por_nombre), ese corrimiento no rompe nada.
+
+    Si la columna no esta (un Centrales.xlsx viejo), devuelve un dict
+    vacio en vez de reventar: la columna Propietario queda vacia y se
+    avisa en el log.
+    """
+
+    columna_nombre = columna_propietario = None
+
+    for columna in resumen_bess.columns:
+        texto = normalizar(columna)
+        if "nombre" in texto and "activ" in texto:
+            columna_nombre = columna
+        elif "propietario" in texto:
+            columna_propietario = columna
+
+    if columna_nombre is None or columna_propietario is None:
+        return {}
+
+    mapa = {}
+
+    for _, fila in resumen_bess.iterrows():
+        nombre = normalizar(fila[columna_nombre])
+        if not nombre:
+            continue
+        mapa[nombre] = _texto_seguro(fila[columna_propietario])
+
+    return mapa
+
+
+def _control_desde_servicio(servicio):
+    """'CSF(-)' -> 'CSF'. Replica =LEFT(C,3) de la planilla 3."""
+
+    return _texto_seguro(servicio)[:3]
+
+
+def _sub_baj_desde_servicio(servicio):
+    """
+    'CSF(+)' -> 'SUBIDA', 'CSF(-)' -> 'BAJADA'.
+
+    Replica al pie de la letra =IF(LEFT(RIGHT($C9,2),1)="+","SUBIDA",
+    "BAJADA"): mira el penultimo caracter, no "si contiene un +".
+    """
+
+    texto = _texto_seguro(servicio)
+
+    return "SUBIDA" if texto[-2:-1] == "+" else "BAJADA"
+
+
+def calcular_hora_mes_subastas(dias, horas, dia_cambio_hora=None, ajuste=1):
+    """
+    Hora_mes = (Dia - 1) * 24 + Hora_dia, mas el ajuste por cambio de
+    hora que la planilla 3 aplica con =($F9-1)*24+$G9+IF(F9>$F$2,1,0).
+
+    dia_cambio_hora es el dia del mes en que cambia la hora (la celda
+    SUBASTAS!F2 de la planilla). Por omision es None = sin ajuste, que
+    es lo correcto en los 10 meses del año en que no hay cambio de
+    hora. Queda como parametro y no hardcodeado porque de donde sale
+    ese dia cada mes es justamente lo que falta confirmar (ver
+    BITACORA.md, "Pendientes abiertos").
+    """
+
+    dias = pd.to_numeric(dias, errors="coerce")
+    horas = pd.to_numeric(horas, errors="coerce")
+
+    hora_mes = (dias - 1) * 24 + horas
+
+    if dia_cambio_hora is not None:
+        hora_mes = hora_mes + (dias > int(dia_cambio_hora)).astype(int) * ajuste
+
+    return hora_mes.astype("Int64")
+
+
+def construir_subastas_desde_accdb(
+    carpeta_subastas,
+    aamm,
+    mapa_propietarios=None,
+    dia_cambio_hora=None,
+    registrar=print,
+):
+    """
+    Arma la hoja "Subastas" del consolidado (las mismas columnas B:Q
+    que construir_subastas) leyendo los Access de
+    <CARPETA_BASE>/Subastas/DB subastas/ en vez de la planilla 3.
+
+    El filtro es el mismo de siempre: se quedan solo las filas cuya
+    Configuración contiene "BESS" o "SAE".
+    """
+
+    try:
+        df_crudo, resumen = ofertas_adj.construir_crudo(
+            carpeta_subastas, aamm, registrar=registrar
+        )
+    except ofertas_adj.ErrorSubastas as error:
+        raise ErrorEntrada(str(error)) from error
+
+    if resumen["dias_sin_archivo"]:
+        registrar(
+            f"  [AVISO] sin Access de subastas para el/los dia(s): "
+            f"{', '.join(str(d) for d in resumen['dias_sin_archivo'])}"
+        )
+
+    # Diagnostico de cambio de hora: si algun dia no trae 24 horas, el
+    # Hora_mes corrido deja de ser (Dia-1)*24+Hora para los dias
+    # siguientes. No se corrige solo (ver calcular_hora_mes_subastas),
+    # pero el usuario tiene que enterarse.
+    horas_por_dia = df_crudo.groupby("DIA")["HORA"].max()
+    dias_raros = horas_por_dia[horas_por_dia != 24]
+
+    for dia, maximo in dias_raros.items():
+        registrar(
+            f"  [AVISO] el dia {int(dia)} trae {int(maximo)} horas, no 24 "
+            f"(cambio de hora?): revisar Hora_mes."
+        )
+
+    # Mismo filtro BESS/SAE de siempre, ahora por nombre de columna.
+    textos = df_crudo["CONFIGURACIÓN"].map(_texto_seguro)
+    filtrado = df_crudo[textos.map(_contiene_bess_o_sae_sin_bat)]
+    filtrado = filtrado.reset_index(drop=True)
+
+    df = pd.DataFrame(index=filtrado.index)
+
+    df["B"] = filtrado["SERVICIO"].map(_texto_seguro)
+    df["C"] = filtrado["SERVICIO"].map(_control_desde_servicio)
+    df["D"] = filtrado["SERVICIO"].map(_sub_baj_desde_servicio)
+
+    df["F"] = pd.to_numeric(filtrado["AÑO"], errors="coerce").astype("Int64")
+    df["G"] = pd.to_numeric(filtrado["MES"], errors="coerce").astype("Int64")
+    df["H"] = pd.to_numeric(filtrado["DIA"], errors="coerce").astype("Int64")
+    df["I"] = pd.to_numeric(filtrado["HORA"], errors="coerce").astype("Int64")
+
+    df["E"] = pd.to_datetime(
+        dict(year=df["F"], month=df["G"], day=df["H"]), errors="coerce"
+    )
+
+    df["J"] = calcular_hora_mes_subastas(
+        df["H"], df["I"], dia_cambio_hora=dia_cambio_hora
+    )
+
+    df["K"] = filtrado["CONFIGURACIÓN"].map(_texto_seguro)
+
+    mapa_propietarios = mapa_propietarios or {}
+    df["L"] = df["K"].map(
+        lambda central: mapa_propietarios.get(normalizar(central), "")
+    )
+
+    df["M"] = (
+        df["K"]
+        + df["H"].map(_entero_a_texto)
+        + df["I"].map(_entero_a_texto)
+    )
+
+    df["N"] = pd.NA
+
+    df["O"] = pd.to_numeric(
+        filtrado[COLUMNA_ENERGIA_SSCC_ACCDB], errors="coerce"
+    )
+
+    for letra in COLUMNAS_SUBASTAS_PENDIENTES:
+        df[letra] = pd.NA
+
+    df = df[list("BCDEFGHIJKLMNOPQ")]
+    df = df.rename(columns=NOMBRES_SUBASTAS)
+
+    if mapa_propietarios:
+        sin_propietario = sorted(
+            {
+                central
+                for central, propietario in zip(df.iloc[:, 9], df.iloc[:, 10])
+                if not propietario
+            }
+        )
+        for central in sin_propietario:
+            registrar(
+                f"  [AVISO] sin Propietario en {ARCHIVO_CENTRALES} "
+                f"('{HOJA_RESUMEN_BESS}'): {central}"
+            )
+    else:
+        registrar(
+            f"  [AVISO] la hoja '{HOJA_RESUMEN_BESS}' de "
+            f"{ARCHIVO_CENTRALES} no tiene columna 'Propietario': la "
+            f"columna Propietario de Subastas queda vacia."
+        )
+
+    registrar(
+        f"  Subastas: {len(df):,} fila(s) desde "
+        f"{resumen['archivos_leidos']} Access (filtro Configuración "
+        f"contiene BESS/SAE). FD y FMA quedan pendientes."
+    )
+
+    return df
+
+
+def _entero_a_texto(valor):
+    """
+    1 -> '1' (no '1.0'): la Clave horaria es un pegado de textos y un
+    decimal de mas la dejaria distinta de la de la planilla.
+    """
+
+    if pd.isna(valor):
+        return ""
+
+    try:
+        return str(int(valor))
+    except (TypeError, ValueError):
+        return _texto_seguro(valor)
 
 
 # ============================================================
@@ -6193,7 +6516,10 @@ SECCIONES_CONSOLIDADO = (
     (
         "subastas",
         "Subastas",
-        f"Usa el archivo {CARPETA_SUBASTAS}/.",
+        f"Usa los Access de {CARPETA_SUBASTAS}/{CARPETA_DB_SUBASTAS}/ "
+        f"(su origen real) y el Propietario de {ARCHIVO_CENTRALES}. Si "
+        f"esa carpeta no tiene Access del periodo, cae al respaldo "
+        f"3_REMUNERACIÓN_SUBASTAS_E_ID_*.",
         ("Subastas",),
     ),
 )
@@ -6367,17 +6693,62 @@ def generar_consolidado(
     avanzar(84)
 
     if "subastas" in secciones_activas:
-        archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
-        if not archivo_subastas:
-            raise ErrorEntrada(
-                f"No se encontro ningun archivo "
-                f"3_REMUNERACIÓN_SUBASTAS_E_ID_* en "
-                f"{rutas['subastas_dir']}"
-            )
-        registrar(f"Leyendo {archivo_subastas.name}...")
-        df_subastas = construir_subastas(
-            archivo_subastas, registrar=registrar
+
+        aamm_val = validar_aamm(aamm)
+        hay_accdb = bool(
+            ofertas_adj.accdb_presentes(rutas["subastas_dir"], aamm_val)
         )
+
+        if hay_accdb:
+            # Camino normal desde ahora: el origen real de las
+            # subastas son los Access, no la planilla 3.
+            mapa_propietarios = {}
+
+            if rutas["centrales"].is_file():
+                resumen_bess, _ = leer_centrales(rutas["centrales"])
+                mapa_propietarios = construir_mapa_propietario(resumen_bess)
+            else:
+                registrar(
+                    f"  [AVISO] no se encontro {rutas['centrales']}: la "
+                    f"columna Propietario de Subastas queda vacia."
+                )
+
+            registrar(
+                f"Leyendo las subastas de {CARPETA_DB_SUBASTAS}/ "
+                f"(periodo {aamm_val})..."
+            )
+            df_subastas = construir_subastas_desde_accdb(
+                rutas["subastas_dir"],
+                aamm_val,
+                mapa_propietarios=mapa_propietarios,
+                registrar=registrar,
+            )
+
+        else:
+            # Respaldo: los casos que todavia no tienen los Access
+            # copiados siguen andando con la planilla 3 de siempre.
+            archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
+
+            if not archivo_subastas:
+                raise ErrorEntrada(
+                    f"No hay de donde sacar las subastas del periodo "
+                    f"{aamm_val}:\n\n"
+                    f"  - {rutas['db_subastas_dir']} no tiene ningun "
+                    f"Access del periodo (traelos con el boton 'Traer "
+                    f"subastas'), y\n"
+                    f"  - tampoco hay un archivo "
+                    f"3_REMUNERACIÓN_SUBASTAS_E_ID_* de respaldo en "
+                    f"{rutas['subastas_dir']}."
+                )
+
+            registrar(
+                f"  [AVISO] no hay Access del periodo en "
+                f"{CARPETA_DB_SUBASTAS}/: se usa el respaldo "
+                f"{archivo_subastas.name} (planilla 3)."
+            )
+            df_subastas = construir_subastas(
+                archivo_subastas, registrar=registrar
+            )
 
     avanzar(92)
 
@@ -6666,6 +7037,55 @@ def traer_csv_cmg(carpeta_base, aamm, registrar=print, progreso=None):
     registrar(f"Listo: {destino}")
 
     return destino
+
+
+def traer_subastas(carpeta_base, aamm, registrar=print, progreso=None):
+    """
+    Copia los Access de subastas del periodo (OfertasSSCCAdj*.accdb)
+    desde la unidad de red a <CARPETA_BASE>/Subastas/DB subastas/
+    (boton "Traer subastas"). Crea la carpeta si no existe. Devuelve
+    la ruta de esa carpeta.
+    """
+
+    aamm = validar_aamm(aamm)
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["base"].is_dir():
+        raise ErrorEntrada(f"No se encontro la carpeta base {rutas['base']}")
+
+    if not rutas["subastas_dir"].is_dir():
+        raise ErrorEntrada(
+            f"No se encontro la carpeta {rutas['subastas_dir']}"
+        )
+
+    if progreso:
+        progreso(5)
+
+    registrar(
+        f"Trayendo subastas de {ofertas_adj.ruta_origen()} "
+        f"(periodo {aamm})..."
+    )
+
+    try:
+        copiados, salteados, _ = ofertas_adj.traer_accdb(
+            rutas["subastas_dir"], aamm, registrar=registrar
+        )
+    except ofertas_adj.ErrorSubastas as error:
+        raise ErrorEntrada(str(error)) from error
+    except OSError as error:
+        raise ErrorEntrada(
+            f"No se pudieron copiar los Access de subastas: {error}"
+        ) from error
+
+    if progreso:
+        progreso(100)
+
+    registrar(
+        f"Listo: {len(copiados)} copiado(s) y {len(salteados)} ya al dia "
+        f"en {rutas['db_subastas_dir']}"
+    )
+
+    return rutas["db_subastas_dir"]
 
 
 def generar_cmg(

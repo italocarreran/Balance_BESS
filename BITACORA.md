@@ -126,10 +126,35 @@ estado, no un historial.
   `Configuración & Dia & Hora_dia`, no `Propietario & Hora_dia &
   Hora_mes` como está hoy. Hoy no afecta ningún cálculo (ninguna otra
   columna consume `Ciclo`), por eso no se tocó sin preguntar.
-- Confirmar si la carpeta `Subastas/` (creada esta sesión, no existe en
-  la planilla original) es el nombre/ubicación que se quiere mantener, o
-  si se prefiere buscar el archivo directamente en `<CARPETA_BASE>` como
-  hacía la macro original (ver plan §23.3).
+- ~~Confirmar si la carpeta `Subastas/` (creada en su momento, no existe
+  en la planilla original) es el nombre/ubicación que se quiere
+  mantener~~ — resuelto: se queda, y además ahora tiene adentro la
+  subcarpeta `DB subastas/` (nombre elegido por el usuario) con los
+  Access, que son el origen real.
+- **Confirmar de dónde sale `Energía SSCC`** (`Subastas!O`, antes
+  `DB!P`): hoy se toma `CANTIDAD PONDERADA MW` del Access
+  (`COLUMNA_ENERGIA_SSCC_ACCDB`), que es la `Quantity2`. La otra
+  candidata es `CANTIDAD MW` (`Quantity`). Con los datos reales vistos
+  no se pueden distinguir (las dos coinciden en casi todas las filas,
+  porque `entradas_sscc.py` completa la ponderada vacía con la cruda).
+  Es un cambio de una línea si el usuario confirma la otra.
+- **`FD` y `FMA` de `Subastas` (`P` y `Q`) quedan pendientes** por
+  pedido explícito del usuario ("la columna V e Y FD y FMA quedan
+  pendientes por ahora"). Venían pegadas en `DB!Y` y `DB!V` de la
+  planilla 3 y **no existen en el Access**: hay que definir su origen.
+  Sospecha a confirmar: el `FD` podría salir homologando central+hora
+  contra la hoja `FD` del propio consolidado (la que ya se arma desde
+  `SSCC_Desempeño_*`), igual que `Calculo E Costos!AM:AR`.
+- **Definir el ajuste de `Hora_mes` por cambio de hora.** La fórmula
+  real de la planilla 3 es `=($F9-1)*24+$G9+IF(F9>$F$2,1,0)`, donde
+  `SUBASTAS!F2` es el día del mes en que cambia la hora. Hoy
+  `calcular_hora_mes_subastas()` tiene ese ajuste como parámetro
+  (`dia_cambio_hora`) y lo deja **apagado**, que es lo correcto en los
+  10 meses del año sin cambio de hora, pero falta definir de dónde sale
+  ese día en los otros dos (el `archivo_de_configuracion.yaml` del
+  script viejo tiene un `cambio_de_hora: -1` en las variables
+  mensuales, pero no está claro si es un día o un signo). Mientras
+  tanto, el log avisa si algún día del mes no trae 24 horas.
 - Confirmar el nombre definitivo de `Pagos_BESS.xlsx` (provisorio, elegido
   por el usuario como "pagos_bess o algo así por ahora").
 - Probar la ventana nueva (diagrama + botones "Generar") con una carpeta
@@ -2256,3 +2281,79 @@ confirmada contra el archivo real: 74 filas, 7 claves, 37 puntos de medida, cana
 `Gen real` todavía sin archivo real, estructura definida en la conversación) y la advertencia de
 que una central no puede estar en las dos hojas: el paso de operación real **agrega**, no
 reemplaza, así que se contaría dos veces.
+
+---
+
+## 2026-09-12 — Las subastas salen de su origen real (los Access), y "Calcular" en Pagos_BESS
+
+Cinco pedidos del usuario en una: renombrar los botones de `Pagos_BESS.xlsx`, y sobre todo dejar
+de sacar las subastas de la planilla 3 para sacarlas de donde realmente vienen. Entregó como
+referencia el script `entradas_sscc.py` (el suelto que corre a mano, autor original
+Gerardo.Vieyra), su `archivo_de_configuracion.yaml`, un documento de trazabilidad
+(`subastas_AAMM.xlsx` → `DB!B:K`) y la salida real de ese script para marzo 2026.
+
+**1) Botones de `Pagos_BESS.xlsx`: "Calcular" en vez de "Actualizar"** (`Balance_BESS.py`). La
+fila del archivo dice ahora **"Calcular todo"** y la de cada hoja **"Calcular"**. No cambió
+ninguna función: solo el texto del botón y el diagrama del docstring. Los de
+`Consolidado_entradas.xlsx` siguen diciendo "Actualizar" (son entradas que se refrescan, no
+cálculos).
+
+**2) `Script/Subastas/Ofertas_Adjudicadas.py` (paquete nuevo).** Mismo patrón que `Script/Cmg/`:
+sabe todo lo de los Access y no importa `nucleo`. Replica la rutina `calc_subastas` del script
+viejo, incluida la parte delicada: por cada día se parte del Access del PO (hora 0, sin sufijo) y
+cada PID de la hora `HH` **reemplaza las horas >= HH**, dejando las anteriores como estaban; de
+qué archivo salió cada fila queda en `Hora_PID`. Después, los mismos filtros: fuera las filas con
+`CANTIDAD MW = 0`, precio 0 fuera de la banda 1, `CANTIDAD PONDERADA MW` vacía completada con
+`CANTIDAD MW`, y duplicados fuera.
+
+Cambios respecto del script viejo, todos pedidos: los `.accdb` no se leen de la red sino que se
+copian primero a la carpeta del caso; el período es el AAMM de la ventana y no un `.yaml`; y no
+escribe ningún Excel. `pyodbc` se importa **dentro** de las funciones que leen, no arriba: es la
+única dependencia del proyecto que solo existe en Windows (necesita el *Microsoft Access Database
+Engine*) y no tiene por qué romper el import de todo el programa donde no esté.
+
+**3) `Subastas/DB subastas/` + botón "Traer subastas".** La carpeta la crea el programa si no
+existe (pedido explícito), en `revisar_estructura()`. El botón (`nucleo.traer_subastas`) copia de
+`\\nas-cen1\Estadisticas\progdiar_adjudicaSEN\` todos los `OfertasSSCCAdj*` del período —hasta
+744 por mes— salteando los que ya están copiados y no cambiaron (mismo tamaño y misma fecha). La
+ruta de red es la segunda y última del programa que apunta fuera de la carpeta base del caso, y
+está en una sola constante (`RAIZ_SUBASTAS_ORIGEN`), igual que la del CSV de CMg.
+
+**4) `construir_subastas_desde_accdb()` arma la hoja `Subastas` del consolidado** con las mismas
+columnas `B:Q` de siempre —el formato no cambió, solo de dónde sale—. Siguiendo el documento de
+trazabilidad: `Concepto` = `SERVICIO` tal cual; `Control` = `SERVICIO[:3]`; `Sub_Baj` mirando el
+penúltimo carácter (no "si contiene un +": se replicó al pie de la letra
+`=IF(LEFT(RIGHT(C,2),1)="+",...)`); `Fecha` = `DATE(Año,Mes,Dia)`; `Hora_dia` = `HORA` **sin
+sumar ni restar 1**; `Hora_mes` = `(Dia-1)*24 + Hora_dia`; `Configuración` directa. `Ciclo` sigue
+vacía acá (se calcula en `Calculo E Costos`, como antes).
+
+La planilla 3 **no se borró**: quedó como respaldo y se usa solo si `DB subastas/` no tiene ningún
+Access del período, avisándolo en el log. Así los casos viejos siguen andando. Su fila del
+diagrama dejó de ser un "FALTA" que bloquea.
+
+**5) `Propietario` desde `Centrales.xlsx`** (punto 7 del usuario: lo dejó en la columna B de
+`Resumen BESS` y corrió todo lo demás una columna a la derecha). `construir_mapa_propietario()`
+lo busca **por nombre de columna**, como ya hacían todos los lectores de esa hoja
+(`_leer_resumen_bess` detecta la fila de encabezados), así que el corrimiento no rompió nada — se
+verificó explícitamente armando un `Centrales.xlsx` con la columna insertada y volviendo a correr
+`construir_mapa_barra`, `construir_dic_resumen_factor`, `..._capacidad` y `..._eficiencia`: los
+cuatro dan lo mismo que antes. Un `Centrales.xlsx` viejo sin esa columna no revienta: la columna
+`Propietario` queda vacía y se avisa en el log.
+
+**Lo que NO se resolvió, y está anotado en "Pendientes abiertos":** `FD` y `FMA` (`Subastas!P:Q`)
+quedan vacías por pedido del usuario —venían pegadas en `DB!Y`/`DB!V` y no existen en el Access—;
+`Energía SSCC` se tomó de `CANTIDAD PONDERADA MW` y falta que el usuario confirme que no es
+`CANTIDAD MW`; y el ajuste de `Hora_mes` por cambio de hora quedó como parámetro apagado, con un
+aviso en el log si algún día del mes no trae 24 horas.
+
+**Verificación.** No hay Access ni driver de Access en el entorno de esta sesión, así que se probó
+en dos mitades: (a) la transformación, contra la **salida real** de `entradas_sscc.py` para marzo
+2026 que entregó el usuario (`docs/subastas_2603_salida_entradas_sscc.xlsx`, 39.181 filas), que
+tiene exactamente las columnas que devuelve la consulta a los Access — de ahí salen 2.904 filas
+BESS/SAE y los pares `Concepto`/`Control`/`Sub_Baj` quedan consistentes en las cuatro
+combinaciones presentes (`CSF(+)`, `CSF(-)`, `CPF(+)`, `CPF(-)`); y (b) la lectura de los Access,
+con un caso sintético que reemplaza `leer_accdb` y verifica el solapamiento PO/PID hora por hora
+y los cuatro filtros. Además, un caso end-to-end que crea la carpeta, copia desde una "red"
+simulada (dos veces, para ver que la segunda no vuelve a copiar), corre `generar_consolidado` con
+solo la sección `subastas` y revisa la hoja escrita. **Falta correrlo una vez contra Access
+reales en Windows**: es el próximo paso natural.
