@@ -2748,3 +2748,53 @@ queda vacia, y el FMA de la central que no participo queda en 0 mientras la que 
 conserva su valor base. Ademas, un caso end-to-end que escribe `Consolidado_entradas.xlsx` con las
 seis filas completas: `FD` con dato en todas y `FMA` = 0,3201 / 0,5 / 0 segun corresponda.
 **Falta compararlo contra un `DB!Y` y un `DB!AC` reales** (§30 del documento).
+
+---
+
+## 2026-09-12 (10) — Boton "Traer inputs" y el FMA CPF que tardaba una eternidad
+
+Dos pedidos que resultaron ser el mismo problema visto de dos lados.
+
+**El sintoma:** el usuario corrio "Generar" del FMA CPF y "se demora mil años", contra los 25
+segundos que tarda `entradas_sscc.py` haciendo lo mismo.
+
+**La causa, y es culpa de como estaba escrito:** `buscar_tabla_resumen()` hacia un `rglob("*")`
+-recursivo- sobre la carpeta de reportes **por cada dia del mes**. O sea 31 recorridos completos de
+un arbol con 31 subcarpetas y sus archivos, sobre una carpeta de RED. Y ademas la busqueda de
+version llamaba a lo mismo una vez por version. El script original no busca nada: arma la ruta
+`Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx` y abre el archivo.
+
+**El arreglo** (`indexar_reportes_cpf()`): se prueba la **ruta exacta** de cada dia -una consulta
+por dia, **cero listados de carpeta** en el caso normal- y recien para los dias que fallan se lista
+la carpeta de reportes UNA vez, para tolerar las variantes (cero a la izquierda en la carpeta,
+sufijo `_UTC-4` en el archivo). Medido con un arbol como el real (31 dias x 17 archivos): la
+version vieja tardaba **114 veces mas** en disco local; sobre red la diferencia es mucho mayor,
+porque cada recorrido recursivo son cientos de idas y vueltas. De paso, el respaldo que buscaba la
+carpeta `*Respuesta_CPF*` con `rglob` desde la carpeta de version -que abajo tiene TODOS los
+reportes diarios- se acoto a tres niveles de profundidad.
+
+**El boton "Traer inputs"** (pedido del usuario) ataca lo mismo por el otro lado: copia a
+`<CARPETA_BASE>/FD y FMA/inputs/` las entradas de los tres FMA
+
+    inputs/
+        tabla_resumen_<D>_<M>_<AAAA>.xlsx   <- entradas de CPF
+        CTF_<AAAA><MM>.csv                  <- entrada de CTF
+        agcface/csf_<AAAAMMDD>.xlsx         <- entradas de CSF
+
+y los tres "Generar" ahora **miran primero ahi**: si las entradas ya estan, no tocan la red en
+absoluto (se probo con la raiz del DCO y la del SCADA apuntando a carpetas inexistentes: las tres
+salidas se generan igual). Ademas queda registrado con que entradas se armo cada salida, que es la
+misma idea de "DB subastas" para los Access.
+
+La carpeta de los del AGC se muda de `FD y FMA/agcface/` a `FD y FMA/inputs/agcface/`, como pidio
+el usuario; si un caso viejo tiene la de antes y no la nueva, se sigue usando la vieja.
+
+**Dos detalles del cableado:** `indexar_reportes_cpf()` acepta tanto el arbol del DCO (carpetas
+"Reporte diario") como una carpeta plana (los `tabla_resumen` todos juntos, que es como quedan en
+`inputs/`), resolviendo las dos formas con el mismo listado. Y la carpeta del DCO se resuelve
+**solo si de verdad hace falta**: antes se resolvia siempre y, con las entradas ya locales, el log
+avisaba que no alcanzaba la red aunque no la necesitara para nada.
+
+**Verificación:** ademas del caso de performance, uno end-to-end que trae los inputs de un DCO y un
+SCADA simulados y despues genera los tres FMA con las dos raices de red apuntando a carpetas que
+no existen — los tres salen, y el `fma_cpf` da el 0,3201 de siempre.

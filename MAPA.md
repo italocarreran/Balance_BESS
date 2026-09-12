@@ -69,6 +69,7 @@ importable como cualquier módulo.
   | `Medidas/Medidas_SAE.xlsx` | **Actualizar** | `nucleo.generar_medidas_sae` — corre los cuatro pasos de Medidas de un viaje |
   | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
   | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
+  | `FD y FMA/` | **Traer inputs** | `nucleo.traer_inputs_fma` — baja a `inputs/` las entradas de los tres FMA (reportes de CPF, CTF y los del AGC) |
   | `FD y FMA/SSCC_Desempeño_*` | **Traer FD** | `nucleo.traer_fd` — baja el FD del período del árbol de indicadores del DCO y descomprime el zip |
   | `FD y FMA/fma_cpf_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"cpf"}` — desde los reportes diarios del DCO |
   | `FD y FMA/fma_csf_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"csf"}` — trae los reportes del AGC a `agcface/` y los concatena |
@@ -283,6 +284,9 @@ importable como cualquier módulo.
   busca `Script/Subastas/Fma.py`. Las dos mitades están probadas juntas: lo que
   escribe este módulo lo lee aquel sin tocar nada.
 - **Expone:** `ErrorIndicesFma`; `nombre_salida(tipo, aamm)`,
+  `carpeta_inputs(...)`, `carpeta_agcface(...)`,
+  `traer_inputs(carpeta_destino, aamm, ...)` → `(resumen, faltantes)`,
+  `indexar_reportes_cpf(carpeta, anio, mes, dias=None)` → `{día: ruta}`,
   `buscar_carpeta_respuesta_cpf(...)`, `buscar_tabla_resumen(...)`,
   `construir_fma_cpf/csf/ctf(...)`, `traer_agc_face(...)`, `TIPOS_FMA`,
   `buscar_reportes_cpf(...)`, `buscar_ctf(...)`,
@@ -306,6 +310,13 @@ importable como cualquier módulo.
     justamente en la prueba.
   - un día sin archivo se saltea con aviso (el original revienta), y si falta el
     origen de una, las otras se arman igual.
+  - **`indexar_reportes_cpf()` es lo que decide si el botón tarda segundos o
+    minutos.** La primera versión hacía un `rglob` recursivo **por cada día**, o
+    sea 31 recorridos completos del árbol de reportes sobre una carpeta de red.
+    Ahora prueba la **ruta exacta** de cada día (una consulta por día, cero
+    listados en el caso normal) y solo para los que fallan lista la carpeta una
+    vez. Medido sobre disco local: 114× más rápido; sobre red la diferencia es
+    mucho mayor, porque cada recorrido son cientos de idas y vueltas.
   - **el CSF no necesita el DCO publicado** (su origen es otro servidor), así que
     su botón funciona aunque el mes todavía no tenga indicadores publicados.
   - los reportes del AGC se llaman **`csf_<AAAAMMDD>`** (confirmado por el

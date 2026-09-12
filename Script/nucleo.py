@@ -109,6 +109,11 @@ HOJA_SUBASTAS_ORIGEN = "DB"
 # Ofertas_Adjudicadas.py, no este modulo.
 CARPETA_DB_SUBASTAS = ofertas_adj.CARPETA_DB_SUBASTAS
 
+# Dentro de "FD y FMA/", donde se copian las entradas del FMA con el
+# boton "Traer inputs" (los reportes de CPF, el CTF y la carpeta de los
+# del AGC). Las conoce Script/Fd/Indices_FMA.py.
+CARPETA_INPUTS_FMA = indices_fma.CARPETA_INPUTS
+
 ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
 
 # Etapa siguiente (Calculo E Costos / "Ecostos"): el usuario pidio que
@@ -795,10 +800,38 @@ def revisar_estructura(carpeta_base, aamm=None):
     # ---- FD y FMA/ ------------------------------------------------
     # Se muestra el nombre de la carpeta que REALMENTE se esta usando
     # (puede ser la vieja si el caso todavia no se renombro).
-    agregar(
-        "sscc_dir", f"{rutas['sscc_desempeno_dir'].name}/", 0,
-        rutas["sscc_desempeno_dir"].is_dir(),
+    filas.append(
+        _fila(
+            "sscc_dir", f"{rutas['sscc_desempeno_dir'].name}/", 0,
+            "ok" if rutas["sscc_desempeno_dir"].is_dir() else "falta",
+            (
+                "las entradas de los FMA se bajan aca con el boton ->"
+                if rutas["sscc_desempeno_dir"].is_dir() else ""
+            ),
+        )
     )
+
+    # La carpeta de entradas del FMA: no bloquea nada, pero si esta, los
+    # "Generar" trabajan contra el disco local en vez de la red.
+    carpeta_inputs = rutas["sscc_desempeno_dir"] / CARPETA_INPUTS_FMA
+    rutas["inputs_fma"] = carpeta_inputs
+
+    if carpeta_inputs.is_dir():
+        cuantos = sum(1 for _ in carpeta_inputs.rglob("*") if _.is_file())
+        filas.append(
+            _fila(
+                "inputs_fma", f"{CARPETA_INPUTS_FMA}/", 1, "ok",
+                f"{cuantos} archivo(s); con esto los 'Generar' no tocan "
+                f"la red",
+            )
+        )
+    else:
+        filas.append(
+            _fila(
+                "inputs_fma", f"{CARPETA_INPUTS_FMA}/", 1, "pendiente",
+                "entradas de los tres FMA: se bajan con 'Traer inputs'",
+            )
+        )
 
     archivo_sscc = buscar_archivo_sscc_desempeno(rutas["sscc_desempeno_dir"])
     rutas["sscc_desempeno"] = archivo_sscc
@@ -7767,6 +7800,65 @@ def traer_fd(carpeta_base, aamm, version=None, registrar=print, progreso=None):
     )
 
     return destino
+
+
+def traer_inputs_fma(
+    carpeta_base, aamm, version=None, registrar=print, progreso=None
+):
+    """
+    Copia a <CARPETA_BASE>/FD y FMA/inputs/ todas las entradas del FMA
+    del periodo: los reportes diarios de CPF, el CTF_AAMM.csv y los
+    reportes del AGC (estos en su subcarpeta 'agcface/'). Boton "Traer
+    inputs" de la fila de la carpeta.
+
+    Despues de esto, los tres botones "Generar" trabajan contra el
+    disco local y no contra la red.
+    """
+
+    aamm = validar_aamm(aamm)
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["base"].is_dir():
+        raise ErrorEntrada(f"No se encontro la carpeta base {rutas['base']}")
+
+    destino = rutas["sscc_desempeno_dir"]
+
+    if not destino.is_dir():
+        raise ErrorEntrada(
+            f"No se encontro la carpeta {CARPETA_FD_FMA}/ en "
+            f"{rutas['base']}"
+        )
+
+    if progreso:
+        progreso(5)
+
+    registrar(f"Trayendo las entradas de FMA del periodo {aamm}...")
+
+    try:
+        resumen, faltantes = indices_fma.traer_inputs(
+            destino, aamm, version=version, registrar=registrar
+        )
+    except (indices_fma.ErrorIndicesFma, indicadores_dco.ErrorFd) as error:
+        raise ErrorEntrada(str(error)) from error
+    except OSError as error:
+        raise ErrorEntrada(f"No se pudieron traer las entradas: {error}") from error
+
+    for faltante in faltantes:
+        registrar(f"  [AVISO] no se pudo traer la entrada de {faltante}")
+
+    if progreso:
+        progreso(100)
+
+    detalle = ", ".join(
+        f"{tipo.upper()}: {cuenta}" for tipo, cuenta in sorted(resumen.items())
+    )
+
+    registrar(
+        f"Listo: {detalle} en "
+        f"{destino / CARPETA_INPUTS_FMA}"
+    )
+
+    return destino / CARPETA_INPUTS_FMA
 
 
 def generar_fma(

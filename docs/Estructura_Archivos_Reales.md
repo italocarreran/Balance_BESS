@@ -359,6 +359,10 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 
 ### 6b. `FD y FMA/fma_cpf_*.xlsx`, `fma_csf_*.xlsx`, `fma_cft_*.xlsx` — de donde sale `Subastas!FMA`
 
+- **Dónde quedan las entradas**: el botón **"Traer inputs"** de la fila de la carpeta las copia
+  todas a `FD y FMA/inputs/` — los `tabla_resumen_*` de CPF y el `CTF_*.csv` sueltos ahí, y los
+  `csf_*` del AGC en `inputs/agcface/`. Con eso los tres "Generar" trabajan contra el disco local
+  en vez de la red, y queda registrado con qué entradas se armó cada salida.
 - **Qué son**: las tres salidas de FMA de `entradas_sscc.py`. **Las arma el propio programa**, cada
   una con su botón **"Generar"** (`Script/Fd/Indices_FMA.py`), que replica las tres rutinas de ese
   script. También se pueden dejar a mano en la carpeta, si ya se generaron aparte.
@@ -367,7 +371,7 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
   | | Origen |
   |---|---|
   | CPF | `…\Indicadores Publicar\<V1\|V2>\01 Respuesta\01 Indices CPF\20AA.MM_Respuesta_CPF\Reporte diario D-M-20AA\tabla_resumen_D_M_20AA.xlsx` |
-  | CSF | `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10` — **están todos los meses juntos**: se eligen los del período por su nombre (`csf_<AAAAMMDD>`, ej. `csf_20260301.xlsx`) y se copian a `FD y FMA/agcface/` |
+  | CSF | `\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10` — **están todos los meses juntos**: se eligen los del período por su nombre (`csf_<AAAAMMDD>`, ej. `csf_20260301.xlsx`) y se copian a `FD y FMA/inputs/agcface/` |
   | CTF | `…\Indicadores Publicar\<V1\|V2>\01 Respuesta\06 Indices CTF\CTF_<AAAA><MM>.csv` |
 - **Patrón**: el nombre empieza con `fma_cpf` / `fma_csf` / `fma_cft` (o `fma_ctf`) y contiene el
   AAMM. Acepta `.xlsx`, `.xlsm`, `.xls` y `.csv`. Si hay varios, el más reciente. Todos traen a la

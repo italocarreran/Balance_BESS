@@ -26,7 +26,11 @@ unico-:
         Cmg/
             cmg<AAMM>_def_15minutal.csv    [Traer cmg_15min]
             cmg.xlsx                       [Generar]
-        FD y FMA/
+        FD y FMA/                          [Traer inputs]
+            inputs/                        <- lo que baja ese boton
+                tabla_resumen_<D>_<M>_<AAAA>.xlsx   (entrada de CPF)
+                CTF_<AAAA><MM>.csv                  (entrada de CTF)
+                agcface/csf_<AAAAMMDD>.xlsx         (entrada de CSF)
             SSCC_Desempeño_<algo>.xlsx     [Traer FD]
             fma_cpf_<AAMM>.xlsx            [Generar]
             fma_csf_<AAMM>.xlsx            [Generar]
@@ -453,6 +457,9 @@ def main():
         # Un boton por cosa que produce: el FD lo trae la fila de su
         # archivo, y las tres salidas de FMA las arma un solo boton,
         # colgado de la primera de las tres.
+        if id_fila == "sscc_dir":
+            return ("Traer inputs", traer_inputs_fma)
+
         if id_fila == "sscc":
             return ("Traer FD", traer_fd)
 
@@ -770,6 +777,30 @@ def main():
             f"{nucleo.CARPETA_FD_FMA}/",
         )
 
+    def traer_inputs_fma():
+        """
+        Copia a <CARPETA_BASE>/FD y FMA/inputs/ las entradas de los tres
+        FMA (reportes de CPF, CTF y los del AGC).
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
+            return
+
+        lanzar(
+            nucleo.traer_inputs_fma,
+            dict(carpeta_base=ruta, aamm=aamm),
+            f"{nucleo.CARPETA_INPUTS_FMA}/",
+        )
+
     def generar_fma(tipo):
         """
         Arma una de las tres salidas de FMA del periodo en
@@ -944,8 +975,9 @@ def main():
     log(
         "Selecciona la carpeta base del caso e ingresa el periodo "
         "(AAMM). Cada fila del diagrama de abajo trae su propio boton: "
-        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer FD' y un "
-        "'Generar' por cada FMA en 'FD y FMA/', 'Traer subastas' en "
+        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer inputs', "
+        "'Traer FD' y un 'Generar' por cada FMA en 'FD y FMA/', "
+        "'Traer subastas' en "
         "Subastas/DB subastas/, 'Actualizar' en cada hoja de "
         "Consolidado_entradas.xlsx y 'Calcular' en cada hoja de "
         "Pagos_BESS.xlsx."

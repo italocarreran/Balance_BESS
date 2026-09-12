@@ -90,7 +90,15 @@ PLANTILLA_TABLA_RESUMEN = "tabla_resumen_{dia}_{mes}_{anio}"
 # periodo. Cuarta y ultima ruta de red del programa.
 RAIZ_AGC_FACE = r"\\nas-cen1\D. Transferencias\SCADA\reporte_agc_face_NM10"
 
-# Subcarpeta (dentro de "FD y FMA/") donde se copian los del mes. El
+# Las entradas del FMA se copian a <CARPETA_BASE>/FD y FMA/inputs/ con
+# el boton "Traer inputs": los reportes diarios de CPF y el CTF sueltos
+# ahi, y los del AGC en su propia subcarpeta. Asi el "Generar" de cada
+# FMA trabaja contra el disco local y no contra la red -que es lo que
+# lo hacia lento-, y ademas queda registrado con que entradas se armo
+# cada salida.
+CARPETA_INPUTS = "inputs"
+
+# Subcarpeta (dentro de "inputs/") donde se copian los del mes. El
 # nombre lo eligio el usuario, sin guion bajo.
 CARPETA_AGC_FACE = "agcface"
 # Confirmado por el usuario: los reportes del AGC se llaman asi
@@ -172,6 +180,27 @@ def nombre_salida(tipo, aamm):
 bajar_por_subcarpetas = dco.bajar_por_subcarpetas
 
 
+def _carpetas_hasta(carpeta, profundidad):
+    """
+    Las subcarpetas hasta N niveles, sin bajar mas. Se usa en vez de
+    rglob() donde el arbol de abajo es enorme (los reportes diarios).
+    """
+
+    actuales = [Path(carpeta)]
+
+    for _ in range(profundidad):
+
+        siguientes = []
+
+        for padre in actuales:
+            for hijo in _listar(padre):
+                if hijo.is_dir():
+                    yield hijo
+                    siguientes.append(hijo)
+
+        actuales = siguientes
+
+
 def buscar_carpeta_respuesta_cpf(carpeta_version):
     """
     Ubica la carpeta '20AA.MM_Respuesta_CPF' (la que tiene adentro un
@@ -191,64 +220,179 @@ def buscar_carpeta_respuesta_cpf(carpeta_version):
             ):
                 return hijo
 
-    try:
-        for ruta in carpeta_version.rglob("*"):
-            if (
-                ruta.is_dir()
-                and PATRON_CARPETA_RESPUESTA_CPF in dco._normalizar(
-                    ruta.name
-                ).replace(" ", "_")
-            ):
-                return ruta
-    except OSError as error:
-        raise ErrorIndicesFma(
-            f"No se pudo recorrer {carpeta_version}: {error}"
-        ) from error
+    # Respaldo: si el DCO la movio de rama, se busca por nombre pero
+    # SIN recorrer el arbol entero -adentro de la carpeta de version
+    # estan los reportes diarios, o sea cientos de carpetas, y eso sobre
+    # red es carisimo-. Tres niveles alcanzan de sobra.
+    for ruta in _carpetas_hasta(carpeta_version, profundidad=3):
+        if PATRON_CARPETA_RESPUESTA_CPF in (
+            dco._normalizar(ruta.name).replace(" ", "_")
+        ):
+            return ruta
 
     return None
 
 
-def buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia):
-    """
-    El `tabla_resumen_<D>_<M>_<AAAA>.xlsx` del dia, buscado
-    recursivamente (cuelga de una carpeta "Reporte diario <D>-<M>-<AAAA>",
-    pero el nombre de esa carpeta cambia). El dia y el mes van SIN cero
-    a la izquierda, como los escribe el DCO.
+def _listar(carpeta):
+    """iterdir() que no revienta si la carpeta no se puede leer."""
 
-    Se acepta cualquier sufijo despues del año porque existen variantes
-    con la zona horaria en el nombre (`..._UTC-4.xlsx`, `..._utc-3.xlsx`).
+    try:
+        return list(Path(carpeta).iterdir())
+    except OSError:
+        return []
+
+
+def _dia_de_carpeta_reporte(nombre, mes, anio):
     """
+    'Reporte diario 7-3-2026' -> 7. None si el nombre no es de una
+    carpeta de reporte diario de ese mes.
+    """
+
+    texto = dco._normalizar(nombre)
+
+    if not texto.startswith("reporte diario"):
+        return None
+
+    numeros = re.findall(r"\d+", texto)
+
+    if len(numeros) < 3:
+        return None
+
+    dia, mes_nombre, anio_nombre = (int(n) for n in numeros[:3])
+
+    if mes_nombre != mes or anio_nombre not in (anio, anio % 100):
+        return None
+
+    return dia
+
+
+def indexar_reportes_cpf(carpeta_respuesta, anio, mes, dias=None):
+    """
+    dia -> ruta del `tabla_resumen` de ese dia, para todo el mes.
+
+    **Esta funcion es la que decide si el boton tarda 20 segundos o
+    varios minutos.** La version anterior hacia un `rglob` recursivo
+    por CADA dia, o sea 31 recorridos completos del arbol de reportes
+    sobre una carpeta de red: eso es lo que lo hacia eterno (el script
+    original arma la ruta y abre el archivo, sin buscar nada).
+
+    Ahora:
+
+      1) se prueba la ruta EXACTA de cada dia
+         (`Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx`),
+         que es una sola consulta por dia y resuelve el caso normal;
+      2) solo para los dias que fallaron se lista la carpeta de
+         reportes UNA vez, se ubica la carpeta de cada dia por su
+         nombre y se lista esa sola carpeta, para tolerar las
+         variantes (cero a la izquierda, sufijo `_UTC-4`, etc.).
+
+    `dias` permite pedir solo algunos (lo usa la busqueda de version,
+    que con encontrar uno ya sabe que esa version sirve).
+    """
+
+    carpeta_respuesta = Path(carpeta_respuesta)
+    dias = list(dias if dias is not None else range(1, _dias_del_mes(anio, mes) + 1))
+
+    encontrados = {}
+    faltantes = []
+
+    # (1) La ruta exacta, tal como la arma entradas_sscc.py.
+    for dia in dias:
+
+        directa = (
+            carpeta_respuesta
+            / f"Reporte diario {dia}-{mes}-{anio}"
+            / (PLANTILLA_TABLA_RESUMEN.format(dia=dia, mes=mes, anio=anio)
+               + ".xlsx")
+        )
+
+        if directa.is_file():
+            encontrados[dia] = directa
+        else:
+            faltantes.append(dia)
+
+    if not faltantes:
+        return encontrados
+
+    # (2) Un solo listado de la carpeta para los dias que faltan. De ese
+    # listado salen las dos formas posibles: las carpetas "Reporte
+    # diario ..." (el arbol del DCO) y los `tabla_resumen` sueltos (la
+    # carpeta inputs/, donde se copian todos juntos).
+    contenido = _listar(carpeta_respuesta)
+
+    carpetas_por_dia = {}
+    sueltos = []
+
+    for hijo in contenido:
+        if hijo.is_dir():
+            dia = _dia_de_carpeta_reporte(hijo.name, mes, anio)
+            if dia is not None:
+                carpetas_por_dia.setdefault(dia, hijo)
+        elif hijo.suffix.lower() in EXTENSIONES_EXCEL:
+            sueltos.append(hijo)
+
+    for dia in faltantes:
+
+        carpeta_dia = carpetas_por_dia.get(dia)
+
+        ruta = (
+            _tabla_resumen_en(carpeta_dia, anio, mes, dia)
+            if carpeta_dia is not None else None
+        )
+
+        if ruta is None:
+            ruta = _elegir_tabla_resumen(sueltos, anio, mes, dia)
+
+        if ruta is not None:
+            encontrados[dia] = ruta
+
+    return encontrados
+
+
+def _tabla_resumen_en(carpeta_dia, anio, mes, dia):
+    """
+    El `tabla_resumen` del dia dentro de SU carpeta (un solo listado,
+    sin recorrer nada mas). Se acepta cualquier sufijo despues del año,
+    porque hay variantes con la zona horaria en el nombre
+    (`..._UTC-4.xlsx`, `..._utc-3.xlsx`); gana el nombre "pelado" y, si
+    no esta, el mas reciente.
+    """
+
+    return _elegir_tabla_resumen(
+        [r for r in _listar(carpeta_dia) if r.is_file()], anio, mes, dia
+    )
+
+
+def _elegir_tabla_resumen(archivos, anio, mes, dia):
+    """El `tabla_resumen` del dia entre una lista de archivos ya leida."""
 
     prefijo = dco._normalizar(
         PLANTILLA_TABLA_RESUMEN.format(dia=dia, mes=mes, anio=anio)
     )
 
-    candidatos = []
-
-    try:
-        for ruta in Path(carpeta_respuesta).rglob("*"):
-            if (
-                ruta.is_file()
-                and ruta.suffix.lower() in EXTENSIONES_EXCEL
-                and dco._normalizar(ruta.stem).startswith(prefijo)
-            ):
-                candidatos.append(ruta)
-    except OSError:
-        return None
+    candidatos = [
+        r for r in archivos
+        if r.suffix.lower() in EXTENSIONES_EXCEL
+        and dco._normalizar(r.stem).startswith(prefijo)
+    ]
 
     if not candidatos:
         return None
 
-    # El nombre "pelado" (sin sufijo de zona horaria) primero; si no,
-    # el mas reciente.
-    exactos = [
-        r for r in candidatos if dco._normalizar(r.stem) == prefijo
-    ]
+    exactos = [r for r in candidatos if dco._normalizar(r.stem) == prefijo]
 
     if exactos:
         return exactos[0]
 
     return max(candidatos, key=lambda r: r.stat().st_mtime)
+
+
+def buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia):
+    """El `tabla_resumen` de un dia suelto (ver indexar_reportes_cpf)."""
+
+    return indexar_reportes_cpf(
+        carpeta_respuesta, anio, mes, dias=[dia]
+    ).get(dia)
 
 
 def buscar_reportes_cpf(carpeta_version, aamm):
@@ -259,6 +403,8 @@ def buscar_reportes_cpf(carpeta_version, aamm):
     Ese "solo si" es el punto: puede existir la carpeta V2 y estar
     vacia (recien creada, a medio subir), y en ese caso hay que seguir
     buscando en V1. Devuelve None si no sirve.
+
+    Alcanza con encontrar UN dia, asi que no se indexa el mes entero.
     """
 
     carpeta_respuesta = buscar_carpeta_respuesta_cpf(carpeta_version)
@@ -268,9 +414,8 @@ def buscar_reportes_cpf(carpeta_version, aamm):
 
     anio, mes = dco.periodo_desde_aamm(aamm)
 
-    for dia in range(1, _dias_del_mes(anio, mes) + 1):
-        if buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia):
-            return carpeta_respuesta
+    if indexar_reportes_cpf(carpeta_respuesta, anio, mes):
+        return carpeta_respuesta
 
     return None
 
@@ -307,16 +452,22 @@ def construir_fma_cpf(carpeta_respuesta, aamm, registrar=print):
     anio, mes = dco.periodo_desde_aamm(aamm)
     dias_del_mes = _dias_del_mes(anio, mes)
 
+    # Un solo indice para todo el mes (ver indexar_reportes_cpf): antes
+    # esto buscaba dia por dia recorriendo el arbol entero cada vez.
+    reportes = indexar_reportes_cpf(carpeta_respuesta, anio, mes)
+
     partes = []
     dias_sin_archivo = []
 
     for dia in range(1, dias_del_mes + 1):
 
-        ruta = buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia)
+        ruta = reportes.get(dia)
 
         if ruta is None:
             dias_sin_archivo.append(dia)
             continue
+
+        registrar(f"  leyendo {ruta.name}...")
 
         try:
             excel = pd.ExcelFile(ruta)
@@ -406,10 +557,28 @@ def ruta_agc_face(raiz=None):
     return Path(raiz or RAIZ_AGC_FACE)
 
 
-def carpeta_agcface(carpeta_destino):
-    """<CARPETA_BASE>/FD y FMA/ -> <...>/FD y FMA/agcface/"""
+def carpeta_inputs(carpeta_destino):
+    """<CARPETA_BASE>/FD y FMA/ -> <...>/FD y FMA/inputs/"""
 
-    return Path(carpeta_destino) / CARPETA_AGC_FACE
+    return Path(carpeta_destino) / CARPETA_INPUTS
+
+
+def carpeta_agcface(carpeta_destino):
+    """
+    <CARPETA_BASE>/FD y FMA/ -> <...>/FD y FMA/inputs/agcface/
+
+    Si un caso viejo todavia tiene la de antes (colgando directo de
+    "FD y FMA/") y la nueva no existe, se usa esa.
+    """
+
+    nueva = carpeta_inputs(carpeta_destino) / CARPETA_AGC_FACE
+
+    if not nueva.is_dir():
+        vieja = Path(carpeta_destino) / CARPETA_AGC_FACE
+        if vieja.is_dir():
+            return vieja
+
+    return nueva
 
 
 def traer_agc_face(carpeta_destino, aamm, raiz=None, registrar=print):
@@ -697,6 +866,152 @@ def _buscar_en(carpetas, prefijo, extensiones, recursivo=False):
 TIPOS_FMA = ("cpf", "csf", "ctf")
 
 
+def traer_inputs(
+    carpeta_destino, aamm, version=None, raiz=None, raiz_agc=None,
+    registrar=print,
+):
+    """
+    Copia a <CARPETA_BASE>/FD y FMA/inputs/ TODAS las entradas del FMA
+    del periodo (boton "Traer inputs"):
+
+        inputs/
+            tabla_resumen_<D>_<M>_<AAAA>.xlsx   <- los reportes de CPF
+            CTF_<AAAA><MM>.csv                  <- la entrada del CTF
+            agcface/
+                csf_<AAAA><MM><DD>.xlsx         <- los reportes del AGC
+
+    Sirve para dos cosas: deja registrado con que entradas se armo cada
+    salida, y hace que el "Generar" de cada FMA trabaje contra el disco
+    local en vez de la carpeta de red.
+
+    Devuelve (resumen, faltantes), donde resumen es un dict por tipo con
+    la cuenta de archivos que quedaron.
+    """
+
+    anio, mes = dco.periodo_desde_aamm(aamm)
+    carpeta_destino = Path(carpeta_destino)
+
+    if not carpeta_destino.is_dir():
+        raise ErrorIndicesFma(f"No se encontro la carpeta {carpeta_destino}")
+
+    destino = carpeta_inputs(carpeta_destino)
+
+    try:
+        destino.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ErrorIndicesFma(
+            f"No se pudo crear {destino}: {error}"
+        ) from error
+
+    carpeta_publicacion = dco.carpeta_del_periodo(aamm, raiz=raiz)
+
+    resumen, faltantes = {}, []
+
+    # ---- reportes diarios de CPF ----
+    carpeta_version, carpeta_respuesta, revisadas = dco.buscar_en_versiones(
+        carpeta_publicacion,
+        lambda cv: buscar_reportes_cpf(cv, aamm),
+        version=version,
+        registrar=registrar,
+    )
+
+    if carpeta_respuesta is None:
+        faltantes.append(
+            f"CPF (ninguna de las versiones revisadas tiene reportes; "
+            f"revisada(s): {', '.join(revisadas)})"
+        )
+    else:
+        registrar(f"  reportes de CPF: {carpeta_respuesta}")
+        reportes = indexar_reportes_cpf(carpeta_respuesta, anio, mes)
+        resumen["cpf"] = _copiar_todos(
+            sorted(reportes.values(), key=lambda r: r.name), destino, registrar
+        )
+
+    # ---- CTF ----
+    carpeta_version_ctf, ruta_ctf, revisadas_ctf = dco.buscar_en_versiones(
+        carpeta_publicacion,
+        lambda cv: buscar_ctf(cv, aamm),
+        version=version,
+        registrar=registrar,
+    )
+
+    if ruta_ctf is None:
+        faltantes.append(
+            f"CTF (ninguna de las versiones revisadas tiene "
+            f"'{PLANTILLA_CTF.format(anio=anio, mes=mes)}*.csv'; "
+            f"revisada(s): {', '.join(revisadas_ctf)})"
+        )
+    else:
+        registrar(f"  CTF: {ruta_ctf}")
+        resumen["ctf"] = _copiar_todos([ruta_ctf], destino, registrar)
+
+    # ---- reportes del AGC ----
+    try:
+        copiados, salteados, _ = traer_agc_face(
+            carpeta_destino, aamm, raiz=raiz_agc, registrar=registrar
+        )
+        resumen["csf"] = len(copiados) + len(salteados)
+    except ErrorIndicesFma as error:
+        faltantes.append(f"CSF ({error})")
+
+    if not resumen:
+        raise ErrorIndicesFma(
+            "No se pudo traer ninguna entrada de FMA:\n  - "
+            + "\n  - ".join(faltantes)
+        )
+
+    return resumen, faltantes
+
+
+def _hay_csf_del_periodo(carpeta, anio, mes):
+    """True si la carpeta ya tiene algun csf_ del periodo."""
+
+    prefijo = dco._normalizar(f"csf_{anio}{mes:02d}")
+
+    return any(
+        r.is_file()
+        and r.suffix.lower() in EXTENSIONES_EXCEL
+        and dco._normalizar(r.stem).startswith(prefijo)
+        for r in _listar(carpeta)
+    )
+
+
+def _copiar_todos(rutas, destino, registrar=print):
+    """
+    Copia una lista de archivos a la carpeta destino, salteando los que
+    ya estan al dia. Devuelve cuantos quedaron.
+    """
+
+    copiados = salteados = 0
+
+    for ruta in rutas:
+
+        ruta_destino = Path(destino) / ruta.name
+
+        if (
+            ruta_destino.is_file()
+            and ruta_destino.stat().st_size == ruta.stat().st_size
+            and int(ruta_destino.stat().st_mtime) == int(ruta.stat().st_mtime)
+        ):
+            salteados += 1
+            continue
+
+        try:
+            shutil.copy2(ruta, ruta_destino)
+        except OSError as error:
+            raise ErrorIndicesFma(
+                f"No se pudo copiar {ruta.name}: {error}"
+            ) from error
+
+        copiados += 1
+
+    registrar(
+        f"  {copiados} copiado(s), {salteados} ya estaban al dia"
+    )
+
+    return copiados + salteados
+
+
 def generar_fma(
     carpeta_destino,
     aamm,
@@ -745,10 +1060,23 @@ def generar_fma(
     # y tener el CPF pero no el CTF (o al reves), y cada uno tiene que
     # usar la version mas alta que tenga SU archivo -pedido explicito
     # del usuario-. Por eso `versiones` es un dict por tipo.
-    carpeta_publicacion = None
+    # La carpeta del DCO se resuelve SOLO si de verdad hay que ir a
+    # buscar algo alla: con las entradas ya traidas a inputs/, el
+    # "Generar" no toca la red (ni avisa de que no la alcanza).
+    publicacion = {"resuelta": False, "carpeta": None}
 
-    if tipos & {"cpf", "ctf"}:
-        carpeta_publicacion = dco.carpeta_del_periodo(aamm, raiz=raiz)
+    def carpeta_publicacion_del_dco():
+
+        if not publicacion["resuelta"]:
+            publicacion["resuelta"] = True
+            try:
+                publicacion["carpeta"] = dco.carpeta_del_periodo(
+                    aamm, raiz=raiz
+                )
+            except dco.ErrorFd as error:
+                registrar(f"  [AVISO] {error}")
+
+        return publicacion["carpeta"]
 
     versiones = {}
 
@@ -757,25 +1085,43 @@ def generar_fma(
     # ---- CPF ----
     if "cpf" in tipos:
 
-        carpeta_version, carpeta_respuesta, revisadas = (
-            dco.buscar_en_versiones(
-                carpeta_publicacion,
-                lambda cv: buscar_reportes_cpf(cv, aamm),
-                version=version,
-                registrar=registrar,
-            )
-        )
+        # Primero lo que ya se trajo a inputs/ (disco local); si ahi no
+        # hay nada, se va al DCO.
+        carpeta_respuesta = None
+        carpeta_version = None
+        revisadas = []
+
+        locales = carpeta_inputs(carpeta_destino)
+
+        if indexar_reportes_cpf(locales, anio, mes):
+            carpeta_respuesta = locales
+            registrar(f"  reportes de CPF: {locales} (ya traidos)")
+        else:
+            carpeta_publicacion = carpeta_publicacion_del_dco()
+
+            if carpeta_publicacion is not None:
+                carpeta_version, carpeta_respuesta, revisadas = (
+                    dco.buscar_en_versiones(
+                        carpeta_publicacion,
+                        lambda cv: buscar_reportes_cpf(cv, aamm),
+                        version=version,
+                        registrar=registrar,
+                    )
+                )
 
         if carpeta_respuesta is None:
             faltantes.append(
-                f"CPF (ninguna de las versiones revisadas tiene reportes "
-                f"'tabla_resumen' del periodo bajo "
-                f"{'/'.join(SUBCARPETAS_CPF)}; revisada(s): "
-                f"{', '.join(revisadas)})"
+                f"CPF (no hay reportes 'tabla_resumen' del periodo ni en "
+                f"{carpeta_inputs(carpeta_destino)} ni en el DCO bajo "
+                f"{'/'.join(SUBCARPETAS_CPF)}"
+                + (f"; version(es) revisada(s): {', '.join(revisadas)}"
+                   if revisadas else "")
+                + ")"
             )
         else:
-            versiones["cpf"] = carpeta_version.name
-            registrar(f"  reportes diarios de CPF: {carpeta_respuesta}")
+            if carpeta_version is not None:
+                versiones["cpf"] = carpeta_version.name
+                registrar(f"  reportes diarios de CPF: {carpeta_respuesta}")
             df_cpf = construir_fma_cpf(carpeta_respuesta, aamm, registrar)
             escritos["cpf"] = _escribir(
                 df_cpf, carpeta_destino / nombre_salida("cpf", aamm)
@@ -785,9 +1131,17 @@ def generar_fma(
     if "csf" in tipos:
 
         try:
-            _, _, carpeta_csf = traer_agc_face(
-                carpeta_destino, aamm, raiz=raiz_agc, registrar=registrar
-            )
+            carpeta_ya_traida = carpeta_agcface(carpeta_destino)
+
+            if _hay_csf_del_periodo(carpeta_ya_traida, anio, mes):
+                carpeta_csf = carpeta_ya_traida
+                registrar(
+                    f"  reportes del AGC: {carpeta_csf} (ya traidos)"
+                )
+            else:
+                _, _, carpeta_csf = traer_agc_face(
+                    carpeta_destino, aamm, raiz=raiz_agc, registrar=registrar
+                )
         except ErrorIndicesFma as error:
             # Si no se pudo traer de la red, se intenta igual con lo que
             # ya haya copiado en agcface/: puede ser una corrida
@@ -815,17 +1169,26 @@ def generar_fma(
 
         prefijo_ctf = PLANTILLA_CTF.format(anio=anio, mes=mes)
 
-        carpeta_version, ruta_ctf, revisadas = dco.buscar_en_versiones(
-            carpeta_publicacion,
-            lambda cv: buscar_ctf(cv, aamm),
-            version=version,
-            registrar=registrar,
+        carpeta_version = None
+        revisadas = []
+
+        # Primero lo que ya se trajo a inputs/ (o lo que el usuario haya
+        # dejado a mano en la carpeta del caso).
+        ruta_ctf = _buscar_en(
+            [carpeta_inputs(carpeta_destino), carpeta_destino],
+            prefijo_ctf, (".csv",),
         )
 
         if ruta_ctf is None:
-            # Ultimo intento: que el usuario lo haya dejado a mano en la
-            # carpeta del caso.
-            ruta_ctf = _buscar_en([carpeta_destino], prefijo_ctf, (".csv",))
+            carpeta_publicacion = carpeta_publicacion_del_dco()
+
+            if carpeta_publicacion is not None:
+                carpeta_version, ruta_ctf, revisadas = dco.buscar_en_versiones(
+                    carpeta_publicacion,
+                    lambda cv: buscar_ctf(cv, aamm),
+                    version=version,
+                    registrar=registrar,
+                )
 
         if ruta_ctf is None:
             faltantes.append(
