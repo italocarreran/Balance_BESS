@@ -25,12 +25,14 @@ try:
     from .Medidas import Generacion_Real
     from .Medidas.comun import ErrorMedidas
     from .Subastas import Ofertas_Adjudicadas as ofertas_adj
+    from .Subastas import Fma as fma_subastas
 except ImportError:  # pragma: no cover - depende de como se importe
     from Cmg import Extrae_CMG_barras as extrae_cmg
     from Medidas import Homologacion, Descarga_PRMTE, Claves_Balance
     from Medidas import Generacion_Real
     from Medidas.comun import ErrorMedidas
     from Subastas import Ofertas_Adjudicadas as ofertas_adj
+    from Subastas import Fma as fma_subastas
 
 
 # ============================================================
@@ -52,7 +54,14 @@ CARPETA_MEDIDAS = "Medidas"
 CARPETA_AUXILIARES = "Auxiliares"
 CARPETA_OFERTAS = "Ofertas"
 CARPETA_CMG = "Cmg"
-CARPETA_SSCC_DESEMPENO = "SSCC_Desempeño"
+# El usuario le cambio el nombre a esta carpeta: antes "SSCC_Desempeño"
+# y ahora "FD y FMA", porque adentro van las dos cosas -el archivo
+# SSCC_Desempeño_* del que sale la hoja FD, y las salidas de los FMA
+# (fma_cpf_*, fma_csf_*, fma_cft_*) de las que sale Subastas!FMA-.
+# Se sigue aceptando el nombre viejo si la carpeta nueva no existe, para
+# que los casos ya armados no se rompan (ver resolver_rutas).
+CARPETA_FD_FMA = "FD y FMA"
+CARPETA_FD_FMA_ANTIGUA = "SSCC_Desempeño"
 CARPETA_SUBASTAS = "Subastas"
 
 ARCHIVO_MEDIDAS_SAE = "Medidas_SAE.xlsx"
@@ -232,7 +241,12 @@ def resolver_rutas(carpeta_base):
     auxiliares_dir = base / CARPETA_AUXILIARES
     ofertas_dir = base / CARPETA_OFERTAS
     cmg_dir = base / CARPETA_CMG
-    sscc_desempeno_dir = base / CARPETA_SSCC_DESEMPENO
+    # La carpeta se llama "FD y FMA"; si un caso viejo todavia tiene la
+    # de nombre anterior y no la nueva, se usa esa.
+    fd_fma_dir = base / CARPETA_FD_FMA
+
+    if not fd_fma_dir.is_dir() and (base / CARPETA_FD_FMA_ANTIGUA).is_dir():
+        fd_fma_dir = base / CARPETA_FD_FMA_ANTIGUA
     subastas_dir = base / CARPETA_SUBASTAS
 
     return {
@@ -241,7 +255,7 @@ def resolver_rutas(carpeta_base):
         "auxiliares_dir": auxiliares_dir,
         "ofertas_dir": ofertas_dir,
         "cmg_dir": cmg_dir,
-        "sscc_desempeno_dir": sscc_desempeno_dir,
+        "sscc_desempeno_dir": fd_fma_dir,
         "subastas_dir": subastas_dir,
         "db_subastas_dir": subastas_dir / CARPETA_DB_SUBASTAS,
         "medidas_sae": medidas_dir / ARCHIVO_MEDIDAS_SAE,
@@ -772,9 +786,11 @@ def revisar_estructura(carpeta_base, aamm=None):
         )
     )
 
-    # ---- SSCC_Desempeño/ ------------------------------------------
+    # ---- FD y FMA/ ------------------------------------------------
+    # Se muestra el nombre de la carpeta que REALMENTE se esta usando
+    # (puede ser la vieja si el caso todavia no se renombro).
     agregar(
-        "sscc_dir", f"{CARPETA_SSCC_DESEMPENO}/", 0,
+        "sscc_dir", f"{rutas['sscc_desempeno_dir'].name}/", 0,
         rutas["sscc_desempeno_dir"].is_dir(),
     )
 
@@ -785,17 +801,57 @@ def revisar_estructura(carpeta_base, aamm=None):
         filas.append(
             _fila(
                 "sscc", archivo_sscc.name, 1, "ok",
-                f"en {CARPETA_SSCC_DESEMPENO}/",
+                f"en {CARPETA_FD_FMA}/",
             )
         )
     else:
         filas.append(
             _fila(
                 "sscc", "Archivo SSCC_Desempeño_*", 1, "falta",
-                f"ningun archivo en {CARPETA_SSCC_DESEMPENO}/ empieza "
+                f"ningun archivo en {CARPETA_FD_FMA}/ empieza "
                 f"con 'SSCC_Desempeño_'",
             )
         )
+
+    # Las tres salidas de FMA viven en la misma carpeta (pedido del
+    # usuario). No bloquean: si falta alguna, el FMA de ese tipo de
+    # servicio queda en 0, igual que la formula original.
+    archivos_fma = (
+        fma_subastas.buscar_archivos_fma(
+            rutas["sscc_desempeno_dir"], aamm_valido
+        )
+        if aamm_valido else {"cpf": None, "csf": None, "ctf": None}
+    )
+    rutas["fma"] = archivos_fma
+
+    for tipo, etiqueta in (
+        ("cpf", "fma_cpf"), ("csf", "fma_csf"), ("ctf", "fma_cft"),
+    ):
+        archivo = archivos_fma.get(tipo)
+
+        if archivo:
+            filas.append(
+                _fila(
+                    f"fma_{tipo}", archivo.name, 1, "ok",
+                    f"alimenta Subastas!FMA ({tipo.upper()})",
+                )
+            )
+        elif not aamm_valido:
+            filas.append(
+                _fila(
+                    f"fma_{tipo}", f"{etiqueta}<AAMM>.xlsx", 1, "pendiente",
+                    "ingresa el periodo (AAMM) arriba para buscarlo",
+                )
+            )
+        else:
+            filas.append(
+                _fila(
+                    f"fma_{tipo}", f"{etiqueta}_{aamm_valido}.xlsx", 1,
+                    "pendiente",
+                    f"salida de FMA {tipo.upper()}: sin ella, el FMA de "
+                    f"esas filas de Subastas queda en 0",
+                )
+            )
 
     # ---- Subastas/ ------------------------------------------------
     agregar(
@@ -2418,6 +2474,46 @@ NOMBRES_SUBASTAS = {
 }
 
 
+def _ordenar_subastas_por_hora_mes(df):
+    """
+    Deja la hoja Subastas ordenada por Hora_mes (pedido del usuario).
+    Se desempata por Configuración y Concepto para que dos corridas
+    sobre los mismos datos den exactamente el mismo archivo.
+
+    Ninguna columna de mas abajo depende del orden de las filas (todo
+    lo que consume Subastas lo hace por clave: calcular_l,
+    construir_prorrata_sscc, construir_dic_umbrales_subastas), asi que
+    ordenar es puramente de presentacion.
+    """
+
+    columnas_orden = [
+        NOMBRES_SUBASTAS["J"],   # Hora_mes
+        NOMBRES_SUBASTAS["K"],   # Configuración
+        NOMBRES_SUBASTAS["B"],   # Concepto
+    ]
+
+    presentes = [c for c in columnas_orden if c in df.columns]
+
+    if not presentes:
+        return df
+
+    # Hora_mes puede venir como texto desde la planilla 3: se ordena
+    # por su valor numerico, no alfabeticamente ("10" antes que "9").
+    auxiliar = df.copy()
+    clave_numerica = "__orden_hora_mes__"
+    auxiliar[clave_numerica] = pd.to_numeric(
+        auxiliar[presentes[0]], errors="coerce"
+    )
+
+    auxiliar = auxiliar.sort_values(
+        by=[clave_numerica] + presentes[1:],
+        kind="stable",
+        na_position="last",
+    )
+
+    return auxiliar.drop(columns=[clave_numerica]).reset_index(drop=True)
+
+
 def construir_subastas(ruta_subastas, registrar=print):
     """
     Replica Cargar_Remuneracion_Subastas_Rapido.
@@ -2491,10 +2587,11 @@ def construir_subastas(ruta_subastas, registrar=print):
 
     df = df[list("BCDEFGHIJKLMNOPQ")]
     df = df.rename(columns=NOMBRES_SUBASTAS)
+    df = _ordenar_subastas_por_hora_mes(df)
 
     registrar(
         f"  Subastas: {len(df):,} fila(s) (filtro Propietario "
-        f"contiene BESS/SAE)"
+        f"contiene BESS/SAE), ordenadas por Hora_mes"
     )
 
     return df
@@ -2542,11 +2639,12 @@ def construir_subastas(ruta_subastas, registrar=print):
 # para poder cambiarla de un lado si el usuario confirma la otra.
 COLUMNA_ENERGIA_SSCC_ACCDB = "CANTIDAD PONDERADA MW"
 
-# Columnas de Subastas que quedan PENDIENTES al leer desde el Access
-# (pedido explicito del usuario: "la columna V e Y FD y FMA quedan
-# pendientes por ahora"). En la planilla 3 venian ya pegadas en DB!Y y
-# DB!V; el Access no las tiene.
-COLUMNAS_SUBASTAS_PENDIENTES = ("P", "Q")
+# Columnas de Subastas que quedan PENDIENTES al leer desde el Access.
+# El Access no las tiene: en la planilla 3 venian pegadas en DB!Y (FD) y
+# DB!V (FMA). El FMA ya se calcula (calcular_fma_subastas, mas abajo,
+# desde las tres salidas de FD y FMA/); la unica que sigue pendiente es
+# FD, que espera su propio documento de trazabilidad.
+COLUMNAS_SUBASTAS_PENDIENTES = ("P",)
 
 
 def construir_mapa_propietario(resumen_bess):
@@ -2635,6 +2733,8 @@ def construir_subastas_desde_accdb(
     aamm,
     mapa_propietarios=None,
     dia_cambio_hora=None,
+    tablas_fma=None,
+    dic_cpf=None,
     registrar=print,
 ):
     """
@@ -2718,8 +2818,23 @@ def construir_subastas_desde_accdb(
     for letra in COLUMNAS_SUBASTAS_PENDIENTES:
         df[letra] = pd.NA
 
+    df["Q"] = pd.NA
+
     df = df[list("BCDEFGHIJKLMNOPQ")]
     df = df.rename(columns=NOMBRES_SUBASTAS)
+    df = _ordenar_subastas_por_hora_mes(df)
+
+    # FMA (Q): se calcula aca, con la hoja ya ordenada, para que la
+    # columna quede alineada fila a fila con lo que se escribe.
+    if tablas_fma:
+        df[NOMBRES_SUBASTAS["Q"]] = calcular_fma_subastas(
+            df, tablas_fma, dic_cpf=dic_cpf, registrar=registrar
+        )
+    else:
+        registrar(
+            f"  [AVISO] sin salidas de FMA en {CARPETA_FD_FMA}/: la "
+            f"columna FMA queda vacia."
+        )
 
     if mapa_propietarios:
         sin_propietario = sorted(
@@ -2744,10 +2859,325 @@ def construir_subastas_desde_accdb(
     registrar(
         f"  Subastas: {len(df):,} fila(s) desde "
         f"{resumen['archivos_leidos']} Access (filtro Configuración "
-        f"contiene BESS/SAE). FD y FMA quedan pendientes."
+        f"contiene BESS/SAE), ordenadas por Hora_mes."
     )
 
     return df
+
+
+# ============================================================
+# FMA (Subastas!Q, antes DB!V de la planilla 3)
+#
+# La formula original de DB!V mira el Concepto de la fila y busca en una
+# de tres hojas, que no son un origen: se arman pegando las tres salidas
+# de entradas_sscc.py (fma_cpf_*, fma_csf_*, fma_cft_*), que el usuario
+# ahora guarda en <CARPETA_BASE>/FD y FMA/. Script/Subastas/Fma.py lee
+# esos tres archivos y devuelve tablas normalizadas; aca se hace el
+# cruce fila por fila.
+#
+#   CPF(+) -> FMA_CPF_mas    por Central FMA CPF + Año + Mes + Dia + Hora
+#   CPF(-) -> FMA_CPF_menos  idem
+#   CSF(+) -> FMA_CSF_mas_base   * Vector de Participacion CSF
+#   CSF(-) -> FMA_CSF_menos_base * Vector de Participacion CSF
+#   CTF(+) -> FMA_CTF_mas    por unidad/Configuracion + fecha + hora
+#   CTF(-) -> FMA_CTF_menos  idem
+#   otro   -> 0
+#
+# Como en la formula original, lo que no se encuentra queda en 0 (el
+# IFERROR exterior de DB!V).
+# ============================================================
+
+# Titulo del bloque de la hoja Diccionario con la equivalencia
+# Configuración -> Central FMA CPF (el documento de trazabilidad la
+# llama "diccionario de nomenclatura CPF" y recomienda justamente
+# sacarla de la planilla y traerla a Centrales.xlsx). Si el bloque no
+# existe, se prueba igual con el nombre tal cual y se avisa.
+TITULO_BLOQUE_FMA_CPF = "fma cpf"
+
+# El Vector de Participacion CSF (DB!AC) sale de la hoja CSF_FD de la
+# planilla 3, que es parte de la trazabilidad de FD -- todavia sin
+# documentar. Hasta entonces el FMA de CSF queda en su valor BASE, que
+# es lo mismo que multiplicar por 1. Queda en una constante para que se
+# vea que es un supuesto y no un olvido.
+VECTOR_PARTICIPACION_CSF_PENDIENTE = 1.0
+
+# La formula real de DB!V tiene dos bloques consecutivos para "CTF(+)"
+# y, por como estan anidados los SI, el segundo nunca se llega a
+# evaluar: CTF(+) termina buscando solo en la primera tabla, mientras
+# que CTF(-) si busca en las dos. El documento de trazabilidad pide
+# expresamente conservar ese comportamiento en la primera replica y
+# recien despues comparar contra una version corregida.
+CTF_MAS_BUSCA_EN_LAS_DOS_TABLAS = False
+
+
+def construir_dic_bloque_diccionario(diccionario, titulo):
+    """
+    Mapa columna_izquierda -> columna_derecha del bloque de la hoja
+    Diccionario cuyo TITULO (primera fila) contiene el texto dado.
+
+    Reusa _bloques_columnas_diccionario(): la hoja son varias tablas
+    independientes puestas lado a lado ("FD" en A:B, "Subastas" en
+    E:F:G, "ofertas" en G...), cada una con su titulo arriba. Devuelve
+    {} si no hay ningun bloque con ese titulo.
+    """
+
+    objetivo = normalizar(titulo)
+
+    for columnas in _bloques_columnas_diccionario(diccionario):
+
+        if len(columnas) < 2:
+            continue
+
+        titulos = [
+            normalizar(diccionario.iloc[0, col]) for col in columnas
+        ]
+
+        if not any(objetivo in t for t in titulos if t):
+            continue
+
+        izquierda, derecha = columnas[0], columnas[1]
+        dic = {}
+
+        for indice in range(len(diccionario)):
+
+            clave = normalizar(diccionario.iloc[indice, izquierda])
+            valor = diccionario.iloc[indice, derecha]
+
+            if not clave or normalizar(clave) == objetivo:
+                continue
+
+            if clave not in dic and _tiene_valor(valor):
+                dic[clave] = _texto_seguro(valor)
+
+        return dic
+
+    return {}
+
+
+def cargar_tablas_fma(carpeta_fd_fma, aamm, registrar=print):
+    """
+    Lee de <CARPETA_BASE>/FD y FMA/ las tres salidas de FMA del periodo
+    y devuelve un dict con las tablas normalizadas. Lo que falte queda
+    en None y se avisa: el FMA de ese tipo de servicio quedara en 0,
+    igual que hace la formula original cuando no encuentra.
+    """
+
+    archivos = fma_subastas.buscar_archivos_fma(carpeta_fd_fma, aamm)
+    tablas = {"cpf": None, "csf": None, "ctf_unidad": None,
+              "ctf_configuracion": None}
+
+    try:
+        if archivos["cpf"]:
+            tablas["cpf"] = fma_subastas.tabla_cpf(
+                archivos["cpf"], registrar=registrar
+            )
+
+        if archivos["csf"]:
+            tablas["csf"] = fma_subastas.tabla_csf(
+                archivos["csf"], registrar=registrar
+            )
+
+        if archivos["ctf"]:
+            (
+                tablas["ctf_unidad"],
+                tablas["ctf_configuracion"],
+            ) = fma_subastas.tablas_ctf(
+                archivos["ctf"], registrar=registrar
+            )
+
+    except fma_subastas.ErrorFma as error:
+        raise ErrorEntrada(str(error)) from error
+
+    for tipo in ("cpf", "csf", "ctf"):
+        if not archivos[tipo]:
+            registrar(
+                f"  [AVISO] no se encontro fma_{tipo}_{aamm} en "
+                f"{CARPETA_FD_FMA}/: el FMA de las filas {tipo.upper()} "
+                f"queda en 0."
+            )
+
+    return tablas
+
+
+def _dic_desde_tabla(tabla, columnas_clave, columnas_valor):
+    """
+    DataFrame -> dict clave (tupla) -> tupla de valores. Las claves
+    numericas se pasan a int para que 3.0 y 3 sean la misma hora.
+    """
+
+    if tabla is None or tabla.empty:
+        return {}
+
+    dic = {}
+
+    for fila in tabla.itertuples(index=False):
+        valores = fila._asdict()
+
+        clave = tuple(
+            _clave_numerica_o_texto(valores[columna])
+            for columna in columnas_clave
+        )
+
+        if clave not in dic:
+            dic[clave] = tuple(valores[c] for c in columnas_valor)
+
+    return dic
+
+
+def _clave_numerica_o_texto(valor):
+    """3.0 -> 3; 'El Toro - U1' -> 'el toro - u1'."""
+
+    if isinstance(valor, str):
+        return normalizar(valor)
+
+    try:
+        if pd.isna(valor):
+            return ""
+        return int(valor)
+    except (TypeError, ValueError):
+        return normalizar(valor)
+
+
+def calcular_fma_subastas(df_subastas, tablas, dic_cpf=None, registrar=print):
+    """
+    Devuelve la columna FMA (Subastas!Q) para cada fila de Subastas,
+    replicando la formula de DB!V (ver el comentario de arriba).
+
+    dic_cpf: Configuración -> nombre de la central como aparece en
+    fma_cpf (la equivalencia de nomenclatura). Si no esta, se prueba
+    con la Configuración tal cual.
+    """
+
+    dic_cpf = dic_cpf or {}
+
+    columna_concepto = NOMBRES_SUBASTAS["B"]
+    columna_anio = NOMBRES_SUBASTAS["F"]
+    columna_mes = NOMBRES_SUBASTAS["G"]
+    columna_dia = NOMBRES_SUBASTAS["H"]
+    columna_hora = NOMBRES_SUBASTAS["I"]
+    columna_config = NOMBRES_SUBASTAS["K"]
+
+    mapa_cpf = _dic_desde_tabla(
+        tablas.get("cpf"),
+        ["Central", "Año", "Mes", "Dia", "Hora"],
+        ["FMA_CPF_mas", "FMA_CPF_menos"],
+    )
+    mapa_csf = _dic_desde_tabla(
+        tablas.get("csf"),
+        ["Año", "Mes", "Dia", "Hora"],
+        ["FMA_CSF_mas_base", "FMA_CSF_menos_base"],
+    )
+    mapa_ctf_unidad = _dic_desde_tabla(
+        tablas.get("ctf_unidad"),
+        ["nombre", "Año", "Mes", "Dia", "Hora"],
+        ["FMA_CTF_mas", "FMA_CTF_menos"],
+    )
+    mapa_ctf_config = _dic_desde_tabla(
+        tablas.get("ctf_configuracion"),
+        ["nombre", "Año", "Mes", "Dia", "Hora"],
+        ["FMA_CTF_mas", "FMA_CTF_menos"],
+    )
+
+    valores = []
+    sin_dato = {"CPF": 0, "CSF": 0, "CTF": 0, "otro": 0}
+    centrales_cpf_sin_equivalencia = set()
+
+    for fila in df_subastas.itertuples(index=False):
+        datos = fila._asdict()
+
+        concepto = _texto_seguro(datos[columna_concepto]).upper()
+        fecha = (
+            _clave_numerica_o_texto(datos[columna_anio]),
+            _clave_numerica_o_texto(datos[columna_mes]),
+            _clave_numerica_o_texto(datos[columna_dia]),
+            _clave_numerica_o_texto(datos[columna_hora]),
+        )
+        config = _texto_seguro(datos[columna_config])
+        config_norm = normalizar(config)
+
+        if concepto.startswith("CPF"):
+
+            central = dic_cpf.get(config_norm)
+
+            if central is None:
+                central = config
+                if dic_cpf:
+                    centrales_cpf_sin_equivalencia.add(config)
+
+            par = mapa_cpf.get((normalizar(central),) + fecha)
+            indice = 0 if concepto.endswith("(+)") else 1
+
+            if par is None:
+                sin_dato["CPF"] += 1
+                valores.append(0.0)
+            else:
+                valores.append(_numero_o_cero(par[indice]))
+
+        elif concepto.startswith("CSF"):
+
+            par = mapa_csf.get(fecha)
+            indice = 0 if concepto.endswith("(+)") else 1
+
+            if par is None:
+                sin_dato["CSF"] += 1
+                valores.append(0.0)
+            else:
+                valores.append(
+                    _numero_o_cero(par[indice])
+                    * VECTOR_PARTICIPACION_CSF_PENDIENTE
+                )
+
+        elif concepto.startswith("CTF"):
+
+            clave = (config_norm,) + fecha
+            es_mas = concepto.endswith("(+)")
+            indice = 0 if es_mas else 1
+
+            par = mapa_ctf_unidad.get(clave)
+
+            # CTF(-) busca en las dos nomenclaturas; CTF(+) solo en la
+            # primera (ver CTF_MAS_BUSCA_EN_LAS_DOS_TABLAS).
+            if par is None and (
+                not es_mas or CTF_MAS_BUSCA_EN_LAS_DOS_TABLAS
+            ):
+                par = mapa_ctf_config.get(clave)
+
+            if par is None:
+                sin_dato["CTF"] += 1
+                valores.append(0.0)
+            else:
+                valores.append(_numero_o_cero(par[indice]))
+
+        else:
+            sin_dato["otro"] += 1
+            valores.append(0.0)
+
+    for central in sorted(centrales_cpf_sin_equivalencia):
+        registrar(
+            f"  [AVISO] sin equivalencia de nomenclatura CPF para "
+            f"'{central}' (bloque '{TITULO_BLOQUE_FMA_CPF}' de "
+            f"{HOJA_DICCIONARIO} en {ARCHIVO_CENTRALES}): se probo con "
+            f"el nombre tal cual."
+        )
+
+    for tipo, cuenta in sin_dato.items():
+        if cuenta:
+            registrar(
+                f"  [AVISO] FMA: {cuenta:,} fila(s) {tipo} sin dato en "
+                f"las salidas de FMA, quedan en 0 (igual que la "
+                f"formula original)."
+            )
+
+    return pd.Series(valores, index=df_subastas.index, dtype="float64")
+
+
+def _numero_o_cero(valor):
+    try:
+        if pd.isna(valor):
+            return 0.0
+        return float(valor)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _entero_a_texto(valor):
@@ -6509,7 +6939,7 @@ SECCIONES_CONSOLIDADO = (
     (
         "fd",
         "FD",
-        f"Usa el archivo {CARPETA_SSCC_DESEMPENO}/ (hojas CPF/CSF "
+        f"Usa el archivo {CARPETA_FD_FMA}/ (hojas CPF/CSF "
         f"Horario).",
         ("FD",),
     ),
@@ -6517,9 +6947,10 @@ SECCIONES_CONSOLIDADO = (
         "subastas",
         "Subastas",
         f"Usa los Access de {CARPETA_SUBASTAS}/{CARPETA_DB_SUBASTAS}/ "
-        f"(su origen real) y el Propietario de {ARCHIVO_CENTRALES}. Si "
-        f"esa carpeta no tiene Access del periodo, cae al respaldo "
-        f"3_REMUNERACIÓN_SUBASTAS_E_ID_*.",
+        f"(su origen real), las salidas de FMA de {CARPETA_FD_FMA}/ "
+        f"(fma_cpf/fma_csf/fma_cft) y {ARCHIVO_CENTRALES} (Propietario "
+        f"+ nomenclatura CPF). Si esa carpeta no tiene Access del "
+        f"periodo, cae al respaldo 3_REMUNERACIÓN_SUBASTAS_E_ID_*.",
         ("Subastas",),
     ),
 )
@@ -6531,7 +6962,7 @@ SECCIONES_PAGOS = (
         "Calculo E Costos",
         f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
         f"{ARCHIVO_CENTRALES}, {ARCHIVO_CMG} y el archivo "
-        f"{CARPETA_SSCC_DESEMPENO}/ (para el FD homologado de AM:AR).",
+        f"{CARPETA_FD_FMA}/ (para el FD homologado de AM:AR).",
         (HOJA_CALCULO_ECOSTOS,),
     ),
     (
@@ -6539,7 +6970,7 @@ SECCIONES_PAGOS = (
         "Calculo RE545",
         f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
         f"{ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- no necesita el "
-        f"archivo {CARPETA_SSCC_DESEMPENO}/.",
+        f"archivo {CARPETA_FD_FMA}/.",
         (HOJA_CALCULO_RE545,),
     ),
 )
@@ -6703,14 +7134,36 @@ def generar_consolidado(
             # Camino normal desde ahora: el origen real de las
             # subastas son los Access, no la planilla 3.
             mapa_propietarios = {}
+            dic_cpf = {}
 
             if rutas["centrales"].is_file():
-                resumen_bess, _ = leer_centrales(rutas["centrales"])
+                resumen_bess, diccionario_centrales = leer_centrales(
+                    rutas["centrales"]
+                )
                 mapa_propietarios = construir_mapa_propietario(resumen_bess)
+                dic_cpf = construir_dic_bloque_diccionario(
+                    diccionario_centrales, TITULO_BLOQUE_FMA_CPF
+                )
             else:
                 registrar(
                     f"  [AVISO] no se encontro {rutas['centrales']}: la "
                     f"columna Propietario de Subastas queda vacia."
+                )
+
+            registrar(
+                f"Leyendo las salidas de FMA de {CARPETA_FD_FMA}/..."
+            )
+            tablas_fma = cargar_tablas_fma(
+                rutas["sscc_desempeno_dir"], aamm_val, registrar=registrar
+            )
+
+            if not dic_cpf:
+                registrar(
+                    f"  [AVISO] {ARCHIVO_CENTRALES} no tiene el bloque "
+                    f"'{TITULO_BLOQUE_FMA_CPF}' en la hoja "
+                    f"{HOJA_DICCIONARIO} (Configuración -> central como "
+                    f"la nombra fma_cpf): el FMA de CPF se busca con el "
+                    f"nombre tal cual."
                 )
 
             registrar(
@@ -6721,6 +7174,8 @@ def generar_consolidado(
                 rutas["subastas_dir"],
                 aamm_val,
                 mapa_propietarios=mapa_propietarios,
+                tablas_fma=tablas_fma,
+                dic_cpf=dic_cpf,
                 registrar=registrar,
             )
 

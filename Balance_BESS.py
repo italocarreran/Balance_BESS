@@ -26,8 +26,11 @@ unico-:
         Cmg/
             cmg<AAMM>_def_15minutal.csv    [Traer cmg_15min]
             cmg.xlsx                       [Generar]
-        SSCC_Desempeño/
+        FD y FMA/
             SSCC_Desempeño_<algo>.xlsx (o .xlsm/.xlsb/.xls)
+            fma_cpf_<AAMM>.xlsx
+            fma_csf_<AAMM>.xlsx
+            fma_cft_<AAMM>.xlsx (o .csv)
         Subastas/
             DB subastas/                   [Traer subastas]
             3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (respaldo)

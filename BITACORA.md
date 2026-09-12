@@ -138,13 +138,40 @@ estado, no un historial.
   no se pueden distinguir (las dos coinciden en casi todas las filas,
   porque `entradas_sscc.py` completa la ponderada vacía con la cruda).
   Es un cambio de una línea si el usuario confirma la otra.
-- **`FD` y `FMA` de `Subastas` (`P` y `Q`) quedan pendientes** por
-  pedido explícito del usuario ("la columna V e Y FD y FMA quedan
-  pendientes por ahora"). Venían pegadas en `DB!Y` y `DB!V` de la
-  planilla 3 y **no existen en el Access**: hay que definir su origen.
-  Sospecha a confirmar: el `FD` podría salir homologando central+hora
-  contra la hoja `FD` del propio consolidado (la que ya se arma desde
-  `SSCC_Desempeño_*`), igual que `Calculo E Costos!AM:AR`.
+- ~~`FMA` de `Subastas` (`Q`) pendiente~~ — **resuelto** esta sesión:
+  sale de las tres salidas de FMA (`fma_cpf_*`, `fma_csf_*`,
+  `fma_cft_*`) que ahora se guardan en `FD y FMA/`, siguiendo el
+  documento de trazabilidad del usuario. Falta validarlo contra un
+  `DB!V` real.
+- **`FD` de `Subastas` (`P`) sigue pendiente.** Venía pegada en `DB!Y`
+  de la planilla 3 y **no existe en el Access**. Sospecha a confirmar:
+  podría salir homologando central+hora contra la hoja `FD` del propio
+  consolidado (la que ya se arma desde `SSCC_Desempeño_*`), igual que
+  `Calculo E Costos!AM:AR`. Es el próximo documento de trazabilidad que
+  el usuario va a preparar.
+- **Vector de Participación CSF**: el FMA de las filas `CSF(+)`/`CSF(-)`
+  es `FMA_base × Vector de Participación CSF` (`DB!AC`), y ese vector
+  vive en la hoja `CSF_FD` de la planilla 3 — parte de la trazabilidad
+  de FD, todavía sin documentar. Hasta entonces se usa **1**
+  (`VECTOR_PARTICIPACION_CSF_PENDIENTE`), o sea el FMA de CSF queda en
+  su valor base. **Es el único supuesto que hoy puede dar un número
+  distinto del de la planilla sin avisar**, así que conviene resolverlo
+  junto con FD.
+- **Agregar el bloque `FMA CPF` a la hoja `Diccionario` de
+  `Centrales.xlsx`**: dos columnas, `Configuración` → central como la
+  nombra `fma_cpf` (ej. `SAE-DEL-DESIERTO` → `BESS DEL DESIERTO`). Es
+  la equivalencia que en la planilla 3 vivía en `FMA_CPF!AD:AE` y que
+  el documento de trazabilidad recomienda mudar acá. Mientras no esté,
+  el FMA de CPF se busca con el nombre tal cual y se avisa en el log.
+- **Confirmar el comportamiento de `CTF(+)`**: la fórmula real de
+  `DB!V` tiene dos bloques consecutivos para `CTF(+)` y, por cómo están
+  anidados los `SI`, el segundo nunca se evalúa — así que `CTF(+)`
+  busca solo en la primera tabla mientras que `CTF(-)` busca en las
+  dos. Se replicó ese comportamiento tal cual (el documento lo pide
+  expresamente) y quedó en una constante,
+  `CTF_MAS_BUSCA_EN_LAS_DOS_TABLAS = False`, para poder comparar
+  después contra la versión corregida. Con centrales BESS es casi
+  seguro que no cambia nada (no hacen CTF).
 - **Definir el ajuste de `Hora_mes` por cambio de hora.** La fórmula
   real de la planilla 3 es `=($F9-1)*24+$G9+IF(F9>$F$2,1,0)`, donde
   `SUBASTAS!F2` es el día del mes en que cambia la hora. Hoy
@@ -2357,3 +2384,74 @@ y los cuatro filtros. Además, un caso end-to-end que crea la carpeta, copia des
 simulada (dos veces, para ver que la segunda no vuelve a copiar), corre `generar_consolidado` con
 solo la sección `subastas` y revisa la hoja escrita. **Falta correrlo una vez contra Access
 reales en Windows**: es el próximo paso natural.
+
+---
+
+## 2026-09-12 (2) — FMA desde sus tres salidas, carpeta "FD y FMA" y Subastas ordenada
+
+Continuación de la entrada anterior, con un documento de trazabilidad nuevo del usuario
+(`docs/Trazabilidad_FMA_a_DB_V_planilla3.md`) y tres pedidos.
+
+**1) La hoja `Subastas` sale ordenada por `Hora_mes`** (`_ordenar_subastas_por_hora_mes()`), con
+desempate por `Configuración` y `Concepto` para que dos corridas sobre los mismos datos den
+exactamente el mismo archivo. Se aplica a los dos caminos (Access y respaldo planilla 3). El orden
+es puramente de presentación: todo lo que consume `Subastas` lo hace por clave (`calcular_l`,
+`construir_prorrata_sscc`, `construir_dic_umbrales_subastas`), nunca por posición de fila. Detalle:
+se ordena por el valor **numérico** de `Hora_mes`, porque por el camino de la planilla 3 puede
+llegar como texto y ahí "10" iría antes que "9".
+
+**2) La carpeta `SSCC_Desempeño/` pasa a llamarse `FD y FMA/`** (`CARPETA_FD_FMA`), porque ahora
+guarda las dos cosas: el `SSCC_Desempeño_*` del que sale la hoja `FD` y las tres salidas de FMA.
+Un caso viejo que todavía tenga la carpeta con el nombre anterior sigue funcionando: si la nueva
+no existe y la vieja sí, se usa la vieja (`resolver_rutas`), y el diagrama muestra el nombre de la
+que realmente se está usando, no la constante.
+
+**3) `Subastas!FMA` (la columna `Q`, antes `DB!V`) ya se calcula.** Módulo nuevo
+`Script/Subastas/Fma.py` (lee y normaliza los tres archivos) + `calcular_fma_subastas()` en
+`nucleo` (el cruce fila por fila, replicando la fórmula de `DB!V`):
+
+| Concepto | De dónde sale | Clave |
+|---|---|---|
+| `CPF(+)` / `CPF(-)` | `fma_cpf_*` | central (traducida) + Año + Mes + Día + Hora |
+| `CSF(+)` / `CSF(-)` | `fma_csf_*` | Año + Mes + Día + Hora |
+| `CTF(+)` / `CTF(-)` | `fma_cft_*` | Configuración + Año + Mes + Día + Hora |
+| otro | — | 0 |
+
+Lo que no se encuentra queda en **0**, igual que el `IFERROR` exterior de la fórmula original.
+
+**Tres trampas del documento que se respetaron al pie de la letra**, porque ninguna es deducible
+mirando los archivos:
+
+- **CPF**: se suman las 7 columnas de horas y, si la suma **llega a 0,98, pasa a ser 1** (no se
+  redondea: se reemplaza). Los `Tiempo f<49.975 [%]` / `f>50.025 [%]` **ya vienen como fracción**
+  (0,33 = 33 %), así que **no** se vuelven a dividir por 100.
+- **CSF**: la hora del archivo va de **0 a 23** y la de las subastas de **1 a 24** → se le suma 1.
+  Y se usan las columnas **`-m`/`+m`** (`FMA CSF-m [%]`, `FMA CSF+m [%]`), **no** las que se llaman
+  igual sin la "m", que también existen en el archivo y darían otro número.
+- **CTF**: varias activaciones en la misma hora **se suman**; y `CTF(-)` busca por `unidad` y, si no
+  encuentra, por `Configuracion`, mientras que `CTF(+)` busca **solo en la primera** — eso es un bug
+  de la fórmula original (el segundo bloque `CTF(+)` es inalcanzable por cómo están anidados los
+  `SI`) que el documento pide **conservar** en la primera réplica. Quedó en la constante
+  `CTF_MAS_BUSCA_EN_LAS_DOS_TABLAS = False` para poder comparar después.
+
+**Dependencia auxiliar nueva:** la equivalencia `Configuración → central como la nombra fma_cpf`
+(en la planilla vivía en `FMA_CPF!AD:AE`) se busca en un bloque titulado **`FMA CPF`** de la hoja
+`Diccionario` de `Centrales.xlsx`, con el mismo mecanismo de bloques lado a lado que ya tenía esa
+hoja (`construir_dic_bloque_diccionario()`, genérica). Si el bloque no está, se prueba con el
+nombre tal cual y se avisa — hay que agregarlo (ver "Pendientes abiertos").
+
+**Lo que quedó fuera:** el **Vector de Participación CSF**, que multiplica al FMA de las filas CSF.
+Vive en `CSF_FD` de la planilla 3, o sea depende de la trazabilidad de FD, que todavía no existe.
+Se usa 1 y queda anotado como el único supuesto que hoy puede dar un número distinto del de la
+planilla. `Subastas!FD` (la columna `P`) sigue vacía por la misma razón.
+
+**Verificación.** Archivos sintéticos armados con los esquemas exactos del documento: se comprobó
+a mano el CPF con la suma por debajo del umbral (0,97 → se usa 0,97) y por arriba (0,99 → se usa
+1), que el CSF corre la hora en uno y toma las columnas "m", y que el CTF suma las tres
+activaciones de una misma hora repartiéndolas por signo. Después, un cruce de 10 filas de Subastas
+que cubre las seis combinaciones de concepto más la traducción de nomenclatura CPF, la hora sin
+dato (→ 0), el respaldo por `Configuracion` del `CTF(-)`, el `CTF(+)` que **no** cae a la segunda
+tabla y un concepto raro (→ 0): las 10 dieron el valor esperado. Y un caso end-to-end que escribe
+`Consolidado_entradas.xlsx` con la carpeta nueva, verifica el orden por `Hora_mes` y que el
+programa siga aceptando la carpeta con el nombre viejo. **Falta compararlo contra un `DB!V` real**
+(el documento propone justamente esa validación, §24).

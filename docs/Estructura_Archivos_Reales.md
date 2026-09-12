@@ -289,7 +289,13 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 
 ---
 
-### 6. `SSCC_Desempeño/SSCC_Desempeño_*.xlsx`
+### 6. `FD y FMA/SSCC_Desempeño_*.xlsx`
+
+> **La carpeta se llama `FD y FMA`** (el usuario la renombró; antes era `SSCC_Desempeño/`) porque
+> adentro van las dos cosas: este archivo, del que sale la hoja `FD`, y las tres salidas de FMA
+> (ver 6b). Si un caso viejo todavía tiene la carpeta con el nombre anterior y no la nueva, el
+> programa la sigue aceptando (`resolver_rutas`).
+
 
 - **Patrón**: cualquier Excel cuyo nombre empiece con `SSCC_Desempeño_`. Si hay más de uno, el
   más reciente por fecha de modificación.
@@ -337,6 +343,35 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 - **Función que lo lee**: `construir_fd(ruta_sscc)`.
 - **Archivo real de referencia**: `docs/Libro1_Subastas_real.xlsx`, hoja `"FD"` ✅ (encabezados
   reales confirmados, sin datos de fila).
+
+---
+
+### 6b. `FD y FMA/fma_cpf_*.xlsx`, `fma_csf_*.xlsx`, `fma_cft_*.xlsx` — de donde sale `Subastas!FMA`
+
+- **Qué son**: las tres salidas de FMA de `entradas_sscc.py`. El usuario las guarda en esta misma
+  carpeta. No las genera este programa: son entradas.
+- **Patrón**: el nombre empieza con `fma_cpf` / `fma_csf` / `fma_cft` (o `fma_ctf`) y contiene el
+  AAMM. Acepta `.xlsx`, `.xlsm`, `.xls` y `.csv`. Si hay varios, el más reciente. Todos traen a la
+  izquierda la columna índice que deja pandas al escribir (`Unnamed: 0`), que se descarta.
+- **Columnas que se usan** (confirmadas contra `entradas_sscc.py` y el documento de trazabilidad
+  `docs/Trazabilidad_FMA_a_DB_V_planilla3.md`):
+
+  | Archivo | Columnas | Qué se hace con ellas |
+  |---|---|---|
+  | `fma_cpf` | `Año`, `Mes`, `Día`, `Hora`, `Central`, las 7 de horas (`Hace CPF [hrs]` … `Otro [hrs]`), `Tiempo f<49.975 [%]`, `Tiempo f>50.025 [%]` | se suman las 7; **si la suma llega a 0,98 pasa a ser 1**; `FMA CPF(+) = suma × Tiempo f<49.975`, `FMA CPF(-) = suma × Tiempo f>50.025`. Los tiempos ya vienen como fracción: **no** se dividen por 100. La hora ya viene en 1..24 |
+  | `fma_csf` | `Año`, `Mes`, `Día`, `Hora Día`, **`FMA CSF-m [%]`**, **`FMA CSF+m [%]`** | `Hora = Hora Día + 1` (el archivo usa 0..23 y las subastas 1..24) y los dos valores se dividen por 100. Se usan las variantes **con "m"**, no `FMA CSF- [%]` / `FMA CSF+ [%]` |
+  | `fma_cft` | `t0`, `tfin`, `unidad`, `Configuracion`, `variacion` | fecha y hora salen de `t0` (`hora + 1`); duración `= (tfin - t0)` en horas, al `(+)` si `variacion > 0` y al `(-)` si `< 0`; las activaciones de la misma hora **se suman**. Se arman dos resúmenes, uno por `unidad` y otro por `Configuracion` |
+
+- **Funciones que los leen**: `Script/Subastas/Fma.py` (leer + normalizar) y
+  `nucleo.calcular_fma_subastas()` (el cruce contra cada fila de Subastas).
+- **Dependencia auxiliar**: la equivalencia `Configuración → central como la nombra fma_cpf` vive
+  en un bloque de la hoja `Diccionario` de `Centrales.xlsx` titulado **`FMA CPF`**
+  (`TITULO_BLOQUE_FMA_CPF`). Si ese bloque no está, se busca con el nombre tal cual y se avisa en
+  el log.
+- **Lo que todavía falta**: el **Vector de Participación CSF** (`DB!AC`), que multiplica al FMA de
+  las filas CSF. Vive en la hoja `CSF_FD` de la planilla 3 y es parte de la trazabilidad de FD,
+  todavía sin documentar. Hasta entonces se usa 1
+  (`VECTOR_PARTICIPACION_CSF_PENDIENTE`), o sea el FMA de CSF queda en su valor **base**.
 
 ---
 
@@ -429,6 +464,7 @@ resumen) y comparar celda a celda contra la hoja equivalente de nuestra salida.
 |---|---|---|
 | `docs/Pagos_BESS_comparacion_real.xlsx` | Hojas `Calculo E Costos`, `Calculo RE545` (nuestra salida en ese momento) + `Ecostos planilla 11` (pegada a mano por el usuario, real) | Primera comparación real vs Python que existió en el proyecto — origen del fix de Prorrata SSCC |
 | `docs/Calculo_RE545_reducido_para_IA.xlsx` | Hoja `Calculo RE545 reducido` (real, recortada) con **fórmulas** (no solo valores) + hoja `Mapa_Formulas` (rango de celdas → fórmula real, muy útil para confirmar un cálculo sin tener que pedir el `.xlsm` completo) | Fuente directa de varias correcciones de `Calculo RE545` (reservas AR:AT constante 1, cruce S/BI de BK:BL:BS) |
+| `docs/Trazabilidad_FMA_a_DB_V_planilla3.md` | Documento del usuario: cómo se llega de las tres salidas de FMA a `DB!V`, fórmula por fórmula | Fuente de todo lo que hace `Script/Subastas/Fma.py` y `calcular_fma_subastas()` |
 | `docs/subastas_2603_salida_entradas_sscc.xlsx` | La salida real de `entradas_sscc.py` para marzo 2026 (39.181 filas, las mismas columnas que devuelve la consulta a los Access) | Caso de prueba de `construir_subastas_desde_accdb()` sin necesidad de Access instalado |
 | `docs/Trazabilidad_subastas_AAMM_a_DB_planilla3.md` | Documento del usuario: cómo se llega de `subastas_AAMM.xlsx` a `DB!B:K` de la planilla 3, fórmula por fórmula | Fuente de las equivalencias de `Concepto`, `Control`, `Sub_Baj`, `Fecha`, `Hora_mes` |
 | `docs/Libro1_Subastas_real.xlsx` | Hojas `FD`, `subastas`, `E COSTOS` (con los **merges reales** de Excel, `ws.merged_cells`), `Resumen` | Fuente de `NOMBRES_SUBASTAS`, `NOMBRES_FD_CSF/CPF`, y de `GRUPOS_CALCULO_E_COSTOS` (encabezados de grupo combinados) |
