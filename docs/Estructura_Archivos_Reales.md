@@ -354,8 +354,10 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 
 ### 6b. `FD y FMA/fma_cpf_*.xlsx`, `fma_csf_*.xlsx`, `fma_cft_*.xlsx` — de donde sale `Subastas!FMA`
 
-- **Qué son**: las tres salidas de FMA de `entradas_sscc.py`. El usuario las guarda en esta misma
-  carpeta. No las genera este programa: son entradas.
+- **Qué son**: las tres salidas de FMA de `entradas_sscc.py`. **Las arma el propio programa** con
+  el botón **"Traer FMA"** (`Script/Fd/Indices_FMA.py`), que replica las tres rutinas de ese
+  script: el CPF sale de los reportes diarios del DCO, el CSF de los `csf_20AAMMDD.xlsx` y el CTF
+  del `CTF_20AAMM.csv`. También se pueden dejar a mano en la carpeta, si ya se generaron aparte.
 - **Patrón**: el nombre empieza con `fma_cpf` / `fma_csf` / `fma_cft` (o `fma_ctf`) y contiene el
   AAMM. Acepta `.xlsx`, `.xlsm`, `.xls` y `.csv`. Si hay varios, el más reciente. Todos traen a la
   izquierda la columna índice que deja pandas al escribir (`Unnamed: 0`), que se descarta.

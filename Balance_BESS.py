@@ -26,11 +26,11 @@ unico-:
         Cmg/
             cmg<AAMM>_def_15minutal.csv    [Traer cmg_15min]
             cmg.xlsx                       [Generar]
-        FD y FMA/                          [Traer FD]
-            SSCC_Desempeño_<algo>.xlsx (o .xlsm/.xlsb/.xls)
-            fma_cpf_<AAMM>.xlsx
+        FD y FMA/
+            SSCC_Desempeño_<algo>.xlsx     [Traer FD]
+            fma_cpf_<AAMM>.xlsx            [Traer FMA]  <- arma las tres
             fma_csf_<AAMM>.xlsx
-            fma_cft_<AAMM>.xlsx (o .csv)
+            fma_cft_<AAMM>.xlsx
         Subastas/
             DB subastas/                   [Traer subastas]
             3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (respaldo)
@@ -450,8 +450,14 @@ def main():
         if id_fila == "cmg_xlsx":
             return ("Generar", generar_cmg)
 
-        if id_fila == "sscc_dir":
+        # Un boton por cosa que produce: el FD lo trae la fila de su
+        # archivo, y las tres salidas de FMA las arma un solo boton,
+        # colgado de la primera de las tres.
+        if id_fila == "sscc":
             return ("Traer FD", traer_fd)
+
+        if id_fila == "fma_cpf":
+            return ("Traer FMA", traer_fma)
 
         if id_fila == "db_subastas":
             return ("Traer subastas", traer_subastas)
@@ -763,6 +769,30 @@ def main():
             f"{nucleo.CARPETA_FD_FMA}/",
         )
 
+    def traer_fma():
+        """
+        Arma las tres salidas de FMA del periodo en
+        <CARPETA_BASE>/FD y FMA/.
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showwarning("Falta el periodo", str(error))
+            return
+
+        lanzar(
+            nucleo.traer_fma,
+            dict(carpeta_base=ruta, aamm=aamm),
+            f"FMA en {nucleo.CARPETA_FD_FMA}/",
+        )
+
     def traer_subastas():
         """
         Copia los Access de subastas del periodo
@@ -913,8 +943,8 @@ def main():
     log(
         "Selecciona la carpeta base del caso e ingresa el periodo "
         "(AAMM). Cada fila del diagrama de abajo trae su propio boton: "
-        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer FD' en "
-        "'FD y FMA/', 'Traer subastas' en "
+        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer FD' y 'Traer "
+        "FMA' en 'FD y FMA/', 'Traer subastas' en "
         "Subastas/DB subastas/, 'Actualizar' en cada hoja de "
         "Consolidado_entradas.xlsx y 'Calcular' en cada hoja de "
         "Pagos_BESS.xlsx."

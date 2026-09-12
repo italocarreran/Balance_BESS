@@ -19,6 +19,7 @@ Script/
     Fd/
         __init__.py
         Indicadores_DCO.py     <- trae el FD del arbol del DCO
+        Indices_FMA.py         <- arma las tres salidas de FMA
     Subastas/
         __init__.py
         Ofertas_Adjudicadas.py <- trae y lee los Access de subastas
@@ -67,7 +68,8 @@ importable como cualquier módulo.
   | `Medidas/Medidas_SAE.xlsx` | **Actualizar** | `nucleo.generar_medidas_sae` — corre los cuatro pasos de Medidas de un viaje |
   | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
   | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
-  | `FD y FMA/` | **Traer FD** | `nucleo.traer_fd` — baja el FD del período del árbol de indicadores del DCO y descomprime el zip |
+  | `FD y FMA/SSCC_Desempeño_*` | **Traer FD** | `nucleo.traer_fd` — baja el FD del período del árbol de indicadores del DCO y descomprime el zip |
+  | `FD y FMA/fma_cpf_<AAMM>.xlsx` | **Traer FMA** | `nucleo.traer_fma` — arma **las tres** salidas de FMA del período (CPF, CSF y CTF) |
   | `Subastas/DB subastas/` | **Traer subastas** | `nucleo.traer_subastas` — copia los `OfertasSSCCAdj*.accdb` del período desde la unidad de red |
   | `Consolidado_entradas.xlsx` | **Actualizar todo** | `generar_consolidado` con todas las secciones |
   | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
@@ -247,6 +249,50 @@ importable como cualquier módulo.
     período que haya quedado suelto ahí.
   - al descomprimir se sacan **solo los Excel** y se dejan sueltos en la
     carpeta; las entradas del zip con ruta absoluta o con `..` se ignoran.
+
+---
+
+## `Script/Fd/Indices_FMA.py`
+
+- **Qué hace:** arma las tres salidas de FMA del período (botón **"Traer FMA"**),
+  replicando `calc_fmacpf`, `calc_fmacsf` y `calc_fmactf` de `entradas_sscc.py`.
+  **Ojo con la palabra "traer"**: el FMA no se copia ya hecho de ningún lado, se
+  **construye**, y cada una de las tres sale de un origen distinto.
+- **Consume:**
+  - **CPF**: los reportes diarios que publica el DCO, dentro del mismo árbol del
+    que sale el FD —
+    `<versión>/01 Respuesta/01 Indices CPF/20AA.MM_Respuesta_CPF/Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx`.
+    Se lee **cada hoja menos "Resumen"** (una por central).
+  - **CSF**: los `csf_20AAMMDD.xlsx` diarios (los del `agc_face`), que se buscan
+    en `FD y FMA/agc_face/`, en `FD y FMA/` y, si no, en la carpeta de versión
+    del DCO.
+  - **CTF**: el `CTF_20AAMM.csv`, con el mismo orden de búsqueda.
+- **Produce:** `fma_cpf_<AAMM>.xlsx`, `fma_csf_<AAMM>.xlsx` y
+  `fma_cft_<AAMM>.xlsx` (+ su `.csv`) en `<CARPETA_BASE>/FD y FMA/` — con los
+  nombres exactos de `entradas_sscc.py` ("cft" incluido), que son los que después
+  busca `Script/Subastas/Fma.py`. Las dos mitades están probadas juntas: lo que
+  escribe este módulo lo lee aquel sin tocar nada.
+- **Expone:** `ErrorIndicesFma`; `nombre_salida(tipo, aamm)`,
+  `buscar_carpeta_respuesta_cpf(...)`, `buscar_tabla_resumen(...)`,
+  `construir_fma_cpf/csf/ctf(...)`,
+  `traer_fma(carpeta_destino, aamm, version=None, raiz=None, registrar=print)` →
+  `(escritos, faltantes, carpeta_version)`.
+- **Depende de:** `pandas` y `Script/Fd/Indicadores_DCO.py` (comparte con él la
+  resolución del árbol del DCO y la elección de versión). **No importa `nucleo`.**
+- **Detalles que importan:**
+  - el reporte diario de CPF trae **29 columnas** y el encabezado en la fila 5
+    (`header=4`); el script les pone 34 nombres (`NOMBRES_CPF`) contando las 5
+    que agrega. Si el DCO le cambia el formato, se levanta un error que lo dice
+    en vez de correr las columnas en silencio.
+  - la **hora** del CPF sale del índice de fila del reporte + 1 (queda 1..24, ya
+    alineada con las subastas).
+  - los `"-"` de los dos `Tiempo f…` se reemplazan por 0.
+  - al CTF se le saca la zona horaria **conservando la hora tal como está
+    escrita** (`_sacar_zona_horaria`): `04:00-03:00` queda en las 04:00, **no**
+    en las 07:00. Convertir a UTC corría todas las horas del CTF — se detectó
+    justamente en la prueba.
+  - un día sin archivo se saltea con aviso (el original revienta), y si falta el
+    origen de una de las tres, las otras dos se arman igual.
 
 ---
 

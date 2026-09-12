@@ -133,8 +133,12 @@ def buscar_archivos_fma(carpeta, aamm):
         ]
 
         if candidatos:
+            # Si estan el .xlsx y el .csv del mismo archivo (el CTF se
+            # escribe en los dos formatos), gana el Excel: asi dos
+            # corridas leen siempre el mismo y no el que quedo ultimo.
             encontrados[tipo] = max(
-                candidatos, key=lambda a: a.stat().st_mtime
+                candidatos,
+                key=lambda a: (a.suffix.lower() != ".csv", a.stat().st_mtime),
             )
 
     return encontrados

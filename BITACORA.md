@@ -2506,3 +2506,54 @@ el archivo de otro mes NO se copie, que lo que queda lo encuentre despues
 pasar (mes todavia sin publicar y servidor sin conectar). **Falta correrlo una vez contra el DCO
 real**, que es donde se va a ver si el FD esta en esa carpeta de version o mas adentro con otro
 nombre.
+
+---
+
+## 2026-09-12 (4) — Boton "Traer FMA"
+
+Mismo pedido que el del FD, ahora para el FMA. Y **la misma precision, mas fuerte todavia**: en
+`entradas_sscc.py` el FMA no se copia de ningun lado, se **construye**, y cada una de las tres sale
+de un origen distinto:
+
+| | De donde | Que se le hace |
+|---|---|---|
+| CPF | reportes diarios del DCO, en el MISMO arbol del que sale el FD (`<version>/01 Respuesta/01 Indices CPF/20AA.MM_Respuesta_CPF/Reporte diario <D>-<M>-<AAAA>/tabla_resumen_<D>_<M>_<AAAA>.xlsx`) | se lee cada hoja menos "Resumen" (una por central), se le pegan Año/Mes/Dia/Hora/Central y se agrupan las columnas de horas |
+| CSF | los `csf_20AAMMDD.xlsx` diarios (los del `agc_face`) | concatenacion, sin transformacion |
+| CTF | el `CTF_20AAMM.csv` | se le saca la zona horaria a `t0`/`tfin` |
+
+**`Script/Fd/Indices_FMA.py`** (modulo nuevo, al lado de `Indicadores_DCO.py` porque comparten la
+raiz de red y el destino). `nucleo.traer_fma()` lo llama desde el boton **"Traer FMA"**. Escribe
+las tres con los nombres exactos de `entradas_sscc.py` (`fma_cpf_AAMM.xlsx`, `fma_csf_AAMM.xlsx`,
+`fma_cft_AAMM.xlsx` -- "cft" incluido) en `FD y FMA/`, que son justo los que busca
+`Script/Subastas/Fma.py` para armar `Subastas!FMA`. **Las dos mitades quedaron probadas juntas**:
+lo que escribe este modulo lo lee el otro sin tocar nada, y el FMA CPF de una fila dio el 0,3201
+esperado a mano.
+
+**Los botones en la ventana.** Como cada fila del arbol lleva un solo boton, quedaron asi: "Traer
+FD" en la fila del `SSCC_Desempeño_*` (que es lo que trae) y "Traer FMA" en la fila de
+`fma_cpf_<AAMM>.xlsx`, con las otras dos filas de FMA diciendo en su detalle que las arma ese
+mismo boton. Un boton por cosa que produce, sin repetir el mismo tres veces.
+
+**Un error que aparecio en la prueba y vale la pena dejar escrito:** al sacarle la zona horaria al
+CTF, la primera version uso `pd.to_datetime(..., utc=True).dt.tz_localize(None)`, que **convierte**
+a UTC: `04:00-03:00` terminaba en las 07:00 y eso corria TODAS las horas del CTF (se vio como
+horas 8 y 10 donde tenian que ser 5 y 7). Lo correcto es lo que hace el script original -dejar la
+hora tal como esta escrita y solo sacar el ofset-, que es lo que ahora hace
+`_sacar_zona_horaria()`, contemplando ademas el caso de ofsets mezclados en la misma columna (el
+dia del cambio de hora, donde pandas ya no devuelve una columna tz-aware).
+
+De paso, `buscar_archivos_fma()` ahora prefiere el `.xlsx` sobre el `.csv` cuando estan los dos
+(el CTF se escribe en los dos formatos): antes ganaba el mas reciente, que es no determinista.
+
+**Otras decisiones:** un dia sin reporte se saltea con aviso en vez de cortar todo (el original
+revienta con la excepcion de pandas); si falta el origen de una de las tres, las otras dos se
+arman igual y se avisa cual falto; y no se uso `chardet` para la codificacion del CSV de CTF -se
+prueban en orden las que de verdad aparecen-, para no sumar una dependencia por eso.
+
+**Verificacion:** un arbol del DCO simulado con reportes diarios de dos dias, cada uno con la hoja
+"Resumen" (que se saltea) y dos centrales, con el encabezado en la fila 5 y las 29 columnas
+reales; mas los insumos de CSF y CTF en la carpeta del caso. Se comprobo que salen las tres, que
+"Resumen" no queda como central, que las horas van de 1 a 24, que los `"-"` quedan en 0, que el
+CTF conserva la hora local, y que `cargar_tablas_fma()` lee las tres salidas y da el numero
+esperado. **Falta correrlo contra el DCO real**, que es donde se va a ver si los reportes estan
+donde dice el script y si el reporte sigue teniendo 29 columnas.

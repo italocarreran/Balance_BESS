@@ -27,6 +27,7 @@ try:
     from .Subastas import Ofertas_Adjudicadas as ofertas_adj
     from .Subastas import Fma as fma_subastas
     from .Fd import Indicadores_DCO as indicadores_dco
+    from .Fd import Indices_FMA as indices_fma
 except ImportError:  # pragma: no cover - depende de como se importe
     from Cmg import Extrae_CMG_barras as extrae_cmg
     from Medidas import Homologacion, Descarga_PRMTE, Claves_Balance
@@ -35,6 +36,7 @@ except ImportError:  # pragma: no cover - depende de como se importe
     from Subastas import Ofertas_Adjudicadas as ofertas_adj
     from Subastas import Fma as fma_subastas
     from Fd import Indicadores_DCO as indicadores_dco
+    from Fd import Indices_FMA as indices_fma
 
 
 # ============================================================
@@ -835,7 +837,12 @@ def revisar_estructura(carpeta_base, aamm=None):
             filas.append(
                 _fila(
                     f"fma_{tipo}", archivo.name, 1, "ok",
-                    f"alimenta Subastas!FMA ({tipo.upper()})",
+                    (
+                        f"alimenta Subastas!FMA ({tipo.upper()}); se "
+                        f"rehace con el boton ->"
+                        if tipo == "cpf" else
+                        f"alimenta Subastas!FMA ({tipo.upper()})"
+                    ),
                 )
             )
         elif not aamm_valido:
@@ -850,8 +857,13 @@ def revisar_estructura(carpeta_base, aamm=None):
                 _fila(
                     f"fma_{tipo}", f"{etiqueta}_{aamm_valido}.xlsx", 1,
                     "pendiente",
-                    f"salida de FMA {tipo.upper()}: sin ella, el FMA de "
-                    f"esas filas de Subastas queda en 0",
+                    (
+                        "se arma con el boton -> (las tres de una)"
+                        if tipo == "cpf" else
+                        f"lo arma el boton 'Traer FMA' de arriba; sin "
+                        f"el, el FMA de las filas {tipo.upper()} queda "
+                        f"en 0"
+                    ),
                 )
             )
 
@@ -7592,6 +7604,59 @@ def traer_fd(carpeta_base, aamm, version=None, registrar=print, progreso=None):
         f"Listo: {len(copiados)} archivo(s) desde {carpeta_version.name}"
         + (f" y {len(extraidos)} descomprimido(s)" if extraidos else "")
         + f" en {destino}"
+    )
+
+    return destino
+
+
+def traer_fma(carpeta_base, aamm, version=None, registrar=print, progreso=None):
+    """
+    Arma las tres salidas de FMA del periodo (fma_cpf_*, fma_csf_*,
+    fma_cft_*) y las deja en <CARPETA_BASE>/FD y FMA/, que es de donde
+    las lee despues la hoja Subastas (boton "Traer FMA").
+
+    OJO: el FMA no se copia ya hecho, se CONSTRUYE -- el CPF desde los
+    reportes diarios que publica el DCO, el CSF desde los csf_ diarios
+    y el CTF desde el CTF_AAMM.csv. Ver Script/Fd/Indices_FMA.py.
+    """
+
+    aamm = validar_aamm(aamm)
+    rutas = resolver_rutas(carpeta_base)
+
+    if not rutas["base"].is_dir():
+        raise ErrorEntrada(f"No se encontro la carpeta base {rutas['base']}")
+
+    destino = rutas["sscc_desempeno_dir"]
+
+    if not destino.is_dir():
+        raise ErrorEntrada(
+            f"No se encontro la carpeta {CARPETA_FD_FMA}/ en "
+            f"{rutas['base']}"
+        )
+
+    if progreso:
+        progreso(5)
+
+    registrar(f"Armando las salidas de FMA del periodo {aamm}...")
+
+    try:
+        escritos, faltantes, carpeta_version = indices_fma.traer_fma(
+            destino, aamm, version=version, registrar=registrar
+        )
+    except (indices_fma.ErrorIndicesFma, indicadores_dco.ErrorFd) as error:
+        raise ErrorEntrada(str(error)) from error
+    except OSError as error:
+        raise ErrorEntrada(f"No se pudo armar el FMA: {error}") from error
+
+    for faltante in faltantes:
+        registrar(f"  [AVISO] no se pudo armar el FMA de {faltante}")
+
+    if progreso:
+        progreso(100)
+
+    registrar(
+        f"Listo: {', '.join(escritos.values())} en {destino} "
+        f"(version {carpeta_version.name})"
     )
 
     return destino
