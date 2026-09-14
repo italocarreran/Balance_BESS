@@ -21,8 +21,29 @@ pip install -r requirements.txt
 python Balance_BESS.py
 ```
 
+0. **Solo la primera vez:** copiar `config.ejemplo.json` como `config.json`
+   (junto a `Balance_BESS.py`) y pegar adentro las dos claves de las APIs del
+   Coordinador. Son **distintas** entre sí y el valor es el mismo para todo
+   el equipo; `config.json` no se versiona, así que cada uno lo pega una vez
+   en su copia. Solo hace falta para el botón que baja `Medidas_SAE.xlsx`:
+   el resto del programa anda sin claves.
+
+   ```json
+   {
+     "claves_api": {
+       "prmte": "PEGAR_AQUI_LA_CLAVE",
+       "generacion_real": "PEGAR_AQUI_LA_CLAVE"
+     }
+   }
+   ```
+
+   `prmte` es la de `medidas.coordinador.cl` y `generacion_real` la de
+   `operacion.coordinador.cl`. Si falta alguna, el programa lo dice con el
+   formato exacto para pegar.
 1. Elegir la **carpeta base** del caso (ver estructura abajo). El programa
-   recuerda la última carpeta usada, por PC/usuario, en `config.json`.
+   recuerda la última carpeta usada, por PC/usuario, en el mismo
+   `config.json` (en su propia sección: guardar la carpeta no pisa las
+   claves).
 2. Ingresar el **período (AAMM)** en el recuadro de la ventana: 4 dígitos,
    año+mes simplificado (ej. `2607` para julio de 2026). No se adivina del
    nombre de ningún archivo — es el dato con el que el programa ubica el
@@ -42,8 +63,9 @@ python Balance_BESS.py
      que no se actualiza se conserva tal cual estaba; si el archivo todavía
      no existe, se crea.
 
-Durante el cálculo, el registro muestra líneas **`[AVISO]`** cuando una
-homologación no encuentra correspondencia: central sin barra, capacidad,
+Durante el cálculo, el registro muestra líneas con la **severidad** y el **id
+del control** (`[ALTA] MAE-001: ...`) cuando una homologación no encuentra
+correspondencia: central sin barra, capacidad,
 eficiencia o Pmax en `Resumen BESS` (o con Pmax en 0, que deja `AE`/`AF`
 vacías); central ausente del `Diccionario`; claves de FD o de CMg
 inexistentes; central sin ninguna hora en la Prorrata SSCC; central que no
@@ -51,6 +73,20 @@ aparece en ninguna fila de `Subastas` (sus reservas y `AU` quedan en 0). El
 cálculo conserva el comportamiento de la planilla —algunos faltantes quedan
 vacíos y otros se rellenan con cero—, pero ahora informa la causa, las
 centrales/claves afectadas y el impacto antes de continuar.
+
+`Pagos_BESS.xlsx` sale además con dos hojas de control:
+
+- **`Alertas`** — una fila por alerta, con su id, severidad, etapa, central y
+  clave. Es el detalle **completo**: la pantalla muestra un resumen con hasta 15
+  ejemplos, el archivo los guarda todos.
+- **`Ejecucion`** — el estado de la corrida (`APROBADA` / `APROBADA CON
+  ADVERTENCIAS` / `NO APROBADA - REQUIERE REVISION`), qué hojas se recalcularon
+  en esta pasada, la conciliación de energía (`Medidores = Calculo E Costos +
+  Calculo RE545`) con su tolerancia, y el manifiesto de las entradas: nombre,
+  tamaño, fecha y `sha256` de cada archivo que alimentó el cálculo.
+
+El catálogo de controles, con lo que está implementado y lo que falta, está en
+`docs/Alertas_y_Controles_Traspaso_Python_BESS.md`.
 
 Las pruebas de estos avisos se corren con `python -m unittest discover`
 desde la raíz del repositorio.
@@ -60,7 +96,15 @@ desde la raíz del repositorio.
 ```text
 Balance_BESS.py            <- la ventana (lo único que se ejecuta)
 Script/
-    nucleo.py              <- todo el cálculo del caso
+    nucleo/                <- el cálculo del caso, una etapa por módulo
+        __init__.py            <- la fachada: `nucleo.<lo que sea>`
+        parametros.py  utiles.py  avisos.py  rutas.py  estructura.py
+        lectura.py  soc.py  ofertas_sscc.py  hojas_entrada.py
+        subastas_accdb.py  fma.py  diccionarios.py
+        columnas_compartidas.py
+        ecostos*.py            <- las cuatro etapas de Calculo E Costos
+        re545*.py              <- las cuatro partes de Calculo RE545
+        medidores.py  escritura.py  proceso.py  traer.py  medidas_sae.py
     Cmg/
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
     Medidas/
@@ -70,8 +114,9 @@ Script/
         Generacion_Real.py     <- API de operación real (hoja "Gen real")
 ```
 
-La idea es ir sacando de `nucleo.py` un módulo por etapa, como ya se hizo
-con `Cmg/`; por ahora el resto sigue en un solo archivo.
+`nucleo/__init__.py` es solo una fachada: re-exporta todo, así que
+`nucleo.lo_que_sea` funciona igual que cuando era un único archivo.
+Ver `MAPA.md` para qué hace cada módulo.
 
 ## Estructura de carpeta de un caso
 

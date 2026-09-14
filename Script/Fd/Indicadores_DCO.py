@@ -34,7 +34,7 @@ selector Pre/Def, asi que por omision se toma la version MAS ALTA que
 exista publicada (V2 antes que V1) y se deja dicho en el log. Se puede
 forzar pasando `version`.
 
-No importa nada de nucleo.py (solo la biblioteca estandar), igual que
+No importa nada de nucleo (solo la biblioteca estandar), igual que
 los demas modulos de Script/. Los errores previsibles salen como
 ErrorFd.
 """

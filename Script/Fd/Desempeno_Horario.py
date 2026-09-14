@@ -40,7 +40,7 @@ El FD **no se recalcula** a partir de las respuestas: se toma tal cual
 viene en el archivo (asi lo pide el documento, seccion 25 -- puede venir
 `Respuesta = "No Participó"` con `FD = 1`).
 
-No importa nada de nucleo.py (solo pandas). Los errores previsibles
+No importa nada de nucleo (solo pandas). Los errores previsibles
 salen como ErrorDesempeno.
 """
 

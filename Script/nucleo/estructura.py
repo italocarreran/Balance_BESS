@@ -1,0 +1,653 @@
+# -*- coding: utf-8 -*-
+"""
+El arbol de carpetas y archivos que dibuja la ventana.
+"""
+
+import openpyxl
+import pandas as pd
+from pathlib import Path
+
+from .externos import (
+    Homologacion, extrae_cmg, fma_subastas, ofertas_adj,
+)
+from .parametros import (
+    ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
+    ARCHIVO_SALIDA_PAGOS, CARPETA_AUXILIARES, CARPETA_CMG,
+    CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_MEDIDAS,
+    CARPETA_OFERTAS, CARPETA_SUBASTAS, HOJA_CALCULO_ECOSTOS,
+    HOJA_CALCULO_RE545, HOJA_DICCIONARIO, HOJA_RESUMEN_BESS,
+)
+from .rutas import (
+    buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
+    buscar_archivo_subastas, buscar_soc, resolver_rutas, validar_aamm,
+)
+from .utiles import ErrorEntrada, normalizar
+
+
+# ============================================================
+# VALIDACION DE ESTRUCTURA
+# ============================================================
+
+def hojas_de(ruta):
+    """
+    Nombres de hoja de un Excel, o None si no se puede abrir (no
+    existe, esta abierto por Excel, corrupto). Se usa para mostrar el
+    estado hoja por hoja de las dos SALIDAS, que se generan por
+    partes: cada hoja puede estar o no estar.
+    """
+
+    ruta = Path(ruta)
+
+    if not ruta.is_file():
+        return None
+
+    try:
+        return list(pd.ExcelFile(ruta).sheet_names)
+    except Exception:
+        return None
+
+
+def _fila(id_fila, etiqueta, nivel, estado, detalle=""):
+    """
+    Una fila del diagrama de la ventana.
+
+    id_fila: identificador estable (la ventana lo usa para saber que
+    boton va en que fila; nucleo no sabe nada de botones).
+    nivel: 0 = raiz del caso, 1 = adentro de una carpeta/archivo,
+    2 = adentro de un archivo que esta adentro de una carpeta. Lo
+    decide nucleo porque es estructura, no presentacion: como
+    dibujarlo (prefijos, colores) es cosa de la ventana.
+    """
+
+    return {
+        "id": id_fila,
+        "etiqueta": etiqueta,
+        "nivel": nivel,
+        "estado": estado,
+        "detalle": detalle,
+    }
+
+
+def hojas_con_datos(ruta):
+    """
+    {nombre de hoja: tiene datos} de un Excel, o None si no se puede
+    abrir. "Tiene datos" = mas de una fila usada: una hoja preservada
+    que nunca se genero queda con una sola celda vacia (ver
+    _preservar_o_avisar en escribir_salida), y en el diagrama tiene
+    que verse como PENDIENTE, no como generada.
+    """
+
+    ruta = Path(ruta)
+
+    if not ruta.is_file():
+        return None
+
+    try:
+        libro = openpyxl.load_workbook(ruta, read_only=True)
+    except Exception:
+        return None
+
+    try:
+        return {hoja.title: (hoja.max_row or 0) > 1 for hoja in libro.worksheets}
+    finally:
+        libro.close()
+
+
+def _filas_de_hojas(ruta_archivo, secciones, prefijo_id, nivel):
+    """
+    Una fila por hoja de una de las dos salidas
+    (SECCIONES_CONSOLIDADO / SECCIONES_PAGOS): 'ok' si la hoja ya
+    existe en el archivo, 'pendiente' si todavia no se genero.
+
+    Las dos salidas se desglosan como el resto del arbol -el archivo
+    como "carpeta", sus hojas adentro- y cada hoja trae su propio
+    boton "Actualizar" en la ventana: por eso no hace falta ninguna
+    ventana intermedia para elegir que recalcular.
+    """
+
+    hojas = hojas_con_datos(ruta_archivo)
+    con_datos = (
+        {normalizar(nombre) for nombre, tiene in hojas.items() if tiene}
+        if hojas is not None else set()
+    )
+
+    filas = []
+
+    for id_seccion, etiqueta, _, nombres_hoja in secciones:
+
+        presentes = [
+            nombre for nombre in nombres_hoja
+            if normalizar(nombre) in con_datos
+        ]
+
+        if hojas is None:
+            estado, detalle = "pendiente", "todavia no generada"
+        elif len(presentes) == len(nombres_hoja):
+            estado, detalle = "ok", "generada"
+        elif presentes:
+            estado, detalle = "pendiente", "generada a medias"
+        else:
+            estado, detalle = "pendiente", "todavia no generada"
+
+        filas.append(
+            _fila(
+                f"{prefijo_id}:{id_seccion}",
+                f"hoja '{etiqueta}'",
+                nivel,
+                estado,
+                detalle,
+            )
+        )
+
+    return filas
+
+
+def revisar_estructura(carpeta_base, aamm=None):
+    """
+    Revisa la carpeta base y devuelve (rutas, filas), donde cada fila
+    es el dict que arma _fila(): id, etiqueta, nivel, estado
+    ('ok'/'falta'/'pendiente') y detalle.
+
+    aamm: periodo ingresado por el usuario en la ventana (4 digitos,
+    ej. '2607'). Sin un AAMM valido no se pueden buscar ni el SoC ni
+    el CSV de CMg; eso se dice en el detalle de ESAS filas, no en una
+    fila propia del periodo (el AAMM se ingresa arriba, en su campo,
+    y no es parte de la estructura de carpetas).
+    """
+
+    rutas = resolver_rutas(carpeta_base)
+    filas = []
+
+    def agregar(id_fila, etiqueta, nivel, existe, detalle=""):
+        filas.append(
+            _fila(id_fila, etiqueta, nivel, "ok" if existe else "falta", detalle)
+        )
+
+    try:
+        aamm_valido = validar_aamm(aamm)
+    except ErrorEntrada:
+        aamm_valido = None
+
+    rutas["aamm"] = aamm_valido
+
+    agregar("base", "Carpeta base", 0, rutas["base"].is_dir(), str(rutas["base"]))
+
+    # ---- Medidas/ -------------------------------------------------
+    agregar("medidas_dir", f"{CARPETA_MEDIDAS}/", 0, rutas["medidas_dir"].is_dir())
+
+    # Medidas_SAE.xlsx ya no se deja a mano: lo arma el programa desde
+    # las dos APIs del Coordinador (ver generar_medidas_sae).
+    filas.append(
+        _fila(
+            "medidas_sae",
+            ARCHIVO_MEDIDAS_SAE,
+            1,
+            "ok" if rutas["medidas_sae"].is_file() else "falta",
+            (
+                "se regenera con el boton ->"
+                if rutas["medidas_sae"].is_file()
+                else "se genera con el boton -> (baja las medidas del mes)"
+            ),
+        )
+    )
+
+    # El SoC del periodo vive aca adentro (nivel 1), no es una entrada
+    # suelta: su nombre solo tiene que contener "SOC" y el AAMM.
+    if aamm_valido:
+        try:
+            archivo_soc = buscar_soc(rutas["medidas_dir"], aamm_valido)
+            filas.append(
+                _fila("soc", archivo_soc.name, 1, "ok", f"periodo {aamm_valido}")
+            )
+            rutas["soc"] = archivo_soc
+        except ErrorEntrada as error:
+            filas.append(
+                _fila(
+                    "soc",
+                    f"SoC del periodo {aamm_valido}",
+                    1,
+                    "falta",
+                    str(error).split("\n")[0],
+                )
+            )
+            rutas["soc"] = None
+    else:
+        filas.append(
+            _fila(
+                "soc",
+                "SoC del periodo",
+                1,
+                "falta",
+                "ingresa el periodo (AAMM) arriba para poder buscarlo",
+            )
+        )
+        rutas["soc"] = None
+
+    # ---- Auxiliares/ ----------------------------------------------
+    agregar(
+        "auxiliares_dir", f"{CARPETA_AUXILIARES}/", 0,
+        rutas["auxiliares_dir"].is_dir(),
+    )
+    agregar("centrales", ARCHIVO_CENTRALES, 1, rutas["centrales"].is_file())
+
+    if rutas["centrales"].is_file():
+
+        hojas = hojas_de(rutas["centrales"])
+
+        if hojas is None:
+            filas.append(
+                _fila(
+                    "centrales:hojas",
+                    "hojas de Centrales.xlsx",
+                    2,
+                    "falta",
+                    "no se pudo abrir el archivo",
+                )
+            )
+        else:
+            hojas_norm = {normalizar(hoja) for hoja in hojas}
+            for hoja in (HOJA_RESUMEN_BESS, HOJA_DICCIONARIO):
+                agregar(
+                    f"centrales:{hoja}", f"hoja '{hoja}'", 2,
+                    normalizar(hoja) in hojas_norm,
+                )
+
+    # Archivo de homologacion (punto de medida + canal -> clave), que
+    # alimenta la descarga de Medidas_SAE.xlsx.
+    archivo_homol = Homologacion.buscar_archivo_homologacion(
+        rutas["auxiliares_dir"]
+    )
+    rutas["homologacion"] = archivo_homol
+
+    if archivo_homol:
+        filas.append(
+            _fila(
+                "homologacion", archivo_homol.name, 1, "ok",
+                f"en {CARPETA_AUXILIARES}/",
+            )
+        )
+
+        hojas_homol = hojas_de(archivo_homol)
+        hojas_homol_norm = (
+            {normalizar(h) for h in hojas_homol} if hojas_homol else set()
+        )
+
+        agregar(
+            f"homologacion:{Homologacion.HOJA_HOMOL}",
+            f"hoja '{Homologacion.HOJA_HOMOL}'", 2,
+            normalizar(Homologacion.HOJA_HOMOL) in hojas_homol_norm,
+            "punto de medida + canal -> clave",
+        )
+
+        # "Gen real" es opcional: un caso donde ninguna central venga
+        # de la API de operacion real es valido.
+        tiene_gen_real = (
+            normalizar(Homologacion.HOJA_GEN_REAL) in hojas_homol_norm
+        )
+        filas.append(
+            _fila(
+                f"homologacion:{Homologacion.HOJA_GEN_REAL}",
+                f"hoja '{Homologacion.HOJA_GEN_REAL}'", 2,
+                "ok" if tiene_gen_real else "pendiente",
+                (
+                    "centrales que se agregan desde la API de "
+                    "operacion real"
+                    if tiene_gen_real
+                    else "opcional: sin ella no se agrega ninguna "
+                         "central de operacion real"
+                ),
+            )
+        )
+
+    else:
+        filas.append(
+            _fila(
+                "homologacion", "Archivo *Homologacion*", 1, "falta",
+                f"ningun Excel de {CARPETA_AUXILIARES}/ tiene "
+                f"'homologacion' en el nombre",
+            )
+        )
+
+    # ---- Ofertas/ -------------------------------------------------
+    agregar("ofertas_dir", f"{CARPETA_OFERTAS}/", 0, rutas["ofertas_dir"].is_dir())
+
+    archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
+    rutas["ofertas"] = archivo_ofertas
+
+    if archivo_ofertas:
+        filas.append(
+            _fila("ofertas", archivo_ofertas.name, 1, "ok", f"en {CARPETA_OFERTAS}/")
+        )
+    else:
+        filas.append(
+            _fila(
+                "ofertas", "Archivo *OfertasSSCC*", 1, "falta",
+                f"ningun archivo en {CARPETA_OFERTAS}/ contiene "
+                f"'OfertasSSCC' en el nombre",
+            )
+        )
+
+    # ---- Cmg/ -----------------------------------------------------
+    # Dos archivos, en orden de uso: primero se trae el CSV 15-minutal
+    # de la unidad de red ("Traer cmg_15min"), y con ese CSV ya al
+    # lado se genera cmg.xlsx ("Generar").
+    agregar("cmg_dir", f"{CARPETA_CMG}/", 0, rutas["cmg_dir"].is_dir())
+
+    rutas["cmg_csv"] = (
+        extrae_cmg.ruta_csv_local(rutas["cmg_dir"], aamm_valido)
+        if aamm_valido else None
+    )
+
+    if rutas["cmg_csv"] is None:
+        filas.append(
+            _fila(
+                "cmg_csv", "cmg<AAMM>_def_15minutal.csv", 1, "falta",
+                "ingresa el periodo (AAMM) arriba para poder traerlo",
+            )
+        )
+    else:
+        filas.append(
+            _fila(
+                "cmg_csv",
+                rutas["cmg_csv"].name,
+                1,
+                "ok" if rutas["cmg_csv"].is_file() else "falta",
+                (
+                    f"en {CARPETA_CMG}/"
+                    if rutas["cmg_csv"].is_file()
+                    else "se baja de la unidad de red con el boton ->"
+                ),
+            )
+        )
+
+    filas.append(
+        _fila(
+            "cmg_xlsx",
+            ARCHIVO_CMG,
+            1,
+            "ok" if rutas["cmg"].is_file() else "pendiente",
+            (
+                "se regenera desde el CSV de arriba ->"
+                if rutas["cmg"].is_file()
+                else "se genera desde el CSV de arriba ->"
+            ),
+        )
+    )
+
+    # ---- FD y FMA/ ------------------------------------------------
+    # Se muestra el nombre de la carpeta que REALMENTE se esta usando
+    # (puede ser la vieja si el caso todavia no se renombro).
+    agregar(
+        "sscc_dir", f"{rutas['sscc_desempeno_dir'].name}/", 0,
+        rutas["sscc_desempeno_dir"].is_dir(),
+    )
+
+    archivo_sscc = buscar_archivo_sscc_desempeno(rutas["sscc_desempeno_dir"])
+    rutas["sscc_desempeno"] = archivo_sscc
+
+    if archivo_sscc:
+        filas.append(
+            _fila(
+                "sscc", archivo_sscc.name, 1, "ok",
+                f"en {CARPETA_FD_FMA}/",
+            )
+        )
+    else:
+        filas.append(
+            _fila(
+                "sscc", "Archivo SSCC_Desempeño_*", 1, "falta",
+                f"no esta en {CARPETA_FD_FMA}/: se baja del DCO con el "
+                f"boton 'Traer FD' de la carpeta",
+            )
+        )
+
+    # Las tres salidas de FMA viven en la misma carpeta (pedido del
+    # usuario). No bloquean: si falta alguna, el FMA de ese tipo de
+    # servicio queda en 0, igual que la formula original.
+    archivos_fma = (
+        fma_subastas.buscar_archivos_fma(
+            rutas["sscc_desempeno_dir"], aamm_valido
+        )
+        if aamm_valido else {"cpf": None, "csf": None, "ctf": None}
+    )
+    rutas["fma"] = archivos_fma
+
+    for tipo, etiqueta in (
+        ("cpf", "fma_cpf"), ("csf", "fma_csf"), ("ctf", "fma_cft"),
+    ):
+        archivo = archivos_fma.get(tipo)
+
+        if archivo:
+            filas.append(
+                _fila(
+                    f"fma_{tipo}", archivo.name, 1, "ok",
+                    f"alimenta Subastas!FMA ({tipo.upper()}); se rehace "
+                    f"con el boton ->",
+                )
+            )
+        elif not aamm_valido:
+            filas.append(
+                _fila(
+                    f"fma_{tipo}", f"{etiqueta}<AAMM>.xlsx", 1, "pendiente",
+                    "ingresa el periodo (AAMM) arriba para buscarlo",
+                )
+            )
+        else:
+            filas.append(
+                _fila(
+                    f"fma_{tipo}", f"{etiqueta}_{aamm_valido}.xlsx", 1,
+                    "pendiente",
+                    (
+                        "se arma con el boton -> desde los reportes "
+                        "diarios del DCO"
+                        if tipo == "cpf" else
+                        "se arma con el boton -> desde los reportes del "
+                        "AGC (se copian a agcface/)"
+                        if tipo == "csf" else
+                        "se arma con el boton -> desde el CTF_AAMM.csv "
+                        "del DCO"
+                    ),
+                )
+            )
+
+    # ---- Subastas/ ------------------------------------------------
+    agregar(
+        "subastas_dir", f"{CARPETA_SUBASTAS}/", 0,
+        rutas["subastas_dir"].is_dir(),
+    )
+
+    # Los Access son AHORA el origen de la hoja Subastas. La carpeta la
+    # crea el programa (pedido del usuario), no la persona.
+    if rutas["subastas_dir"].is_dir():
+        ofertas_adj.asegurar_carpeta_db(rutas["subastas_dir"])
+
+    accdb = (
+        ofertas_adj.accdb_presentes(rutas["subastas_dir"], aamm_valido)
+        if aamm_valido and rutas["db_subastas_dir"].is_dir()
+        else []
+    )
+    rutas["accdb_subastas"] = [ruta for _, _, ruta in accdb]
+
+    if not rutas["db_subastas_dir"].is_dir():
+        detalle_db = "no se pudo crear; revisa permisos"
+        estado_db = "falta"
+    elif accdb:
+        dias = len({dia for dia, _, _ in accdb})
+        detalle_db = (
+            f"{len(accdb)} Access del periodo, {dias} dia(s) - "
+            f"se refrescan con el boton ->"
+        )
+        estado_db = "ok"
+    elif not aamm_valido:
+        detalle_db = "ingresa el periodo (AAMM) para revisar que hay"
+        estado_db = "pendiente"
+    else:
+        detalle_db = (
+            "vacia para el periodo: se traen de la unidad de red con "
+            "el boton ->"
+        )
+        estado_db = "pendiente"
+
+    filas.append(
+        _fila("db_subastas", f"{CARPETA_DB_SUBASTAS}/", 1, estado_db,
+              detalle_db)
+    )
+
+    archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
+    rutas["subastas"] = archivo_subastas
+
+    # La planilla 3 dejo de ser el origen: queda solo como respaldo
+    # para los casos que todavia no tienen los Access copiados, asi
+    # que su ausencia ya no es un "falta" que bloquee nada.
+    if archivo_subastas:
+        filas.append(
+            _fila(
+                "subastas", archivo_subastas.name, 1, "ok",
+                f"respaldo en {CARPETA_SUBASTAS}/ (solo se usa si "
+                f"'{CARPETA_DB_SUBASTAS}/' esta vacia)",
+            )
+        )
+    else:
+        filas.append(
+            _fila(
+                "subastas", "Archivo 3_REMUNERACIÓN_SUBASTAS_E_ID_*", 1,
+                "ok" if accdb else "pendiente",
+                (
+                    f"no esta, y ya no hace falta: las subastas salen "
+                    f"de '{CARPETA_DB_SUBASTAS}/'"
+                    if accdb else
+                    f"no esta: seria el respaldo si "
+                    f"'{CARPETA_DB_SUBASTAS}/' queda vacia"
+                ),
+            )
+        )
+
+    # ---- Salidas --------------------------------------------------
+    # Las dos salidas se desglosan igual que Centrales.xlsx: el
+    # archivo y, adentro, una fila por hoja. Cada hoja se actualiza
+    # por separado desde su propio boton; si el archivo todavia no
+    # existe, se crea al actualizar la primera hoja.
+    for id_salida, nombre, ruta, secciones in (
+        ("consolidado", ARCHIVO_SALIDA, rutas["salida"], SECCIONES_CONSOLIDADO),
+        (
+            "pagos", ARCHIVO_SALIDA_PAGOS, rutas["salida_pagos"],
+            SECCIONES_PAGOS,
+        ),
+    ):
+        filas_hojas = _filas_de_hojas(ruta, secciones, id_salida, 1)
+
+        # El archivo esta "ok" solo si TODAS sus hojas tienen datos:
+        # que el .xlsx exista no dice nada (se crea entero, con las
+        # hojas que todavia no se generaron vacias).
+        completas = all(fila["estado"] == "ok" for fila in filas_hojas)
+
+        if not ruta.is_file():
+            detalle = "salida: se crea al actualizar la primera hoja ->"
+        elif completas:
+            detalle = "salida: se actualiza hoja por hoja ->"
+        else:
+            detalle = "salida: le faltan hojas por generar ->"
+
+        filas.append(
+            _fila(
+                id_salida, nombre, 0,
+                "ok" if (ruta.is_file() and completas) else "pendiente",
+                detalle,
+            )
+        )
+        filas.extend(filas_hojas)
+
+    return rutas, filas
+
+
+# ============================================================
+# PROCESO COMPLETO
+#
+# Dos salidas independientes:
+#
+#   - generar_consolidado(): Consolidado_entradas.xlsx.
+#   - generar_pagos_bess(): Pagos_BESS.xlsx -- lee Medidores y
+#     Subastas de Consolidado_entradas.xlsx ya generado, no los
+#     recalcula.
+#
+# Las dos reciben un set de "secciones activas": lo que entra se
+# recalcula y lo que queda afuera se preserva tal cual estaba en el
+# archivo (ver escribir_salida/hojas_regenerar). En la ventana, cada
+# seccion es una fila-hoja del diagrama con su boton "Actualizar", y
+# el boton del archivo manda todas juntas.
+#
+# SECCIONES_CONSOLIDADO agrupa cada seccion con las hojas que produce.
+# "medidores" junta Medidas_SAE, SoC, Centrales (Diccionario) y
+# OfertasSSCC porque construir_medidores() necesita los 4 juntos: no
+# se pueden actualizar por separado a ese nivel de detalle sin
+# recalcular con datos parcialmente viejos.
+#
+# El tercer elemento de cada tupla (la descripcion de que lee esa
+# seccion) ya no se muestra en la ventana -antes era el texto debajo
+# de cada casilla-: queda como documentacion del contrato de cada
+# seccion, que es donde hay que mirarlo al tocar una.
+# ============================================================
+
+SECCIONES_CONSOLIDADO = (
+    (
+        "medidores",
+        "Medidores",
+        f"Usa {ARCHIVO_MEDIDAS_SAE}, el SoC del periodo, "
+        f"{ARCHIVO_CENTRALES} y OfertasSSCC (comparte esta lectura "
+        f"con 'Ofertas SSCC' de abajo: actualizar cualquiera de las "
+        f"dos dispara la misma lectura). Esta seccion decide si se "
+        f"reescribe la hoja 'Medidores' en particular.",
+        ("Medidores",),
+    ),
+    (
+        "ofertas_sscc",
+        "Ofertas SSCC",
+        "Misma lectura que 'Medidores' (arriba) -- esta seccion "
+        "decide si se reescribe la hoja 'Ofertas SSCC' en particular.",
+        ("Ofertas SSCC",),
+    ),
+    (
+        "cmg",
+        "CMg",
+        f"Usa {ARCHIVO_CMG}.",
+        ("CMg",),
+    ),
+    (
+        "fd",
+        "FD",
+        f"Usa el archivo {CARPETA_FD_FMA}/ (hojas CPF/CSF "
+        f"Horario).",
+        ("FD",),
+    ),
+    (
+        "subastas",
+        "Subastas",
+        f"Usa los Access de {CARPETA_SUBASTAS}/{CARPETA_DB_SUBASTAS}/ "
+        f"(su origen real), y de {CARPETA_FD_FMA}/ las salidas de FMA "
+        f"(fma_cpf/fma_csf/fma_cft) y el SSCC_Desempeño_* (columna FD y "
+        f"Vector de Participacion CSF), mas {ARCHIVO_CENTRALES} "
+        f"(Propietario + nomenclaturas). Si esa carpeta no tiene Access "
+        f"del periodo, cae al respaldo 3_REMUNERACIÓN_SUBASTAS_E_ID_*.",
+        ("Subastas",),
+    ),
+)
+
+
+SECCIONES_PAGOS = (
+    (
+        "ecostos",
+        "Calculo E Costos",
+        f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
+        f"{ARCHIVO_CENTRALES}, {ARCHIVO_CMG} y el archivo "
+        f"{CARPETA_FD_FMA}/ (para el FD homologado de AM:AR).",
+        (HOJA_CALCULO_ECOSTOS,),
+    ),
+    (
+        "re545",
+        "Calculo RE545",
+        f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
+        f"{ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- no necesita el "
+        f"archivo {CARPETA_FD_FMA}/.",
+        (HOJA_CALCULO_RE545,),
+    ),
+)

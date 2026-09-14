@@ -8,7 +8,7 @@ suelto.
 
     Balance_BESS.py
     Script/
-        nucleo.py          <- todo el calculo del caso
+        nucleo/            <- el calculo del caso, un modulo por etapa
         Cmg/
             Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV
                                       15-minutal
@@ -16,7 +16,7 @@ suelto.
             Ofertas_Adjudicadas.py <- trae y lee los Access
                                       OfertasSSCCAdj*.accdb
 
-Por ahora `nucleo.py` sigue siendo un solo archivo grande; la idea
-(conversada con el usuario) es ir sacando de ahi un modulo por etapa,
-como ya se hizo con Cmg/, a medida que se agreguen mas entradas.
+`nucleo` era un solo archivo grande; hoy es un paquete con un modulo
+por etapa (ver Script/nucleo/__init__.py, que es solo la fachada:
+`nucleo.lo_que_sea` sigue funcionando igual que antes).
 """

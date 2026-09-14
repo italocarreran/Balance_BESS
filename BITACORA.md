@@ -2805,3 +2805,181 @@ Queda a la vista, sin tocar (son agregaciones internas, no homologaciones):
 los `dic_bc` / `dic_bf` / `dic_bg` de `calcular_componentes_re545()` usan
 `.get(clave, 0.0)`; si una central+ventana faltara ahí sería una inconsistencia
 interna del propio cálculo, no un cruce contra un archivo de entrada.
+
+---
+
+## Sesión 2026-09-14 (tercera pasada) — `nucleo.py` pasa a ser un paquete
+
+`Script/__init__.py` venía diciendo hace meses que la idea era "ir sacando de
+`nucleo.py` un módulo por etapa, como ya se hizo con `Cmg/`". Se hizo: el
+archivo de 8.360 líneas y 193 símbolos es ahora `Script/nucleo/`, 27 módulos.
+
+**Qué se movió.** Nada de lógica. El corte fue por bloques de líneas, así que
+cada función viajó con sus comentarios de sección y de encabezado intactos. Se
+verificó comparando el AST de los 193 símbolos antes y después: los únicos seis
+que cambian son los que se tocaron a propósito (ver más abajo).
+
+**La fachada.** `nucleo/__init__.py` re-exporta todo con un `__all__` de 205
+nombres — los de guion bajo incluidos, porque las pruebas los usan. Ni
+`Balance_BESS.py` (que usa 20 nombres de `nucleo`) ni las pruebas cambiaron una
+línea.
+
+**Sin ciclos.** Los imports van en una sola dirección: `parametros`/`utiles`
+hacia las etapas, y las etapas hacia `proceso`. Para lograrlo hubo que sacar
+dos cosas de donde estaban:
+
+- `_texto_seguro`, `_tiene_valor`, `_es_numero`, `_valor_clave`,
+  `_entero_a_texto`, `_normaliza_valor_vba` y `_columna_clave_vba` vivían
+  dentro de la sección "Ofertas SSCC" y de la etapa 2 de E Costos, pero las
+  usan cinco o seis etapas: ahora están en `utiles.py`.
+- `calcular_l`, `calcular_m` y `calcular_n_o` son las MISMAS para las dos hojas
+  de cálculo. Estaban en la etapa 2 de E Costos, así que RE545 tenía que
+  importar de E Costos para calcular sus propias columnas — una dependencia
+  falsa. Ahora son `columnas_compartidas.py`.
+- `SECCIONES_CONSOLIDADO`/`SECCIONES_PAGOS` se movieron a `estructura.py`, que
+  es quien las recorre (`proceso.py` las usaba solo de paso).
+- `externos.py` concentra el `try/except` que importa los paquetes hermanos
+  (`Cmg/`, `Fd/`, `Medidas/`, `Subastas/`): estaba escrito una vez y ahora lo
+  usan siete módulos sin repetirlo.
+
+**Redundancia eliminada.** `construir_mapa_barra()` y
+`construir_dic_resumen_factor()` repetían, cada una, el buscador de columna y
+el bucle `iterrows()` que `_mapa_resumen_bess_por_nombre()` ya hacía para
+capacidad y eficiencia. Los cuatro diccionarios de "Resumen BESS" pasan ahora
+por el mismo helper, con `_columna_resumen_bess()` / `_exigir_columna()` para
+la búsqueda y un conversor por parámetro (la barra es texto, el resto números).
+El error de columna faltante ahora **nombra cuál falta** en vez de listar las
+tres juntas. `iterrows()` se reemplazó por `zip()` de las dos columnas.
+Equivalencia comprobada contra la implementación vieja (misma salida en el caso
+normal y con las columnas en orden invertido) y fijada en
+`tests/test_diccionarios_resumen.py`.
+
+**Limpieza menor** que salió de pasar pyflakes por todo: dos f-strings sin
+placeholders en `estructura.py`, la variable muerta `descartadas` en
+`extraer_soc()`, y un `import re` sin uso en `Script/Fd/Indices_FMA.py`.
+pyflakes queda limpio sobre todo el repo.
+
+**Cómo verificar que esto no rompió nada** (por si hay que repetirlo):
+
+    python -m py_compile Balance_BESS.py Script/nucleo/*.py Script/*/*.py
+    python -m unittest discover     # 14 pruebas
+
+y, dentro de Python, que `dir(nucleo)` siga teniendo los mismos nombres que
+antes y que los 20 `nucleo.<algo>` de `Balance_BESS.py` resuelvan.
+
+**Pendiente, a la vista:** `proceso.py` importa de 17 módulos. Es lo esperable
+en un orquestador, pero si crece más conviene partirlo en
+`proceso_consolidado.py` / `proceso_pagos.py`, que son dos caminos
+independientes que hoy solo comparten el archivo.
+
+---
+
+## Sesión 2026-09-14 (cuarta pasada) — las claves de las APIs salen del código
+
+Pedido del usuario: las dos `user_key` (PRMTE y Generación real) van a
+`config.json`, en una sección que **no depende del usuario** — el valor es el
+mismo para todo el equipo.
+
+**Lo que estaba mal antes** (y que este cambio corrige de paso): había **una
+sola** constante `USER_KEY` en `Script/Medidas/comun.py`. La sesión que la
+unificó lo hizo creyendo que las dos APIs pedían la misma clave ("antes estaba
+repetida en dos archivos, y con valores distintos" — los valores distintos eran
+lo correcto, no el error). El usuario confirmó ahora que **son distintas**:
+`prmte` es la de `medidas.coordinador.cl` y `generacion_real` la de
+`operacion.coordinador.cl`.
+
+**Cómo quedó.** `Script/config.py` es ahora el único módulo que toca
+`config.json`. El archivo tiene dos clases de sección:
+
+- `"<hostname>_<usuario>"` — carpeta base y AAMM recordados, por PC/usuario.
+- `"claves_api"` — compartida, con las dos claves. Nombre reservado.
+
+`Balance_BESS.py` dejó de leer y escribir el JSON a mano: sus `leer_config()` /
+`guardar_config()` ahora delegan en `config.seccion()` /
+`config.actualizar_seccion()`, que mezclan sin pisar el resto del archivo. O
+sea: guardar la carpeta base **no puede** borrar las claves (hay una prueba que
+lo fija).
+
+`comun.leer_clave_api(cual)` traduce `ErrorConfig` a `ErrorMedidas`, que es lo
+que el resto de Medidas ya sabe convertir en `ErrorEntrada` para la ventana.
+La clave se lee **en el momento de usarla**, no al importar: así se puede
+completar el `config.json` con el programa ya abierto.
+
+**El error cuando falta** trae la ruta absoluta del archivo y el JSON exacto
+para pegar, y aclara cuál clave es de cuál API. Está fijado en las pruebas
+(`tests/test_config_claves.py`, 7 casos: cada clave por separado, archivo
+ausente, JSON roto, el `PEGAR_AQUI_LA_CLAVE` del ejemplo sin reemplazar, una
+puesta y la otra no, y el que las secciones no se pisan entre sí).
+
+**`config.ejemplo.json`** se versiona (no tiene ninguna clave adentro) y es lo
+que hay que copiar como `config.json`. `config.json` sigue en `.gitignore`.
+
+**Consecuencia buscada:** el repositorio ya no tiene ni un lugar donde poner
+credenciales. La nota de METODOLOGIA §5 que decía "queda versionada, así que el
+repositorio no puede volverse público sin rotarla antes" quedó sin efecto. Se
+revisó el historial completo (`git log --all -p` buscando cualquier
+`user_key`/`api_key` con un literal de 6+ caracteres): **nunca se commiteó una
+clave real** — `USER_KEY` siempre estuvo en `""`. Así que no hay nada que rotar
+por este motivo. Si en algún momento se hubiera commiteado una, sacarla del
+código no la saca del historial y habría que rotarla igual.
+
+---
+
+## Sesión 2026-09-14 (quinta pasada) — el registro de alertas, la conciliación y el manifiesto
+
+El usuario trajo un catálogo de controles para el traspaso (ahora en
+`docs/Alertas_y_Controles_Traspaso_Python_BESS.md`). Se revisó contra el código
+y se implementó la parte de la Fase 1 con mejor relación costo/beneficio.
+
+**Lo que el catálogo detectó y estaba mal:**
+
+- **`Pagos_BESS.xlsx` no tenía hoja de log.** Todos los `[AVISO]` de la etapa de
+  cálculo —FD, prorrata, reservas, Pmax, CMg: los que tocan plata— salían solo a
+  la caja de texto de la ventana, que no se guarda en ningún lado.
+- **`_avisar_claves_sin_mapeo()` mostraba 15 faltantes y perdía el resto**, que
+  es literalmente lo que `FD-005` del catálogo prohíbe.
+- **No existía la conservación de energía** (`TRA-001…009`), el control más
+  barato y más potente que hay: el reparto por `Ventana_No_Completa` es
+  justamente donde una fila se puede perder.
+- **No había estado de corrida**: todo era "aviso" plano, sin id ni severidad.
+
+**Lo que se hizo:**
+
+- `nucleo/alertas.py` — `Alerta` (id, severidad, etapa, central, clave, acción,
+  origen del control) y `Registro`, que junta las alertas de una corrida y
+  calcula su estado con las reglas de la sección 21 del catálogo (`APROBADA`
+  solo sin CRÍTICAS ni ALTAS). El truco para no tocar 10 firmas: **un `Registro`
+  ES un `registrar`** — se llama como `print` y además sabe guardar. `anotar()`
+  funciona con los dos, así que las pruebas y los scripts sueltos siguen andando
+  sin armar una corrida.
+- `nucleo/conciliacion.py` — `Medidores = E Costos + RE545`, con tolerancia
+  **escrita** (relativa `1e-9`, piso absoluto `1e-6`) y las dos guardadas en el
+  libro junto con la diferencia observada. Detecta fila perdida (`TRA-007`),
+  energía en la hoja equivocada (`TRA-005`/`TRA-006`) y filas de más o de menos
+  (`TRA-001`). Ojo: **concilia contra `df_re545_base`**, no contra `df_re545`,
+  que ya pasó por `renombrar_calculo_re545()` y no tiene `Energia_Positiva`.
+- `nucleo/manifiesto.py` — nombre, ruta, tamaño, fecha y `sha256` de cada archivo
+  que alimentó la corrida. Sin esto, `APROBADA` no es reproducible.
+- Hojas **`Alertas`** y **`Ejecucion`** en `Pagos_BESS.xlsx`. La regla de volumen
+  quedó definida: detalle completo al archivo **sin tope**, resumen con 15
+  ejemplos a la pantalla.
+- Ids en todos los cruces que ya avisaban: `MAE-001..005` (barra, Pmax, Pmax=0,
+  capacidad, eficiencia), `CMG-004`, `FD-005`, `DIC-001`, `PRO-001/002`,
+  `SUB-011`, y `PAG-001` (hoja del libro de pagos que quedó vacía).
+- `PER-001` en la etapa de pagos: si la hoja `Medidores` del consolidado trae más
+  de un mes, el libro quedó mezclado entre corridas y es CRÍTICA.
+
+**Una consecuencia que conviene entender antes de que asuste:** una corrida
+parcial (solo `Calculo RE545`) sobre un libro que no existía deja la otra hoja
+vacía → `PAG-001` → `NO APROBADA`. Es correcto: el libro tiene una hoja de pagos
+vacía. Por eso `Ejecucion` escribe siempre `hojas_recalculadas`.
+
+**Pendiente, anotado en las secciones 25-27 del catálogo:** unificar el `Log` del
+consolidado con estas hojas; escribir un libro de diagnóstico cuando la corrida
+muere por `ErrorEntrada` (hoy `FALLIDA` no llega a ningún archivo); el sello de
+período por hoja (`CTX-001`); la regla de la hora repetida del cambio de horario
+(`DST-001`); los controles de unidades (`UNI-001`) y de supuestos hardcodeados
+(`SUP-001`).
+
+33 pruebas, incluida una que corre `generar_pagos_bess()` de punta a punta sobre
+un caso sintético y verifica que el libro salga con las dos hojas nuevas.

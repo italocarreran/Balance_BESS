@@ -10,9 +10,43 @@ de.
 
 ```
 Balance_BESS.py            <- la ventana (lo unico que se ejecuta)
+config.ejemplo.json        <- el formato de "claves_api" para copiar
+config.json                <- local, NO se versiona (claves + por usuario)
 Script/
     __init__.py
-    nucleo.py              <- todo el calculo del caso
+    config.py              <- lo unico que lee y escribe config.json
+    nucleo/                <- el calculo del caso, una etapa por modulo
+        __init__.py            <- la fachada: nucleo.<lo que sea>
+        externos.py            <- los paquetes hermanos, en un solo lugar
+        parametros.py          <- nombres de archivo, carpeta y hoja
+        utiles.py              <- normalizacion y ErrorEntrada
+        alertas.py             <- el registro de alertas y el estado
+        avisos.py              <- los avisos de cruces que darian cero
+        conciliacion.py        <- Medidores = E Costos + RE545 (TRA)
+        manifiesto.py          <- que archivo exacto alimento la corrida
+        rutas.py               <- rutas del caso y busqueda de entradas
+        estructura.py          <- el arbol que dibuja la ventana
+        lectura.py             <- Medidas_SAE.xlsx y Centrales.xlsx
+        soc.py                 <- el SoC por bloques del SCADA
+        ofertas_sscc.py        <- Ofertas SSCC y Medidores R, S, T, V
+        hojas_entrada.py       <- hojas CMg, FD y Subastas
+        subastas_accdb.py      <- Subastas desde los Access
+        fma.py                 <- Subastas!Q (FMA) y Subastas!P (FD)
+        diccionarios.py        <- los diccionarios de Resumen BESS y CMg
+        columnas_compartidas.py<- L, M y N/O: iguales en las dos hojas
+        ecostos.py             <- Calculo E Costos: base y orquestacion
+        ecostos_columnas.py    <- E Costos etapa 2
+        ecostos_prorratas.py   <- E Costos etapa 3
+        ecostos_ciclo.py       <- E Costos etapa 4
+        re545.py               <- Calculo RE545: base y orquestacion
+        re545_reservas.py      <- RE545 AC:AT y AU
+        re545_resumen.py       <- RE545 AW:BG y BV
+        re545_componentes.py   <- RE545 BI:CE
+        medidores.py           <- la hoja Medidores
+        escritura.py           <- los dos libros de salida
+        proceso.py             <- los dos procesos completos
+        traer.py               <- los botones Traer/Generar
+        medidas_sae.py         <- Medidas_SAE.xlsx
     Cmg/
         __init__.py
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
@@ -35,9 +69,15 @@ Script/
 ```
 
 `Script/` es un paquete: la ventana hace `from Script import nucleo` y
-`nucleo.py` hace `from .Cmg import Extrae_CMG_barras`. La idea (conversada
-con el usuario) es ir sacando de `nucleo.py` un módulo por etapa, como ya
-se hizo con `Cmg/`; por ahora el resto sigue en un solo archivo grande.
+`nucleo/externos.py` hace `from ..Cmg import Extrae_CMG_barras` (el único
+lugar del núcleo donde se importan los paquetes hermanos).
+
+`nucleo` era un solo archivo de 8.300 líneas; hoy es un paquete con un
+módulo por etapa. `nucleo/__init__.py` es **solo una fachada**: re-exporta
+todo, así que `nucleo.lo_que_sea` sigue funcionando igual y ni la ventana
+ni las pruebas tuvieron que cambiar. Los módulos se importan entre sí en
+una sola dirección (de `parametros`/`utiles` hacia las etapas, y de las
+etapas hacia `proceso`): no hay ciclos.
 
 El nombre del módulo de CMg usa guiones bajos, no espacios, para que sea
 importable como cualquier módulo.
@@ -104,12 +144,48 @@ importable como cualquier módulo.
 - **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`);
   helpers de presentación del árbol (`_es_ultimo_en_su_nivel`,
   `_prefijos_arbol`) que traducen la lista plana de `revisar_estructura()`
-  a prefijos tipo consola — deliberadamente NO viven en `nucleo.py`, que no
+  a prefijos tipo consola — deliberadamente NO viven en `nucleo/`, que no
   conoce conceptos de interfaz. El **nivel** de cada fila sí lo pone
   `nucleo` (es estructura, no dibujo), y el **id** de cada fila es lo que
   la ventana usa para decidir qué botón le cuelga (`_boton_de_fila`): así
-  `nucleo.py` no sabe nada de botones.
+  `nucleo/` no sabe nada de botones.
 - **Depende de:** el paquete `Script/` (mismo directorio).
+
+---
+
+## `Script/config.py`
+
+- **Qué hace:** es el único lugar del proyecto que lee y escribe
+  `config.json` (que vive en la raíz, junto a `Balance_BESS.py`, y no se
+  versiona).
+
+- **Dos clases de sección, y la diferencia importa:**
+  - `"<hostname>_<usuario>"` — lo de cada PC/usuario: la última carpeta base
+    y el AAMM. Las escribe la ventana sola.
+  - `"claves_api"` — **compartida**: las dos claves de las APIs del
+    Coordinador. Nombre reservado (una sección de usuario nunca se llama
+    así). El valor es el mismo para todo el equipo, pero como el archivo es
+    local, cada uno lo pega una vez en su copia.
+
+- **Expone:** `leer_todo()`, `escribir_todo()`, `seccion(nombre)`,
+  `actualizar_seccion(nombre, datos)` — que mezcla sin pisar el resto del
+  archivo — y `clave_api(cual)`, con las constantes `CLAVE_PRMTE` y
+  `CLAVE_GENERACION_REAL`.
+
+- **`clave_api()`** levanta `ErrorConfig` con la ruta del archivo y el JSON
+  exacto para pegar cuando la clave falta, cuando el archivo no existe, o
+  cuando quedó el `PEGAR_AQUI_LA_CLAVE` del ejemplo sin reemplazar. Se llama
+  **en el momento de usar la clave**, no al importar: así se puede completar
+  el `config.json` con el programa ya abierto.
+
+- **Las dos claves son distintas** (`prmte` → `medidas.coordinador.cl`,
+  `generacion_real` → `operacion.coordinador.cl`). Antes había una sola
+  constante `USER_KEY` en el código, lo que además de dejarla versionada
+  forzaba a que las dos APIs compartieran clave.
+
+- **Quién lo usa:** `Balance_BESS.py` (su propia sección de usuario) y
+  `Script/Medidas/comun.py` (`leer_clave_api()`, que traduce `ErrorConfig` a
+  `ErrorMedidas` para que la ventana lo muestre igual que el resto).
 
 ---
 
@@ -421,7 +497,7 @@ importable como cualquier módulo.
 
 ---
 
-## `nucleo.py`
+## `nucleo/` (paquete)
 
 - **Qué hace:** todo el cálculo de la etapa Medidores (Medidores, Ofertas
   SSCC), la carga de CMg, FD y Subastas, y una primera etapa (base) de
@@ -742,5 +818,5 @@ importable como cualquier módulo.
 
 ## Diferencias con el documento de dominio
 
-_(vacío — no se detectaron diferencias entre `nucleo.py`/`Balance_BESS.py`
+_(vacío — no se detectaron diferencias entre `nucleo/`/`Balance_BESS.py`
 y `docs/Plan_Traspaso_Python_Balance_BESS.md` al organizar el repositorio)._

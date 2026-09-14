@@ -27,4 +27,6 @@ diagnosticos) van a una carpeta de trabajo aparte que la ventana no
 muestra.
 """
 
-from .comun import ErrorMedidas  # noqa: F401  (re-export)
+from .comun import ErrorMedidas
+
+__all__ = ["ErrorMedidas"]

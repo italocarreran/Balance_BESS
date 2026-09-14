@@ -9,15 +9,15 @@ original: Freddy.Arriagada), con tres cambios pedidos por el usuario:
      red a la carpeta Cmg/ del caso ("Traer cmg_15min") y de ahi se
      lee;
   2) las barras a filtrar no estan escritas en el codigo: se las pasa
-     quien llama (nucleo.py las saca de "Resumen BESS" de
+     quien llama (nucleo las saca de "Resumen BESS" de
      Centrales.xlsx);
   3) no se escribe el Excel aca: este modulo devuelve DataFrames y es
-     nucleo.py el que resuelve rutas y escribe.
+     nucleo el que resuelve rutas y escribe.
 
-No importa nada de nucleo.py (solo pandas): asi este modulo se puede
+No importa nada de nucleo (solo pandas): asi este modulo se puede
 probar y correr suelto, y el dia que se saquen mas etapas a modulos
 propios no hay ciclos de import. Los errores previsibles salen como
-ErrorCmg; nucleo.py los traduce a su ErrorEntrada.
+ErrorCmg; nucleo los traduce a su ErrorEntrada.
 
 El nombre del archivo usa guiones bajos (no espacios) para que sea
 importable como modulo normal.
