@@ -14,11 +14,11 @@ todos pedidos por el usuario:
   2) el periodo no sale de un yaml: es el AAMM que el usuario escribe
      en la ventana;
   3) no se escribe ningun Excel aca: este modulo devuelve DataFrames y
-     es nucleo.py el que resuelve rutas y escribe.
+     es nucleo el que resuelve rutas y escribe.
 
-No importa nada de nucleo.py (solo pandas): asi este modulo se puede
+No importa nada de nucleo (solo pandas): asi este modulo se puede
 probar y correr suelto, igual que Script/Cmg/Extrae_CMG_barras.py. Los
-errores previsibles salen como ErrorSubastas; nucleo.py los traduce a
+errores previsibles salen como ErrorSubastas; nucleo los traduce a
 su ErrorEntrada.
 
 pyodbc se importa DENTRO de las funciones que leen, no arriba: es la
@@ -122,7 +122,7 @@ def _validar_aamm(aamm):
 
 
 def periodo_desde_aamm(aamm):
-    """'2603' -> (2026, 3). Mismo criterio que nucleo.py."""
+    """'2603' -> (2026, 3). Mismo criterio que nucleo."""
 
     aamm = _validar_aamm(aamm)
     anio = 2000 + int(aamm[:2])

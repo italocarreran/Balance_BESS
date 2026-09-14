@@ -31,7 +31,7 @@ código (no versionado, es de la herramienta, no del caso).
   usuario.
 - `Script/` — paquete con todo el cálculo, sin dependencias de interfaz.
   `Balance_BESS.py` importa `Script.nucleo` y nunca al revés.
-  - `Script/nucleo.py` — el cálculo del caso.
+  - `Script/nucleo/` — el cálculo del caso, un módulo por etapa.
   - `Script/Cmg/Extrae_CMG_barras.py` — arma `cmg.xlsx` desde el CSV
     15-minutal.
   - `Script/Medidas/` — arma `Medidas_SAE.xlsx` desde las dos APIs del
@@ -75,7 +75,7 @@ con grep o por su encabezado (p. ej. "9.4" para la columna `Ventana`).
 
 - `Balance_BESS.py` — módulo/entrada principal, se abre siempre primero.
   Vive en la raíz del repositorio.
-- `Script/nucleo.py` — módulo de cálculo compartido.
+- `Script/nucleo/` — paquete de cálculo compartido (fachada en su `__init__.py`).
 - `Script/Cmg/Extrae_CMG_barras.py` — módulo de la etapa CMg.
 - `Script/Medidas/*.py` — módulos de la etapa Medidas.
   Los nombres de archivo de los módulos usan guiones bajos, no espacios,
@@ -150,8 +150,8 @@ alguno autentica con el nombre de otra persona).
 No hay todavía scripts de apoyo (`scripts/sincronizar.sh`,
 `scripts/verificar.sh`). Mientras no existan, la verificación antes de
 cerrar una sesión es manual: correr `python -m py_compile Balance_BESS.py
-Script/nucleo.py Script/Cmg/*.py Script/Medidas/*.py` y, si hay un caso de
-prueba disponible, `nucleo.generar_consolidado(...)`/
+Script/nucleo/*.py Script/*/*.py`, `python -m unittest discover` y, si hay
+un caso de prueba disponible, `nucleo.generar_consolidado(...)`/
 `nucleo.generar_pagos_bess(...)` contra él. Lo que depende de una API
 (`generar_medidas_sae`) se prueba monkeypatcheando las dos funciones de
 descarga con DataFrames sintéticos con la forma de la respuesta real: el
@@ -203,7 +203,7 @@ resto del proceso es puro pandas y sí se puede verificar.
   completo (no es atómica todavía; ver §7).
 - **Rutas de un caso:** nunca rutas absolutas ni dependientes de
   `Path(__file__).parent` para los archivos de un caso. Todo se deriva de la
-  carpeta base vía `resolver_rutas()` en `nucleo.py`. `Path(__file__).parent`
+  carpeta base vía `resolver_rutas()` en `nucleo/rutas.py`. `Path(__file__).parent`
   se usa únicamente para `CONFIG_PATH` en `Balance_BESS.py`.
 - **Lectura de Excel:** con `pandas` (`read_excel`/`ExcelFile`) y escritura
   con `openpyxl` como engine. El SoC se extrae por **detección dinámica de
@@ -212,7 +212,7 @@ resto del proceso es puro pandas y sí se puede verificar.
   entre el nombre de la central y sus columnas `Time Stamp`/`Value` (regla
   del plan, §6.1 de `docs/Plan_Traspaso_Python_Balance_BESS.md`).
 - **Normalización de texto:** toda comparación de nombres de central/hoja
-  pasa por `normalizar()` en `nucleo.py` (minúsculas, sin tildes, espacios
+  pasa por `normalizar()` en `nucleo/utiles.py` (minúsculas, sin tildes, espacios
   colapsados). No reimplementar una variante local de esta función en otro
   archivo.
 - **Homologación de nombres:** se resuelve siempre contra la hoja
@@ -321,7 +321,7 @@ resto del proceso es puro pandas y sí se puede verificar.
 ## 6. Generación de `INTERFACES.md`
 
 No aplica todavía: no existe un generador de interfaces en este repositorio.
-Con los módulos de hoy (`Balance_BESS.py`, `Script/nucleo.py`,
+Con los módulos de hoy (`Balance_BESS.py`, `Script/nucleo/`,
 `Script/Cmg/`, `Script/Medidas/`) alcanza con `MAPA.md`. Si se agregan
 muchos más y esto deja de ser suficiente, documentar acá la decisión de
 introducir un generador (o no) antes de empezar a usarlo.
@@ -347,8 +347,8 @@ causa raíz deje de existir en el código.
 | Que un archivo se llame `SOC_2607.csv` (o cualquier nombre que contenga "SOC"+AAMM) no garantiza que sea el archivo de SoC de la etapa Medidores. Ya apareció un CSV con ese patrón de nombre que en realidad era un archivo de pagos/liquidación (columnas `Fecha_Hora, CONFIGURACION, Central, Pago, Tipo_pago, Bloque_15min`, sin ninguna columna de SoC), sin relación con `Medidores!J`. | El archivo de SoC real siempre es `.xlsx`, con la estructura de bloques horizontales `Status/Questionable/Time Stamp/Value` (ver `extraer_soc()`). Si un archivo que matchea el patrón de nombre no tiene esa estructura, **no asumir que el formato cambió**: es señal de que no es el archivo correcto. Preguntar antes de adaptar el parser a una estructura nueva. |
 | El `Centrales.xlsx` real trae, en la hoja `Resumen BESS`, un título fusionado en la primera fila (`"Cuadro N° 1: Resumen BESS"`) **antes** de la fila de encabezados reales. Un primer intento leyó la hoja con `pd.read_excel(header=0)` (posición fija) y `construir_mapa_barra()` fallaba: no encontraba `'Nombre activo'`/`'Barra inyección'` porque esas columnas venían como `Unnamed: N`. | `leer_centrales()` ahora usa `_leer_resumen_bess()`, que detecta la fila de encabezados buscando los textos esperados (mismo criterio que `detectar_fila_nombres()` para el SoC), nunca por posición fija. Si en el futuro aparece otra hoja de `Centrales.xlsx` con un título similar, aplicar el mismo patrón, no asumir `header=0`. |
 | **(Resuelto)** `nucleo.construir_calculo_e_costos()`/`completar_calculo_e_costos_grupos()` calculan TODO con nombres internos tipo letra/placeholder (`Mes`, `clave`, `Energia_Positiva`, `L`, `N`, `AB`...) y recién renombran a los nombres reales (`NOMBRES_CALCULO_E_COSTOS`) al final de `completar_calculo_e_costos_grupos()` — mismo patrón que `NOMBRES_FD_CSF`/`NOMBRES_SUBASTAS`. El usuario tardó 3 intentos en mandar el archivo correcto con la hoja "E COSTOS" (las dos primeras veces solo traía `FD`/`Subastas`). | Si se agrega una columna nueva a `Calculo E Costos`, calcularla con un nombre interno letra/placeholder y agregarla a `NOMBRES_CALCULO_E_COSTOS` al final, **nunca** usar el nombre real directamente en medio del cálculo (mismo motivo que FD: si dos columnas terminan compartiendo un nombre real, indexar por ese nombre a mitad de cálculo sería ambiguo). |
-| `"OfertasSSCC"` tiene **tres** "s" seguidas al pasarlo a minúsculas (`"Ofertas"` termina en "s" + `"SSCC"` empieza con dos "s" más = `"...tas" + "sscc"` = `"...tasssc c"`). Un primer intento transcribió el literal a mano con solo dos "s" (`"ofertasscc"`) y `buscar_archivo_ofertas()` nunca encontraba ningún archivo real. | No transcribir a mano un literal derivado de un nombre con letras dobles/triples repetidas: calcularlo en tiempo de ejecución (`"OfertasSSCC".lower()`, constante `PATRON_NOMBRE_OFERTAS` en `nucleo.py`) y comparar contra eso. Se detectó con un test sintético antes de llegar a producción; si vuelve a fallar la detección del archivo de Ofertas, este es el primer sospechoso a descartar. |
-| Al agregar `calcular_r()` para la etapa 2 de `Calculo E Costos`, se redefinió sin querer una función que YA existía con ese nombre (`calcular_r()` de Medidores, para `Oferta_Completa_Dia`) — Python no avisa: la segunda definición pisa a la primera en silencio, y como `construir_medidores()` llama a `calcular_r()` en tiempo de ejecución (no al definirse), el error solo aparece al correr esa parte, con un `TypeError` de argumentos que no dice nada sobre la causa real. Se detectó por un test sintético que corrió `generar_pagos_bess()` de punta a punta. | Antes de agregar una función nueva a `nucleo.py`, buscar (`grep -n "^def <nombre>("`) si el nombre ya existe. Si dos hojas distintas tienen una columna con la misma letra pero lógica distinta (como el `R` de Medidores y el `R` de Calculo E Costos), usar un sufijo que distinga la hoja (`calcular_r_ecostos`, no `calcular_r`) en vez de reutilizar el nombre corto. |
+| `"OfertasSSCC"` tiene **tres** "s" seguidas al pasarlo a minúsculas (`"Ofertas"` termina en "s" + `"SSCC"` empieza con dos "s" más = `"...tas" + "sscc"` = `"...tasssc c"`). Un primer intento transcribió el literal a mano con solo dos "s" (`"ofertasscc"`) y `buscar_archivo_ofertas()` nunca encontraba ningún archivo real. | No transcribir a mano un literal derivado de un nombre con letras dobles/triples repetidas: calcularlo en tiempo de ejecución (`"OfertasSSCC".lower()`, constante `PATRON_NOMBRE_OFERTAS` en `nucleo/parametros.py`) y comparar contra eso. Se detectó con un test sintético antes de llegar a producción; si vuelve a fallar la detección del archivo de Ofertas, este es el primer sospechoso a descartar. |
+| Al agregar `calcular_r()` para la etapa 2 de `Calculo E Costos`, se redefinió sin querer una función que YA existía con ese nombre (`calcular_r()` de Medidores, para `Oferta_Completa_Dia`) — Python no avisa: la segunda definición pisa a la primera en silencio, y como `construir_medidores()` llama a `calcular_r()` en tiempo de ejecución (no al definirse), el error solo aparece al correr esa parte, con un `TypeError` de argumentos que no dice nada sobre la causa real. Se detectó por un test sintético que corrió `generar_pagos_bess()` de punta a punta. | Antes de agregar una función nueva a `nucleo/`, buscar (`grep -rn "^def <nombre>(" Script/nucleo/`) si el nombre ya existe — la fachada re-exporta todo, así que dos módulos distintos con el mismo nombre se pisan igual que antes. Si dos hojas distintas tienen una columna con la misma letra pero lógica distinta (como el `R` de Medidores y el `R` de Calculo E Costos), usar un sufijo que distinga la hoja (`calcular_r_ecostos`, no `calcular_r`) en vez de reutilizar el nombre corto. |
 | La hoja `Diccionario` de `Centrales.xlsx` se lee de **tres** formas distintas según qué la consume: `construir_homologacion()` (toda la fila como equivalencias simétricas, para el SoC), `_mapas_homologacion_fge()` (columnas E/F/G→E, para Ofertas SSCC) y `construir_dic_mapeo_diccionario()` (columna A→B, primera coincidencia gana, para `Calculo E Costos!AM:AR`). | No fusionar estas tres lecturas ni reusar una para lo que hace otra: son reglas de negocio distintas sobre la misma hoja, confirmadas en momentos distintos de la migración. Si aparece una CUARTA necesidad de homologación, no asumir que es igual a alguna de las tres — preguntar. |
 | `NOMBRES_CALCULO_E_COSTOS` tiene valores DUPLICADOS a propósito: `AG:AL` ("Prorratas") y `AM:AR` ("FD") comparten los mismos 6 nombres cortos (`CPF(-)`, `CSF(-)`, `CTF(-)`, `CPF(+)`, `CSF(+)`, `CTF(+)`) porque así está en el archivo real (se distinguen por un encabezado de grupo en las filas 1-2 que no se replica en nuestro esquema de una sola fila). Indexar el DataFrame final por uno de esos nombres (`df["CPF(-)"]`) después de renombrar devuelve un DataFrame de 2 columnas, no una Series — un test que no lo espera falla con `ValueError: truth value of a Series is ambiguous`. | No es un bug: es el mismo patrón que el `"Hora Mes"` duplicado de `FD`. Si hay que acceder a una de las dos columnas después del rename (normalmente no hace falta, el rename es el último paso antes de escribir a Excel), usar posición (`df.columns.get_loc`/`.iloc`), nunca el nombre solo. |
 

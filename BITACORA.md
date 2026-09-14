@@ -2805,3 +2805,69 @@ Queda a la vista, sin tocar (son agregaciones internas, no homologaciones):
 los `dic_bc` / `dic_bf` / `dic_bg` de `calcular_componentes_re545()` usan
 `.get(clave, 0.0)`; si una central+ventana faltara ahí sería una inconsistencia
 interna del propio cálculo, no un cruce contra un archivo de entrada.
+
+---
+
+## Sesión 2026-09-14 (tercera pasada) — `nucleo.py` pasa a ser un paquete
+
+`Script/__init__.py` venía diciendo hace meses que la idea era "ir sacando de
+`nucleo.py` un módulo por etapa, como ya se hizo con `Cmg/`". Se hizo: el
+archivo de 8.360 líneas y 193 símbolos es ahora `Script/nucleo/`, 27 módulos.
+
+**Qué se movió.** Nada de lógica. El corte fue por bloques de líneas, así que
+cada función viajó con sus comentarios de sección y de encabezado intactos. Se
+verificó comparando el AST de los 193 símbolos antes y después: los únicos seis
+que cambian son los que se tocaron a propósito (ver más abajo).
+
+**La fachada.** `nucleo/__init__.py` re-exporta todo con un `__all__` de 205
+nombres — los de guion bajo incluidos, porque las pruebas los usan. Ni
+`Balance_BESS.py` (que usa 20 nombres de `nucleo`) ni las pruebas cambiaron una
+línea.
+
+**Sin ciclos.** Los imports van en una sola dirección: `parametros`/`utiles`
+hacia las etapas, y las etapas hacia `proceso`. Para lograrlo hubo que sacar
+dos cosas de donde estaban:
+
+- `_texto_seguro`, `_tiene_valor`, `_es_numero`, `_valor_clave`,
+  `_entero_a_texto`, `_normaliza_valor_vba` y `_columna_clave_vba` vivían
+  dentro de la sección "Ofertas SSCC" y de la etapa 2 de E Costos, pero las
+  usan cinco o seis etapas: ahora están en `utiles.py`.
+- `calcular_l`, `calcular_m` y `calcular_n_o` son las MISMAS para las dos hojas
+  de cálculo. Estaban en la etapa 2 de E Costos, así que RE545 tenía que
+  importar de E Costos para calcular sus propias columnas — una dependencia
+  falsa. Ahora son `columnas_compartidas.py`.
+- `SECCIONES_CONSOLIDADO`/`SECCIONES_PAGOS` se movieron a `estructura.py`, que
+  es quien las recorre (`proceso.py` las usaba solo de paso).
+- `externos.py` concentra el `try/except` que importa los paquetes hermanos
+  (`Cmg/`, `Fd/`, `Medidas/`, `Subastas/`): estaba escrito una vez y ahora lo
+  usan siete módulos sin repetirlo.
+
+**Redundancia eliminada.** `construir_mapa_barra()` y
+`construir_dic_resumen_factor()` repetían, cada una, el buscador de columna y
+el bucle `iterrows()` que `_mapa_resumen_bess_por_nombre()` ya hacía para
+capacidad y eficiencia. Los cuatro diccionarios de "Resumen BESS" pasan ahora
+por el mismo helper, con `_columna_resumen_bess()` / `_exigir_columna()` para
+la búsqueda y un conversor por parámetro (la barra es texto, el resto números).
+El error de columna faltante ahora **nombra cuál falta** en vez de listar las
+tres juntas. `iterrows()` se reemplazó por `zip()` de las dos columnas.
+Equivalencia comprobada contra la implementación vieja (misma salida en el caso
+normal y con las columnas en orden invertido) y fijada en
+`tests/test_diccionarios_resumen.py`.
+
+**Limpieza menor** que salió de pasar pyflakes por todo: dos f-strings sin
+placeholders en `estructura.py`, la variable muerta `descartadas` en
+`extraer_soc()`, y un `import re` sin uso en `Script/Fd/Indices_FMA.py`.
+pyflakes queda limpio sobre todo el repo.
+
+**Cómo verificar que esto no rompió nada** (por si hay que repetirlo):
+
+    python -m py_compile Balance_BESS.py Script/nucleo/*.py Script/*/*.py
+    python -m unittest discover     # 14 pruebas
+
+y, dentro de Python, que `dir(nucleo)` siga teniendo los mismos nombres que
+antes y que los 20 `nucleo.<algo>` de `Balance_BESS.py` resuelvan.
+
+**Pendiente, a la vista:** `proceso.py` importa de 17 módulos. Es lo esperable
+en un orquestador, pero si crece más conviene partirlo en
+`proceso_consolidado.py` / `proceso_pagos.py`, que son dos caminos
+independientes que hoy solo comparten el archivo.

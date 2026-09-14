@@ -40,11 +40,10 @@ Diferencias a proposito respecto del script original:
   4) no se usa chardet para adivinar la codificacion del CSV de CTF:
      se prueban las codificaciones que de verdad aparecen, en orden.
 
-No importa nada de nucleo.py (solo pandas). Los errores previsibles
+No importa nada de nucleo (solo pandas). Los errores previsibles
 salen como ErrorIndicesFma.
 """
 
-import re
 import shutil
 from pathlib import Path
 

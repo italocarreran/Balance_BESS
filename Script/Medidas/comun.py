@@ -2,7 +2,7 @@
 """
 Lo minimo compartido por los modulos de Medidas.
 
-A proposito NO se importa nada de nucleo.py (ver Script/__init__.py):
+A proposito NO se importa nada de nucleo (ver Script/__init__.py):
 `normalizar` esta duplicada -son diez lineas- para no crear un ciclo
 de imports entre el nucleo y sus modulos de etapa.
 """

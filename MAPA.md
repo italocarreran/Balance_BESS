@@ -12,7 +12,35 @@ de.
 Balance_BESS.py            <- la ventana (lo unico que se ejecuta)
 Script/
     __init__.py
-    nucleo.py              <- todo el calculo del caso
+    nucleo/                <- el calculo del caso, una etapa por modulo
+        __init__.py            <- la fachada: nucleo.<lo que sea>
+        externos.py            <- los paquetes hermanos, en un solo lugar
+        parametros.py          <- nombres de archivo, carpeta y hoja
+        utiles.py              <- normalizacion y ErrorEntrada
+        avisos.py              <- los [AVISO] de cruces que darian cero
+        rutas.py               <- rutas del caso y busqueda de entradas
+        estructura.py          <- el arbol que dibuja la ventana
+        lectura.py             <- Medidas_SAE.xlsx y Centrales.xlsx
+        soc.py                 <- el SoC por bloques del SCADA
+        ofertas_sscc.py        <- Ofertas SSCC y Medidores R, S, T, V
+        hojas_entrada.py       <- hojas CMg, FD y Subastas
+        subastas_accdb.py      <- Subastas desde los Access
+        fma.py                 <- Subastas!Q (FMA) y Subastas!P (FD)
+        diccionarios.py        <- los diccionarios de Resumen BESS y CMg
+        columnas_compartidas.py<- L, M y N/O: iguales en las dos hojas
+        ecostos.py             <- Calculo E Costos: base y orquestacion
+        ecostos_columnas.py    <- E Costos etapa 2
+        ecostos_prorratas.py   <- E Costos etapa 3
+        ecostos_ciclo.py       <- E Costos etapa 4
+        re545.py               <- Calculo RE545: base y orquestacion
+        re545_reservas.py      <- RE545 AC:AT y AU
+        re545_resumen.py       <- RE545 AW:BG y BV
+        re545_componentes.py   <- RE545 BI:CE
+        medidores.py           <- la hoja Medidores
+        escritura.py           <- los dos libros de salida
+        proceso.py             <- los dos procesos completos
+        traer.py               <- los botones Traer/Generar
+        medidas_sae.py         <- Medidas_SAE.xlsx
     Cmg/
         __init__.py
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
@@ -35,9 +63,15 @@ Script/
 ```
 
 `Script/` es un paquete: la ventana hace `from Script import nucleo` y
-`nucleo.py` hace `from .Cmg import Extrae_CMG_barras`. La idea (conversada
-con el usuario) es ir sacando de `nucleo.py` un módulo por etapa, como ya
-se hizo con `Cmg/`; por ahora el resto sigue en un solo archivo grande.
+`nucleo/externos.py` hace `from ..Cmg import Extrae_CMG_barras` (el único
+lugar del núcleo donde se importan los paquetes hermanos).
+
+`nucleo` era un solo archivo de 8.300 líneas; hoy es un paquete con un
+módulo por etapa. `nucleo/__init__.py` es **solo una fachada**: re-exporta
+todo, así que `nucleo.lo_que_sea` sigue funcionando igual y ni la ventana
+ni las pruebas tuvieron que cambiar. Los módulos se importan entre sí en
+una sola dirección (de `parametros`/`utiles` hacia las etapas, y de las
+etapas hacia `proceso`): no hay ciclos.
 
 El nombre del módulo de CMg usa guiones bajos, no espacios, para que sea
 importable como cualquier módulo.
@@ -104,11 +138,11 @@ importable como cualquier módulo.
 - **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`);
   helpers de presentación del árbol (`_es_ultimo_en_su_nivel`,
   `_prefijos_arbol`) que traducen la lista plana de `revisar_estructura()`
-  a prefijos tipo consola — deliberadamente NO viven en `nucleo.py`, que no
+  a prefijos tipo consola — deliberadamente NO viven en `nucleo/`, que no
   conoce conceptos de interfaz. El **nivel** de cada fila sí lo pone
   `nucleo` (es estructura, no dibujo), y el **id** de cada fila es lo que
   la ventana usa para decidir qué botón le cuelga (`_boton_de_fila`): así
-  `nucleo.py` no sabe nada de botones.
+  `nucleo/` no sabe nada de botones.
 - **Depende de:** el paquete `Script/` (mismo directorio).
 
 ---
@@ -421,7 +455,7 @@ importable como cualquier módulo.
 
 ---
 
-## `nucleo.py`
+## `nucleo/` (paquete)
 
 - **Qué hace:** todo el cálculo de la etapa Medidores (Medidores, Ofertas
   SSCC), la carga de CMg, FD y Subastas, y una primera etapa (base) de
@@ -742,5 +776,5 @@ importable como cualquier módulo.
 
 ## Diferencias con el documento de dominio
 
-_(vacío — no se detectaron diferencias entre `nucleo.py`/`Balance_BESS.py`
+_(vacío — no se detectaron diferencias entre `nucleo/`/`Balance_BESS.py`
 y `docs/Plan_Traspaso_Python_Balance_BESS.md` al organizar el repositorio)._

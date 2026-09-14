@@ -1,0 +1,166 @@
+# -*- coding: utf-8 -*-
+"""
+Nombres de archivo, carpeta y hoja del caso; mapeo A:I.
+"""
+
+import re
+
+from .externos import ofertas_adj
+
+
+# ============================================================
+# PARAMETROS FIJOS
+# ============================================================
+
+# Equivale a Medidores!S1 en la planilla 11.
+INICIO_VENTANA = 10
+
+# Umbral de la columna O. La planilla usa 6%.
+UMBRAL_SOC = 0.06
+
+
+# ============================================================
+# NOMBRES DE ARCHIVO Y CARPETA
+# ============================================================
+
+CARPETA_MEDIDAS = "Medidas"
+CARPETA_AUXILIARES = "Auxiliares"
+CARPETA_OFERTAS = "Ofertas"
+CARPETA_CMG = "Cmg"
+# El usuario le cambio el nombre a esta carpeta: antes "SSCC_Desempeño"
+# y ahora "FD y FMA", porque adentro van las dos cosas -el archivo
+# SSCC_Desempeño_* del que sale la hoja FD, y las salidas de los FMA
+# (fma_cpf_*, fma_csf_*, fma_cft_*) de las que sale Subastas!FMA-.
+# Se sigue aceptando el nombre viejo si la carpeta nueva no existe, para
+# que los casos ya armados no se rompan (ver resolver_rutas).
+CARPETA_FD_FMA = "FD y FMA"
+CARPETA_FD_FMA_ANTIGUA = "SSCC_Desempeño"
+CARPETA_SUBASTAS = "Subastas"
+
+ARCHIVO_MEDIDAS_SAE = "Medidas_SAE.xlsx"
+HOJA_MEDIDAS_SAE = "Medidas"
+
+# Medidas_SAE.xlsx tampoco se arma a mano (igual que cmg.xlsx): lo
+# genera el programa desde las dos APIs del Coordinador, y los pasos
+# intermedios (lotes descargados, marca de reanudacion) van a esta
+# carpeta, que la ventana NO muestra a pedido del usuario -- no son
+# entradas ni salidas del caso, son andamios.
+CARPETA_TRABAJO_MEDIDAS = "_trabajo"
+
+ARCHIVO_CENTRALES = "Centrales.xlsx"
+HOJA_RESUMEN_BESS = "Resumen BESS"
+HOJA_DICCIONARIO = "Diccionario"
+
+# Nombre literal y fijo (a diferencia de SoC/Ofertas/SSCC_Desempeño/
+# Subastas): asi lo exige Cargar_CMg_Desde_Archivo.
+ARCHIVO_CMG = "cmg.xlsx"
+HOJA_CMG_ORIGEN = "CMg"
+
+# El CSV 15-minutal del que sale cmg.xlsx vive en la carpeta Cmg/ del
+# caso, al lado de cmg.xlsx, y se baja ahi desde la unidad de red con
+# el boton "Traer cmg_15min" (ver traer_csv_cmg). El nombre del
+# archivo, la ruta de red y el formato del CSV los conoce
+# Script/Cmg/Extrae_CMG_barras.py, no este modulo.
+
+HOJA_CPF_HORARIO = "CPF Horario"
+HOJA_CSF_HORARIO = "CSF Horario"
+
+HOJA_SUBASTAS_ORIGEN = "DB"
+
+# Las subastas ya no salen de la planilla 3: salen de los Access
+# OfertasSSCCAdj*.accdb, que son su origen real (la planilla 3 tambien
+# se arma pegando lo que sale de ellos). Se copian de la unidad de red
+# a <CARPETA_BASE>/Subastas/DB subastas/ con el boton "Traer
+# subastas". El nombre de la carpeta, la ruta de red, los nombres de
+# archivo y la consulta SQL los conoce Script/Subastas/
+# Ofertas_Adjudicadas.py, no este modulo.
+CARPETA_DB_SUBASTAS = ofertas_adj.CARPETA_DB_SUBASTAS
+
+ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
+
+# Etapa siguiente (Calculo E Costos / "Ecostos"): el usuario pidio que
+# viva en una planilla aparte de Consolidado_entradas.xlsx. Nombre
+# provisorio, puede cambiar.
+ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"
+HOJA_CALCULO_ECOSTOS = "Calculo E Costos"
+HOJA_CALCULO_RE545 = "Calculo RE545"
+
+# El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
+# lo ingresa el usuario en la ventana. El archivo de SoC solo debe
+# contener "SOC" y el AAMM en su nombre (plan, seccion 19.1) - no existe
+# un nombre de archivo literal fijo.
+PATRON_AAMM = re.compile(r"^\d{4}$")
+
+# Extensiones de Excel aceptadas para los archivos que se buscan por
+# patron de nombre (OfertasSSCC, SSCC_Desempeño_*, 3_REMUNERACIÓN_
+# SUBASTAS_E_ID_*) - no para SoC (siempre .xlsx) ni para cmg.xlsx
+# (nombre literal fijo).
+EXTENSIONES_EXCEL = {".xlsx", ".xlsm", ".xlsb", ".xls"}
+
+# Se derivan con .lower() en vez de transcribir el literal a mano: con
+# letras dobles/triples seguidas ("Ofertas"+"SSCC") es facil perder una
+# al tipear (ya paso una vez, ver METODOLOGIA.md #7).
+PATRON_NOMBRE_OFERTAS = "OfertasSSCC".lower()
+PATRON_NOMBRE_SSCC_DESEMPENO = "SSCC_Desempeño_".lower()
+PATRON_NOMBRE_SUBASTAS = "3_REMUNERACIÓN_SUBASTAS_E_ID_".lower()
+
+
+# ============================================================
+# MAPEO DE COLUMNAS A:I
+# ============================================================
+
+# Orden de Medidas_SAE.xlsx, que alimenta Medidores!A:I.
+COLUMNAS_AI = [
+    "Mes",
+    "Dia",
+    "Hora",
+    "Minutos",
+    "Hora Mes",
+    "Cuarto de Hora",
+    "clave",
+    "intervalo",
+    "Gen_Unidad",
+]
+
+# Nombre logico de cada letra de Excel, para poder comparar contra la
+# hoja original columna por columna. El orden de insercion de este
+# dict ES el orden final de columnas de Medidores.
+#
+# V, W, X, Y, AB, AC, AD, AE NO estan aca: en la planilla original no
+# son una columna por fila de Medidores, son tablas auxiliares de otro
+# largo (una fila por central x dia, o por central x ventana) que solo
+# viven en esas letras de columna porque ahi habia espacio libre. En
+# Python se escriben como hoja propia de Consolidado_entradas.xlsx en
+# vez de forzarlas a columnas del mismo largo que A:U (ver ejecutar()).
+LETRA_A_CAMPO = {
+    "A": "Mes",
+    "B": "Dia",
+    "C": "Hora",
+    "D": "Minutos",
+    "E": "Hora Mes",
+    "F": "Cuarto de Hora",
+    "G": "clave",
+    "H": "intervalo",
+    "I": "Gen_Unidad",
+    "J": "SoC",
+    "K": "Copia_Ventana",
+    "L": "Ventana",
+    "M": "M_VACIA",
+    "N": "Clave_Dia_HoraMes",
+    "O": "Indicador_SoC",
+    "P": "P_VACIA",
+    "Q": "Q_VACIA",
+    "R": "Oferta_Completa_Dia",
+    "S": "Indicador_Ventana_Oferta",
+    "T": "Ventana_No_Completa",
+    "U": "U_VACIA",
+}
+
+# Columnas que el plan define como deliberadamente vacias (plan
+# seccion 16.3): no son trabajo pendiente, es el diseño confirmado.
+COLUMNAS_VACIAS = [
+    "M_VACIA",
+    "P_VACIA",
+    "Q_VACIA",
+    "U_VACIA",
+]

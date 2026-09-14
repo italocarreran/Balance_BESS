@@ -13,7 +13,7 @@ arman pegando las salidas de entradas_sscc.py
 
 que el usuario guarda en <CARPETA_BASE>/FD y FMA/. Este modulo lee esos
 tres archivos y devuelve tablas ya normalizadas; el cruce contra cada
-fila de Subastas lo hace nucleo.py (calcular_fma_subastas).
+fila de Subastas lo hace nucleo (calcular_fma_subastas).
 
 Todo lo que hace aca sale del documento de trazabilidad que entrego el
 usuario (Trazabilidad FMA -> columna DB!V de Planilla 3), no de una
@@ -33,7 +33,7 @@ suposicion:
     y otro por `Configuracion`, porque la formula original busca en uno
     y despues en el otro.
 
-No importa nada de nucleo.py (solo pandas), igual que los otros modulos
+No importa nada de nucleo (solo pandas), igual que los otros modulos
 de Script/. Los errores previsibles salen como ErrorFma.
 """
 
@@ -274,7 +274,7 @@ def tabla_csf(ruta, registrar=print):
 
     Los valores quedan como FRACCION (se dividen por 100). Son la BASE:
     el FMA final de CSF es esta base por el Vector de Participacion CSF,
-    que todavia no tenemos (depende de FD -- ver nucleo.py).
+    que todavia no tenemos (depende de FD -- ver nucleo).
     """
 
     nombre = Path(ruta).name

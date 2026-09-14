@@ -60,7 +60,15 @@ desde la raíz del repositorio.
 ```text
 Balance_BESS.py            <- la ventana (lo único que se ejecuta)
 Script/
-    nucleo.py              <- todo el cálculo del caso
+    nucleo/                <- el cálculo del caso, una etapa por módulo
+        __init__.py            <- la fachada: `nucleo.<lo que sea>`
+        parametros.py  utiles.py  avisos.py  rutas.py  estructura.py
+        lectura.py  soc.py  ofertas_sscc.py  hojas_entrada.py
+        subastas_accdb.py  fma.py  diccionarios.py
+        columnas_compartidas.py
+        ecostos*.py            <- las cuatro etapas de Calculo E Costos
+        re545*.py              <- las cuatro partes de Calculo RE545
+        medidores.py  escritura.py  proceso.py  traer.py  medidas_sae.py
     Cmg/
         Extrae_CMG_barras.py   <- arma cmg.xlsx desde el CSV 15-minutal
     Medidas/
@@ -70,8 +78,9 @@ Script/
         Generacion_Real.py     <- API de operación real (hoja "Gen real")
 ```
 
-La idea es ir sacando de `nucleo.py` un módulo por etapa, como ya se hizo
-con `Cmg/`; por ahora el resto sigue en un solo archivo.
+`nucleo/__init__.py` es solo una fachada: re-exporta todo, así que
+`nucleo.lo_que_sea` funciona igual que cuando era un único archivo.
+Ver `MAPA.md` para qué hace cada módulo.
 
 ## Estructura de carpeta de un caso
 
