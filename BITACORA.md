@@ -3402,3 +3402,54 @@ nuevas en `tests/test_compensacion_central.py`), más una corrida sintética que
 escribió la hoja y se revisó celda por celda con `openpyxl`, y un caso con el
 nombre de la empresa escrito distinto en cada lado para ver que el `Resumen`
 la deja en una sola fila. Falta correrla contra el archivo real del período.
+
+---
+
+## 2026-09-14 — La rueda del mouse: el registro se desplaza solo
+
+Dos cosas que el usuario reportó de la ventana: que desplazarse "se ve como
+pegado", y que el registro no tiene su propio desplazamiento (poniendo el
+mouse encima se movía toda la ventana).
+
+**Las dos salían de la misma línea**, el binding que había:
+
+```python
+canvas.bind_all("<MouseWheel>",
+                lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+```
+
+1. `bind_all` es global: la rueda movía la ventana estuviera donde estuviera
+   el puntero, incluido encima del registro.
+2. `int(-delta / 120)` trunca hacia cero. Un touchpad de precisión de Windows
+   manda deltas **menores a 120** (40, 60...), que son fracciones de muesca, y
+   todos daban 0: no se movía nada hasta que el gesto era grande y ahí saltaba
+   de golpe. Eso es lo "pegado".
+3. Y como yapa, una "unidad" de `Canvas` sin `yscrollincrement` es un décimo
+   del alto visible: cada muesca era un salto enorme.
+
+**Cómo quedó.** La rueda la atiende un `rueda()` que mira qué widget está
+**debajo del puntero** (`winfo_containing`) y sube por los padres hasta
+encontrar uno anotado en `desplazables`. El registro está anotado: con el
+puntero encima se desplaza el registro y nada más, ni siquiera cuando ya está
+en un extremo (encadenar ahí es justo lo que hacía que recorrer el registro
+terminara moviendo la ventana). Fuera del registro, se desplaza la ventana.
+
+El resto fraccionario de cada evento se acumula (`_acumular`), así que los
+deltas chicos del touchpad suman en vez de perderse, y el resto se descarta al
+cambiar de sentido. El `Canvas` va con `yscrollincrement=1`: desplaza de a
+píxeles (45 por muesca), no de a décimos de pantalla. El registro va de a
+líneas (3 por muesca), que es lo natural en un widget de texto.
+
+**Un detalle que no es obvio:** la rueda además se ata al widget mismo
+(`registrar_desplazable`), no solo al diccionario. Las ataduras de widget
+corren ANTES que las de clase, así que el `"break"` evita que la atadura de
+clase de `Text` —que también desplaza— lo mueva una segunda vez. Sin eso, una
+muesca sobre el registro movía el doble.
+
+**Verificación:** `tests/test_ventana_rueda.py` (nuevo) abre la ventana de
+verdad y le manda eventos `<MouseWheel>` reales: que sobre el registro se mueva
+solo el registro, que fuera se mueva solo la ventana, que el registro al final
+no arrastre la ventana, que tres deltas de 40 sumen exactamente una muesca, y
+que una muesca sobre el registro no mueva el doble. La suite quedó en 71
+pruebas. Las cinco de la ventana se saltean si no hay tkinter o no hay display
+(acá corrieron con `xvfb-run`); en Windows corren solas.
