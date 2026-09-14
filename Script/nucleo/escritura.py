@@ -3,9 +3,12 @@
 Escritura de los dos libros de salida.
 """
 
+from pathlib import Path
+
 import openpyxl
 import pandas as pd
-from pathlib import Path
+
+from .alertas import ALTA, Alerta
 
 from .ecostos import GRUPOS_CALCULO_E_COSTOS, NOMBRES_CALCULO_E_COSTOS
 from .parametros import HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545
@@ -51,6 +54,46 @@ def _escribir_encabezados_grupo(ws, columnas_internas, grupos, fila=1, columna_i
         ws.cell(row=fila, column=columna_desde, value=etiqueta)
 
 
+def _escribir_control(
+    writer, registro, manifiesto, conciliacion, periodo, hojas_regeneradas
+):
+    """
+    Escribe las hojas "Alertas" y "Ejecucion" del libro de pagos.
+
+    Se salta sola si no hay registro: asi escribir_pagos_bess() sigue
+    sirviendo suelto (pruebas, scripts) sin armar una corrida entera.
+    """
+
+    if registro is None:
+        return
+
+    registro.tabla().to_excel(writer, sheet_name="Alertas", index=False)
+
+    filas = [
+        ("estado", registro.estado()),
+        ("periodo", periodo),
+        ("corrida", registro.inicio.strftime("%Y-%m-%d %H:%M:%S")),
+        ("hojas_recalculadas", ", ".join(hojas_regeneradas)),
+    ]
+
+    for severidad, cuantas in registro.conteo().items():
+        filas.append((f"alertas_{severidad.lower()}", cuantas))
+
+    if conciliacion:
+        filas += list(conciliacion.items())
+
+    pd.DataFrame(filas, columns=["campo", "valor"]).to_excel(
+        writer, sheet_name="Ejecucion", index=False
+    )
+
+    if manifiesto is not None and not manifiesto.empty:
+        _escribir_tabla_con_titulo(
+            writer, "Ejecucion", manifiesto,
+            "Entradas de esta corrida (sha256 del contenido)",
+            fila_inicio=len(filas) + 3,
+        )
+
+
 def escribir_pagos_bess(
     ruta_salida,
     df_ecostos=None,
@@ -59,6 +102,10 @@ def escribir_pagos_bess(
     ruta_existente=None,
     hojas_regenerar=None,
     registrar=print,
+    registro=None,
+    manifiesto=None,
+    conciliacion=None,
+    periodo="",
 ):
     """
     Escribe Pagos_BESS.xlsx: la hoja "Calculo E Costos" (si se pasa
@@ -78,6 +125,21 @@ def escribir_pagos_bess(
     Consolidado_entradas.xlsx (una hoja que no se pidio actualizar se
     preserva, no se recalcula). Si una hoja a preservar
     no existe en ruta_existente, queda vacia y se registra un aviso.
+
+    Ademas de las dos hojas de calculo escribe, cuando se le pasan:
+
+      - "Alertas": una fila por alerta de la corrida (registro), con
+        su id, severidad, central y clave. Es el registro persistente
+        que pide el catalogo de controles: hasta ahora estas alertas
+        vivian solo en la caja de texto de la ventana.
+      - "Ejecucion": el estado de la corrida (APROBADA / NO APROBADA),
+        el conteo por severidad, la conciliacion de energia y el
+        manifiesto de entradas.
+
+    OJO con las corridas parciales: si hojas_regenerar trae una sola
+    hoja, la otra viene de una corrida ANTERIOR y el estado no habla
+    de ella. Por eso "Ejecucion" escribe siempre que hojas se
+    recalcularon en esta pasada.
     """
 
     ruta_salida = Path(ruta_salida)
@@ -95,6 +157,7 @@ def escribir_pagos_bess(
             )
 
     avisos_preservacion = []
+    escritas = []
 
     def _preservar_o_avisar(writer, nombre_hoja):
         if _copiar_hoja_existente(wb_existente, nombre_hoja, writer.book):
@@ -108,10 +171,20 @@ def escribir_pagos_bess(
         )
         avisos_preservacion.append(mensaje)
 
+        if registro is not None:
+            registro.anotar(Alerta(
+                "PAG-001", ALTA, nombre_hoja, mensaje,
+                valor_encontrado="hoja vacia",
+                valor_esperado="la hoja de una corrida anterior",
+                accion="el libro queda con una hoja de pagos vacia",
+                origen_control="CONTROL NUEVO",
+            ))
+
     with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
 
         if HOJA_CALCULO_ECOSTOS in regenerar:
             if df_ecostos is not None:
+                escritas.append(HOJA_CALCULO_ECOSTOS)
                 # startrow=1: deja la fila 1 libre para los
                 # encabezados de grupo (celdas combinadas), que se
                 # escriben aparte con _escribir_encabezados_grupo();
@@ -133,6 +206,7 @@ def escribir_pagos_bess(
 
         if HOJA_CALCULO_RE545 in regenerar:
             if df_re545 is not None:
+                escritas.append(HOJA_CALCULO_RE545)
                 df_re545.to_excel(
                     writer,
                     sheet_name=HOJA_CALCULO_RE545,
@@ -164,8 +238,12 @@ def escribir_pagos_bess(
         else:
             _preservar_o_avisar(writer, HOJA_CALCULO_RE545)
 
+        _escribir_control(
+            writer, registro, manifiesto, conciliacion, periodo, escritas,
+        )
+
     for mensaje in avisos_preservacion:
-        registrar(f"  [AVISO] {mensaje}")
+        registrar(f"  [{ALTA}] PAG-001: {mensaje}")
 
     registrar(f"Archivo generado: {ruta_salida}")
 

@@ -11,7 +11,10 @@ ahora en el modulo de su etapa:
 
     parametros.py            Nombres de archivo, carpeta y hoja del caso; mapeo A:I.
     utiles.py                Normalizacion y el error de entrada: lo que usa todo.
+    alertas.py               El registro de alertas y el estado de la corrida.
     avisos.py                Diagnostico comun de los cruces que terminan en cero.
+    conciliacion.py          Medidores = E Costos + RE545 (control TRA).
+    manifiesto.py            Que archivo exacto alimento esta corrida.
     rutas.py                 Rutas del caso y busqueda de los archivos de entrada.
     estructura.py            El arbol de carpetas y archivos que dibuja la ventana.
     lectura.py               Medidas_SAE.xlsx y el maestro Centrales.xlsx.
@@ -74,7 +77,18 @@ from .utiles import (
     _normaliza_valor_vba, _texto_seguro, _tiene_valor, _valor_clave,
     normalizar,
 )
+from .alertas import (
+    ALTA, APROBADA, APROBADA_CON_ADVERTENCIAS, COLUMNAS_ALERTA, CRITICA,
+    FALLIDA, INFO, MEDIA, NO_APROBADA, SEVERIDADES, Alerta, Registro,
+    anotar, anotar_muchas,
+)
 from .avisos import _avisar_claves_sin_mapeo
+from .conciliacion import (
+    TOLERANCIA_ABSOLUTA, TOLERANCIA_RELATIVA, conciliar_energia,
+)
+from .manifiesto import (
+    COLUMNAS_MANIFIESTO, construir_manifiesto, sha256_de,
+)
 from .rutas import (
     _buscar_archivo_excel_mas_reciente, _es_archivo_de_soc,
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
@@ -188,6 +202,11 @@ from .medidas_sae import (
 # tambien los helpers con guion bajo, porque las pruebas los usan
 # por nombre.
 __all__ = [
+    "ALTA", "APROBADA", "APROBADA_CON_ADVERTENCIAS", "COLUMNAS_ALERTA",
+    "CRITICA", "FALLIDA", "INFO", "MEDIA", "NO_APROBADA", "SEVERIDADES",
+    "Alerta", "Registro", "anotar", "anotar_muchas",
+    "TOLERANCIA_ABSOLUTA", "TOLERANCIA_RELATIVA", "conciliar_energia",
+    "COLUMNAS_MANIFIESTO", "construir_manifiesto", "sha256_de",
     "externos", "Claves_Balance", "Descarga_PRMTE", "ErrorMedidas",
     "Generacion_Real", "Homologacion", "desempeno_fd", "extrae_cmg",
     "fma_subastas", "indicadores_dco", "indices_fma", "ofertas_adj",

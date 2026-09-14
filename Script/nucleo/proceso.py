@@ -6,6 +6,9 @@ Los dos procesos completos, de punta a punta.
 import pandas as pd
 
 from .externos import desempeno_fd, ofertas_adj
+
+from .alertas import CRITICA, Alerta, Registro, anotar
+from .conciliacion import conciliar_energia
 from .diccionarios import (
     construir_dic_cmg, construir_dic_resumen_capacidad,
     construir_dic_resumen_eficiencia, construir_dic_resumen_factor,
@@ -14,6 +17,7 @@ from .diccionarios import (
 from .ecostos import (
     completar_calculo_e_costos_grupos, construir_calculo_e_costos,
 )
+from .manifiesto import construir_manifiesto
 from .ecostos_prorratas import construir_dic_mapeo_diccionario
 from .escritura import escribir_pagos_bess, escribir_salida
 from .estructura import SECCIONES_CONSOLIDADO, SECCIONES_PAGOS
@@ -359,6 +363,11 @@ def generar_pagos_bess(
         if progreso:
             progreso(valor)
 
+    # Todo lo que el calculo escriba al log pasa por este Registro: las
+    # alertas quedan guardadas con su id y severidad, no solo impresas.
+    registro = Registro(salida=registrar)
+    registrar = registro
+
     secciones_activas = set(secciones_activas)
     ids_validos = {seccion[0] for seccion in SECCIONES_PAGOS}
     desconocidas = secciones_activas - ids_validos
@@ -409,7 +418,33 @@ def generar_pagos_bess(
         )
 
     registrar(f"  filas: {len(df_medidores):,}")
+
+    # La hoja Medidores de la que salen los dos calculos tiene que ser
+    # de un solo mes: si trae dos, el libro quedo mezclado entre
+    # corridas de periodos distintos y todo lo que siga paga mal.
+    meses = sorted(
+        int(m) for m in pd.to_numeric(
+            df_medidores["Mes"], errors="coerce"
+        ).dropna().unique()
+    )
+    periodo_medidores = "-".join(f"{m:02d}" for m in meses)
+
+    if len(meses) > 1:
+        anotar(registrar, Alerta(
+            "PER-001", CRITICA, "Traspaso",
+            f"La hoja 'Medidores' de {rutas['salida'].name} tiene "
+            f"{len(meses)} meses distintos ({periodo_medidores}): el "
+            f"libro quedo mezclado entre corridas de periodos distintos.",
+            valor_encontrado=periodo_medidores,
+            valor_esperado="un unico mes",
+            accion="corrida NO APROBADA",
+            archivo=rutas["salida"].name, hoja="Medidores",
+            origen_control="CATALOGO PER-001",
+        ))
+
     avanzar(10)
+
+    archivo_sscc = None
 
     if not rutas["centrales"].is_file():
         raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
@@ -458,6 +493,12 @@ def generar_pagos_bess(
     df_ecostos = None
     df_re545 = None
     df_resumen_re545 = None
+
+    # La version de RE545 con los nombres internos de columna. La que
+    # se escribe (df_re545) ya paso por renombrar_calculo_re545(), y
+    # ahi "Energia_Positiva" se llama como en el Excel: la
+    # conciliacion tiene que mirar esta, no aquella.
+    df_re545_base = None
 
     if quiere_ecostos:
 
@@ -541,6 +582,21 @@ def generar_pagos_bess(
     avanzar(90)
 
     registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
+    # TRA: la energia de Medidores tiene que repartirse entera entre
+    # las dos hojas. Va antes de escribir: si no cuadra, la corrida
+    # queda NO APROBADA y eso se escribe en el libro.
+    registrar("Conciliando energia Medidores -> E Costos + RE545...")
+    conciliacion = conciliar_energia(
+        df_medidores, df_ecostos, df_re545_base, registrar=registrar
+    )
+
+    manifiesto = construir_manifiesto([
+        ("Consolidado_entradas", rutas["salida"]),
+        ("Centrales", rutas["centrales"]),
+        ("cmg", rutas["cmg"]),
+        ("SSCC_Desempeño (FD)", archivo_sscc),
+    ])
+
     escribir_pagos_bess(
         rutas["salida_pagos"],
         df_ecostos,
@@ -549,9 +605,19 @@ def generar_pagos_bess(
         ruta_existente=rutas["salida_pagos"],
         hojas_regenerar=hojas_regenerar,
         registrar=registrar,
+        registro=registro,
+        manifiesto=manifiesto,
+        conciliacion=conciliacion,
+        periodo=periodo_medidores,
     )
 
     avanzar(100)
     registrar(f"Listo: {rutas['salida_pagos']}")
+
+    for linea in registro.resumen(
+        periodo=periodo_medidores,
+        hojas_regeneradas=sorted(hojas_regenerar),
+    ).split("\n"):
+        registrar(linea)
 
     return rutas["salida_pagos"]

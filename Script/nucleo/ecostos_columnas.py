@@ -6,6 +6,7 @@ E Costos, etapa 2: R, S, T, U, W, X, Y, AB:AF.
 import math
 import pandas as pd
 
+from .alertas import ALTA, Alerta, anotar_muchas
 from .utiles import _texto_seguro, _tiene_valor, normalizar
 
 
@@ -230,11 +231,23 @@ def calcular_ae_af(df_ecostos, dic_factor, registrar=print):
     })
 
     if sin_factor_util:
-        registrar(
-            f"  [AVISO] Calculo E Costos: Pmax (MW) en 0 o no numerico "
-            f"para {len(sin_factor_util):,} central(es) "
+        anotar_muchas(
+            registrar,
+            [
+                Alerta(
+                    "MAE-003", ALTA, "Calculo E Costos",
+                    "Pmax (MW) en 0 o no numerico.",
+                    central=central, valor_encontrado="0 o no numerico",
+                    valor_esperado="un Pmax (MW) numerico y distinto de 0",
+                    accion="AE y AF quedan vacias para esa central",
+                    origen_control="CATALOGO AUX-007",
+                )
+                for central in sin_factor_util
+            ],
+            f"  [{ALTA}] MAE-003: Calculo E Costos: Pmax (MW) en 0 o no "
+            f"numerico para {len(sin_factor_util):,} central(es) "
             f"({', '.join(repr(v) for v in sin_factor_util[:15])}); "
-            f"AE y AF quedan vacias para esas centrales."
+            f"AE y AF quedan vacias para esas centrales.",
         )
 
     ae, af = [], []

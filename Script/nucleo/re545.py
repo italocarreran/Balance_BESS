@@ -5,11 +5,13 @@ Calculo RE545: traspaso base, S, U, V y orquestacion.
 
 import pandas as pd
 
+from .alertas import ALTA, Alerta, anotar
 from .avisos import _avisar_claves_sin_mapeo
 from .columnas_compartidas import calcular_l, calcular_m, calcular_n_o
 from .diccionarios import _buscar_cmg
 from .parametros import (
-    ARCHIVO_CENTRALES, ARCHIVO_CMG, HOJA_RESUMEN_BESS,
+    ARCHIVO_CENTRALES, ARCHIVO_CMG, HOJA_CALCULO_RE545,
+    HOJA_RESUMEN_BESS,
 )
 from .re545_reservas import (
     calcular_reservas_re545, construir_dic_reservas_subastas,
@@ -187,6 +189,10 @@ def construir_calculo_re545(
     _avisar_claves_sin_mapeo(
         df["clave"], mapa_barra, "Central sin barra de inyeccion",
         f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+        id_alerta="MAE-001", etapa=HOJA_CALCULO_RE545,
+        archivo=ARCHIVO_CENTRALES, hoja=HOJA_RESUMEN_BESS,
+        accion="la Barra queda vacia y con ella el CMg de esas filas",
+        origen_control="CATALOGO AUX-006",
     )
 
     energia = pd.to_numeric(
@@ -223,12 +229,16 @@ def construir_calculo_re545(
     sin_cmg = int(df["CMg"].isna().sum())
     sin_cmg_promedio = int(df["R"].isna().sum())
     if sin_cmg or sin_cmg_promedio:
-        registrar(
-            f"  [AVISO] Calculo RE545: {sin_cmg:,} fila(s) sin CMg y "
-            f"{sin_cmg_promedio:,} sin CMg Promedio (sin match "
-            f"Barra+Cuarto de Hora en {ARCHIVO_CMG}). Los calculos "
-            f"posteriores pueden convertir esos faltantes en 0."
-        )
+        anotar(registrar, Alerta(
+            "CMG-004", ALTA, HOJA_CALCULO_RE545,
+            f"{sin_cmg:,} fila(s) sin CMg y {sin_cmg_promedio:,} sin "
+            f"CMg Promedio (sin match Barra+Cuarto de Hora en "
+            f"{ARCHIVO_CMG}).",
+            valor_encontrado=f"{sin_cmg:,} / {sin_cmg_promedio:,} filas",
+            accion="los calculos posteriores los toman como 0",
+            archivo=ARCHIVO_CMG,
+            origen_control="CATALOGO CMG-004",
+        ))
 
     filas_con_energia = int(va_a_re545.sum())
 
@@ -442,10 +452,18 @@ def completar_calculo_re545(
     _avisar_claves_sin_mapeo(
         df["clave"], dic_capacidad, "Central sin Capacidad (MWh)",
         f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+        id_alerta="MAE-004", etapa=HOJA_CALCULO_RE545,
+        archivo=ARCHIVO_CENTRALES, hoja=HOJA_RESUMEN_BESS,
+        accion="U, BC y BN quedan vacias para esa central",
+        origen_control="CATALOGO AUX-006",
     )
     _avisar_claves_sin_mapeo(
         df["clave"], dic_eficiencia, "Central sin Eficiencia",
         f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+        id_alerta="MAE-005", etapa=HOJA_CALCULO_RE545,
+        archivo=ARCHIVO_CENTRALES, hoja=HOJA_RESUMEN_BESS,
+        accion="V queda vacia para esa central",
+        origen_control="CATALOGO AUX-006",
     )
 
     dics_reservas = construir_dic_reservas_subastas(df_subastas)

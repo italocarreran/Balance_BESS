@@ -19,7 +19,7 @@ class AlertasMapeosTest(unittest.TestCase):
 
         self.assertEqual(faltantes, ["SAE-B", "SAE-C"])
         self.assertEqual(len(mensajes), 1)
-        self.assertIn("[AVISO]", mensajes[0])
+        self.assertIn("[ALTA]", mensajes[0])
         self.assertIn("pueden quedar vacios o en 0", mensajes[0])
 
     def test_fd_avisa_diccionario_y_matches_que_se_rellenan_con_cero(self):

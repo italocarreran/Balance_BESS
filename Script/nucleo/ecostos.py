@@ -5,6 +5,7 @@ Calculo E Costos: traspaso base y orquestacion.
 
 import pandas as pd
 
+from .alertas import ALTA, Alerta, anotar
 from .avisos import _avisar_claves_sin_mapeo
 from .columnas_compartidas import calcular_l, calcular_m, calcular_n_o
 from .diccionarios import _buscar_cmg
@@ -23,7 +24,8 @@ from .ecostos_prorratas import (
     construir_prorrata_sscc,
 )
 from .parametros import (
-    ARCHIVO_CENTRALES, ARCHIVO_CMG, HOJA_RESUMEN_BESS,
+    ARCHIVO_CENTRALES, ARCHIVO_CMG, HOJA_CALCULO_ECOSTOS,
+    HOJA_RESUMEN_BESS,
 )
 from .utiles import _tiene_valor, normalizar
 
@@ -66,6 +68,10 @@ def construir_calculo_e_costos(
     _avisar_claves_sin_mapeo(
         df["clave"], mapa_barra, "Central sin barra de inyeccion",
         f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+        id_alerta="MAE-001", etapa=HOJA_CALCULO_ECOSTOS,
+        archivo=ARCHIVO_CENTRALES, hoja=HOJA_RESUMEN_BESS,
+        accion="la Barra queda vacia y con ella el CMg de esas filas",
+        origen_control="CATALOGO AUX-006",
     )
 
     energia = pd.to_numeric(
@@ -95,16 +101,26 @@ def construir_calculo_e_costos(
     sin_cmg = int(df["CMg"].isna().sum())
 
     if sin_barra:
-        registrar(
-            f"  [AVISO] Calculo E Costos: {sin_barra:,} fila(s) sin barra de "
-            f"inyeccion (central no encontrada en '{HOJA_RESUMEN_BESS}')."
-        )
+        anotar(registrar, Alerta(
+            "MAE-001", ALTA, HOJA_CALCULO_ECOSTOS,
+            f"{sin_barra:,} fila(s) sin barra de inyeccion (central no "
+            f"encontrada en '{HOJA_RESUMEN_BESS}').",
+            valor_encontrado=f"{sin_barra:,} filas",
+            accion="la Barra queda vacia y con ella el CMg de esas filas",
+            archivo=ARCHIVO_CENTRALES, hoja=HOJA_RESUMEN_BESS,
+            origen_control="CATALOGO AUX-006",
+        ))
 
     if sin_cmg:
-        registrar(
-            f"  [AVISO] Calculo E Costos: {sin_cmg:,} fila(s) sin CMg (sin match "
-            f"Barra+Cuarto de Hora en {ARCHIVO_CMG})."
-        )
+        anotar(registrar, Alerta(
+            "CMG-004", ALTA, HOJA_CALCULO_ECOSTOS,
+            f"{sin_cmg:,} fila(s) sin CMg (sin match Barra+Cuarto de "
+            f"Hora en {ARCHIVO_CMG}).",
+            valor_encontrado=f"{sin_cmg:,} filas",
+            accion="el CMg queda vacio; S y T lo toman como 0",
+            archivo=ARCHIVO_CMG,
+            origen_control="CATALOGO CMG-004",
+        ))
 
     registrar(
         f"  Calculo E Costos: {n:,} fila(s) traspasadas desde Medidores."
@@ -264,6 +280,10 @@ def completar_calculo_e_costos_grupos(
     _avisar_claves_sin_mapeo(
         df["clave"], dic_factor, "Central sin Pmax (MW)",
         f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+        id_alerta="MAE-002", etapa=HOJA_CALCULO_ECOSTOS,
+        archivo=ARCHIVO_CENTRALES, hoja=HOJA_RESUMEN_BESS,
+        accion="AE y AF quedan vacias (el #N/D del original)",
+        origen_control="CATALOGO AUX-008",
     )
 
     tabla_prorrata = construir_prorrata_sscc(df_subastas)

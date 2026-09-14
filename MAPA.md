@@ -20,7 +20,10 @@ Script/
         externos.py            <- los paquetes hermanos, en un solo lugar
         parametros.py          <- nombres de archivo, carpeta y hoja
         utiles.py              <- normalizacion y ErrorEntrada
-        avisos.py              <- los [AVISO] de cruces que darian cero
+        alertas.py             <- el registro de alertas y el estado
+        avisos.py              <- los avisos de cruces que darian cero
+        conciliacion.py        <- Medidores = E Costos + RE545 (TRA)
+        manifiesto.py          <- que archivo exacto alimento la corrida
         rutas.py               <- rutas del caso y busqueda de entradas
         estructura.py          <- el arbol que dibuja la ventana
         lectura.py             <- Medidas_SAE.xlsx y Centrales.xlsx

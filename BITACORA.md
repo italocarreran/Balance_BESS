@@ -2922,3 +2922,64 @@ revisó el historial completo (`git log --all -p` buscando cualquier
 clave real** — `USER_KEY` siempre estuvo en `""`. Así que no hay nada que rotar
 por este motivo. Si en algún momento se hubiera commiteado una, sacarla del
 código no la saca del historial y habría que rotarla igual.
+
+---
+
+## Sesión 2026-09-14 (quinta pasada) — el registro de alertas, la conciliación y el manifiesto
+
+El usuario trajo un catálogo de controles para el traspaso (ahora en
+`docs/Alertas_y_Controles_Traspaso_Python_BESS.md`). Se revisó contra el código
+y se implementó la parte de la Fase 1 con mejor relación costo/beneficio.
+
+**Lo que el catálogo detectó y estaba mal:**
+
+- **`Pagos_BESS.xlsx` no tenía hoja de log.** Todos los `[AVISO]` de la etapa de
+  cálculo —FD, prorrata, reservas, Pmax, CMg: los que tocan plata— salían solo a
+  la caja de texto de la ventana, que no se guarda en ningún lado.
+- **`_avisar_claves_sin_mapeo()` mostraba 15 faltantes y perdía el resto**, que
+  es literalmente lo que `FD-005` del catálogo prohíbe.
+- **No existía la conservación de energía** (`TRA-001…009`), el control más
+  barato y más potente que hay: el reparto por `Ventana_No_Completa` es
+  justamente donde una fila se puede perder.
+- **No había estado de corrida**: todo era "aviso" plano, sin id ni severidad.
+
+**Lo que se hizo:**
+
+- `nucleo/alertas.py` — `Alerta` (id, severidad, etapa, central, clave, acción,
+  origen del control) y `Registro`, que junta las alertas de una corrida y
+  calcula su estado con las reglas de la sección 21 del catálogo (`APROBADA`
+  solo sin CRÍTICAS ni ALTAS). El truco para no tocar 10 firmas: **un `Registro`
+  ES un `registrar`** — se llama como `print` y además sabe guardar. `anotar()`
+  funciona con los dos, así que las pruebas y los scripts sueltos siguen andando
+  sin armar una corrida.
+- `nucleo/conciliacion.py` — `Medidores = E Costos + RE545`, con tolerancia
+  **escrita** (relativa `1e-9`, piso absoluto `1e-6`) y las dos guardadas en el
+  libro junto con la diferencia observada. Detecta fila perdida (`TRA-007`),
+  energía en la hoja equivocada (`TRA-005`/`TRA-006`) y filas de más o de menos
+  (`TRA-001`). Ojo: **concilia contra `df_re545_base`**, no contra `df_re545`,
+  que ya pasó por `renombrar_calculo_re545()` y no tiene `Energia_Positiva`.
+- `nucleo/manifiesto.py` — nombre, ruta, tamaño, fecha y `sha256` de cada archivo
+  que alimentó la corrida. Sin esto, `APROBADA` no es reproducible.
+- Hojas **`Alertas`** y **`Ejecucion`** en `Pagos_BESS.xlsx`. La regla de volumen
+  quedó definida: detalle completo al archivo **sin tope**, resumen con 15
+  ejemplos a la pantalla.
+- Ids en todos los cruces que ya avisaban: `MAE-001..005` (barra, Pmax, Pmax=0,
+  capacidad, eficiencia), `CMG-004`, `FD-005`, `DIC-001`, `PRO-001/002`,
+  `SUB-011`, y `PAG-001` (hoja del libro de pagos que quedó vacía).
+- `PER-001` en la etapa de pagos: si la hoja `Medidores` del consolidado trae más
+  de un mes, el libro quedó mezclado entre corridas y es CRÍTICA.
+
+**Una consecuencia que conviene entender antes de que asuste:** una corrida
+parcial (solo `Calculo RE545`) sobre un libro que no existía deja la otra hoja
+vacía → `PAG-001` → `NO APROBADA`. Es correcto: el libro tiene una hoja de pagos
+vacía. Por eso `Ejecucion` escribe siempre `hojas_recalculadas`.
+
+**Pendiente, anotado en las secciones 25-27 del catálogo:** unificar el `Log` del
+consolidado con estas hojas; escribir un libro de diagnóstico cuando la corrida
+muere por `ErrorEntrada` (hoy `FALLIDA` no llega a ningún archivo); el sello de
+período por hoja (`CTX-001`); la regla de la hora repetida del cambio de horario
+(`DST-001`); los controles de unidades (`UNI-001`) y de supuestos hardcodeados
+(`SUP-001`).
+
+33 pruebas, incluida una que corre `generar_pagos_bess()` de punta a punta sobre
+un caso sintético y verifica que el libro salga con las dos hojas nuevas.

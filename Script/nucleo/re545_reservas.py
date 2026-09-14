@@ -5,6 +5,7 @@ RE545: los tres bloques de reservas (AC:AT) y AU.
 
 import pandas as pd
 
+from .alertas import ALTA, Alerta, anotar_muchas
 from .utiles import (
     ErrorEntrada, _normaliza_valor_vba, _texto_seguro, _tiene_valor,
 )
@@ -186,11 +187,25 @@ def calcular_reservas_re545(df_re545, dics_reservas, registrar=print):
     })
 
     if sin_subastas:
-        registrar(
-            f"  [AVISO] Calculo RE545: {len(sin_subastas):,} central(es) "
-            f"no aparecen en ninguna fila de la hoja Subastas "
+        anotar_muchas(
+            registrar,
+            [
+                Alerta(
+                    "SUB-011", ALTA, "Calculo RE545",
+                    "Central sin ninguna fila en la hoja Subastas.",
+                    central=central,
+                    valor_esperado="al menos una fila en Subastas",
+                    accion="AC:AT y AU quedan en 0: se paga como si no "
+                           "hubiera tenido reservas",
+                    hoja="Subastas",
+                    origen_control="CONTROL NUEVO",
+                )
+                for central in sin_subastas
+            ],
+            f"  [{ALTA}] SUB-011: Calculo RE545: {len(sin_subastas):,} "
+            f"central(es) no aparecen en ninguna fila de la hoja Subastas "
             f"({', '.join(repr(v) for v in sin_subastas[:15])}); sus "
-            f"reservas (AC:AT) y AU quedan en 0."
+            f"reservas (AC:AT) y AU quedan en 0.",
         )
 
     au = pd.Series(0.0, index=df.index)

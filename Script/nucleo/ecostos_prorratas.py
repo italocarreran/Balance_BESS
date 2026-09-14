@@ -7,6 +7,7 @@ import math
 import pandas as pd
 
 from .parametros import HOJA_DICCIONARIO
+from .alertas import ALTA, MEDIA, Alerta, anotar, anotar_muchas
 from .utiles import (
     _columna_clave_vba, _normaliza_valor_vba, _texto_seguro,
     _tiene_valor, normalizar,
@@ -173,18 +174,36 @@ def calcular_prorratas(df_ecostos, dic_prorrata, registrar=print):
     ]
 
     if sin_ninguna:
-        registrar(
-            f"  [AVISO] Calculo E Costos: {len(sin_ninguna):,} central(es) "
-            f"no tienen ninguna hora en la Prorrata SSCC "
+        anotar_muchas(
+            registrar,
+            [
+                Alerta(
+                    "PRO-001", ALTA, "Calculo E Costos",
+                    "Central sin ninguna hora en la Prorrata SSCC.",
+                    central=central,
+                    valor_esperado="al menos una hora en la Prorrata SSCC",
+                    accion="AG/AH quedan en 0 y con ellas todo el "
+                           "prorrateo de SSCC de esa central",
+                    hoja="Subastas",
+                    origen_control="CONTROL NUEVO",
+                )
+                for central in sin_ninguna
+            ],
+            f"  [{ALTA}] PRO-001: Calculo E Costos: {len(sin_ninguna):,} "
+            f"central(es) no tienen ninguna hora en la Prorrata SSCC "
             f"({', '.join(repr(v) for v in sin_ninguna[:15])}); AG/AH "
-            f"quedan en 0 y con ellas todo el prorrateo de SSCC."
+            f"quedan en 0 y con ellas todo el prorrateo de SSCC.",
         )
     elif faltantes_por_central:
-        registrar(
-            f"  [AVISO] Calculo E Costos: {int(sin_match.sum()):,} fila(s) "
-            f"sin prorrata SSCC para su central+'Hora Mes'; AG/AH quedan "
-            f"en 0 en esas filas."
-        )
+        anotar(registrar, Alerta(
+            "PRO-002", MEDIA, "Calculo E Costos",
+            f"{int(sin_match.sum()):,} fila(s) sin prorrata SSCC para su "
+            f"central+'Hora Mes'.",
+            valor_encontrado=f"{int(sin_match.sum()):,} filas",
+            accion="AG/AH quedan en 0 en esas filas",
+            hoja="Subastas",
+            origen_control="CONTROL NUEVO",
+        ))
 
     ag = valores.map(lambda v: v[0])
     ah = valores.map(lambda v: v[1])
@@ -303,25 +322,53 @@ def calcular_fd_prorrateado(
         aq.append(csf_ac[0] if csf_ac is not None else 0.0)
 
     if sin_diccionario:
-        registrar(
-            f"  [AVISO] FD de Calculo E Costos: central(es) no presentes "
-            f"en el diccionario de nomenclatura ({HOJA_DICCIONARIO} A:B): "
+        anotar_muchas(
+            registrar,
+            [
+                Alerta(
+                    "DIC-001", ALTA, "Calculo E Costos",
+                    f"Central no presente en el diccionario de "
+                    f"nomenclatura ({HOJA_DICCIONARIO} A:B).",
+                    central=central,
+                    valor_esperado=f"una fila en {HOJA_DICCIONARIO} A:B",
+                    accion="AM, AN, AP y AQ quedan vacias para esa central",
+                    hoja=HOJA_DICCIONARIO,
+                    origen_control="CATALOGO AUX-004",
+                )
+                for central in sorted(sin_diccionario)
+            ],
+            f"  [{ALTA}] DIC-001: FD de Calculo E Costos: central(es) no "
+            f"presentes en el diccionario de nomenclatura "
+            f"({HOJA_DICCIONARIO} A:B): "
             f"{', '.join(repr(v) for v in sorted(sin_diccionario))}. "
-            f"AM, AN, AP y AQ quedan vacias para esas centrales."
+            f"AM, AN, AP y AQ quedan vacias para esas centrales.",
         )
-    if sin_fd_cpf:
-        registrar(
-            f"  [AVISO] FD de Calculo E Costos: {len(sin_fd_cpf):,} "
-            f"clave(s) CPF homologadas no aparecen en la hoja FD; sus "
-            f"valores se completan con 0. Ejemplos: "
-            f"{', '.join(sorted(sin_fd_cpf)[:10])}."
-        )
-    if sin_fd_csf:
-        registrar(
-            f"  [AVISO] FD de Calculo E Costos: {len(sin_fd_csf):,} "
-            f"clave(s) CSF homologadas no aparecen en la hoja FD; sus "
-            f"valores se completan con 0. Ejemplos: "
-            f"{', '.join(sorted(sin_fd_csf)[:10])}."
+
+    # FD-005 del catalogo: se guardan TODAS las claves faltantes, no
+    # una muestra. A la pantalla va el resumen con 10 ejemplos.
+    for etiqueta, faltantes in (("CPF", sin_fd_cpf), ("CSF", sin_fd_csf)):
+        if not faltantes:
+            continue
+        anotar_muchas(
+            registrar,
+            [
+                Alerta(
+                    "FD-005", ALTA, "Calculo E Costos",
+                    f"Clave {etiqueta} homologada que no aparece en la "
+                    f"hoja FD.",
+                    clave=clave,
+                    valor_esperado="una fila en la hoja FD",
+                    accion="el valor se completa con 0",
+                    hoja="FD",
+                    origen_control="CATALOGO FD-005",
+                )
+                for clave in sorted(faltantes)
+            ],
+            f"  [{ALTA}] FD-005: FD de Calculo E Costos: "
+            f"{len(faltantes):,} clave(s) {etiqueta} homologadas no "
+            f"aparecen en la hoja FD; sus valores se completan con 0. "
+            f"Ejemplos: {', '.join(sorted(faltantes)[:10])}"
+            f"{' (detalle completo en la hoja Alertas)' if len(faltantes) > 10 else ''}.",
         )
 
     return (

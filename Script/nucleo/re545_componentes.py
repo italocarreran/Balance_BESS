@@ -6,7 +6,9 @@ RE545: Componente 1 y Componente 2 (BI:CE).
 import pandas as pd
 
 from .avisos import _avisar_claves_sin_mapeo
-from .parametros import ARCHIVO_CENTRALES, HOJA_RESUMEN_BESS
+from .parametros import (
+    ARCHIVO_CENTRALES, HOJA_CALCULO_RE545, HOJA_RESUMEN_BESS,
+)
 from .re545_resumen import (
     _clave_grupo_re545, _mapa_resumen_por_grupo, calcular_bv_re545,
 )
@@ -197,8 +199,12 @@ def calcular_componentes_re545(
     # El aviso va antes de calcular nada para que salga igual si algo
     # mas adelante falla.
     _avisar_claves_sin_mapeo(
-        df["clave"], dic_factor, "Calculo RE545: central sin Pmax (MW)",
+        df["clave"], dic_factor, "Central sin Pmax (MW)",
         f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+        id_alerta="MAE-002", etapa=HOJA_CALCULO_RE545,
+        archivo=ARCHIVO_CENTRALES, hoja=HOJA_RESUMEN_BESS,
+        accion="BN queda vacia y BQ = BS + BN la toma como 0",
+        origen_control="CATALOGO AUX-008",
     )
 
     bi, bj = calcular_bi_bj_re545(df)

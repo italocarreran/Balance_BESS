@@ -63,8 +63,9 @@ python Balance_BESS.py
      que no se actualiza se conserva tal cual estaba; si el archivo todavía
      no existe, se crea.
 
-Durante el cálculo, el registro muestra líneas **`[AVISO]`** cuando una
-homologación no encuentra correspondencia: central sin barra, capacidad,
+Durante el cálculo, el registro muestra líneas con la **severidad** y el **id
+del control** (`[ALTA] MAE-001: ...`) cuando una homologación no encuentra
+correspondencia: central sin barra, capacidad,
 eficiencia o Pmax en `Resumen BESS` (o con Pmax en 0, que deja `AE`/`AF`
 vacías); central ausente del `Diccionario`; claves de FD o de CMg
 inexistentes; central sin ninguna hora en la Prorrata SSCC; central que no
@@ -72,6 +73,20 @@ aparece en ninguna fila de `Subastas` (sus reservas y `AU` quedan en 0). El
 cálculo conserva el comportamiento de la planilla —algunos faltantes quedan
 vacíos y otros se rellenan con cero—, pero ahora informa la causa, las
 centrales/claves afectadas y el impacto antes de continuar.
+
+`Pagos_BESS.xlsx` sale además con dos hojas de control:
+
+- **`Alertas`** — una fila por alerta, con su id, severidad, etapa, central y
+  clave. Es el detalle **completo**: la pantalla muestra un resumen con hasta 15
+  ejemplos, el archivo los guarda todos.
+- **`Ejecucion`** — el estado de la corrida (`APROBADA` / `APROBADA CON
+  ADVERTENCIAS` / `NO APROBADA - REQUIERE REVISION`), qué hojas se recalcularon
+  en esta pasada, la conciliación de energía (`Medidores = Calculo E Costos +
+  Calculo RE545`) con su tolerancia, y el manifiesto de las entradas: nombre,
+  tamaño, fecha y `sha256` de cada archivo que alimentó el cálculo.
+
+El catálogo de controles, con lo que está implementado y lo que falta, está en
+`docs/Alertas_y_Controles_Traspaso_Python_BESS.md`.
 
 Las pruebas de estos avisos se corren con `python -m unittest discover`
 desde la raíz del repositorio.
