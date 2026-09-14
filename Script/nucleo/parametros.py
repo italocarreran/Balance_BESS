@@ -36,6 +36,7 @@ CARPETA_CMG = "Cmg"
 CARPETA_FD_FMA = "FD y FMA"
 CARPETA_FD_FMA_ANTIGUA = "SSCC_Desempeño"
 CARPETA_SUBASTAS = "Subastas"
+CARPETA_PRORRATA_RETIROS = "Prorrata retiros"
 
 ARCHIVO_MEDIDAS_SAE = "Medidas_SAE.xlsx"
 HOJA_MEDIDAS_SAE = "Medidas"
@@ -84,6 +85,8 @@ ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
 ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"
 HOJA_CALCULO_ECOSTOS = "Calculo E Costos"
 HOJA_CALCULO_RE545 = "Calculo RE545"
+HOJA_PRORRATA_RETIROS = "PRORRATA_RETIROS"
+HOJA_RESUMEN = "Resumen"
 
 # El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
 # lo ingresa el usuario en la ventana. El archivo de SoC solo debe

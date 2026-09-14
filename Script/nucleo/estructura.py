@@ -14,9 +14,11 @@ from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
     ARCHIVO_SALIDA_PAGOS, CARPETA_AUXILIARES, CARPETA_CMG,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_MEDIDAS,
-    CARPETA_OFERTAS, CARPETA_SUBASTAS, HOJA_CALCULO_ECOSTOS,
-    HOJA_CALCULO_RE545, HOJA_DICCIONARIO, HOJA_RESUMEN_BESS,
+    CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS, CARPETA_SUBASTAS,
+    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_DICCIONARIO,
+    HOJA_PRORRATA_RETIROS, HOJA_RESUMEN, HOJA_RESUMEN_BESS,
 )
+from .prorrata_retiros import buscar_archivo_prorrata
 from .rutas import (
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
     buscar_archivo_subastas, buscar_soc, resolver_rutas, validar_aamm,
@@ -522,6 +524,26 @@ def revisar_estructura(carpeta_base, aamm=None):
             )
         )
 
+    # ---- Prorrata de retiros --------------------------------------
+    agregar(
+        "prorrata_dir", f"{CARPETA_PRORRATA_RETIROS}/", 0,
+        rutas["prorrata_retiros_dir"].is_dir(),
+    )
+    try:
+        archivo_prorrata = buscar_archivo_prorrata(
+            rutas["prorrata_retiros_dir"], aamm_valido
+        )
+        rutas["prorrata_retiros"] = archivo_prorrata
+        filas.append(_fila(
+            "prorrata_archivo",
+            archivo_prorrata.name if archivo_prorrata else "Prorrata_Retiros_AAMM_pre/def.xlsx",
+            1, "ok" if archivo_prorrata else "falta",
+            "fuente: hoja 'Prorrata 15min'" if archivo_prorrata else "deja aqui el Excel del periodo",
+        ))
+    except ErrorEntrada as error:
+        rutas["prorrata_retiros"] = None
+        filas.append(_fila("prorrata_archivo", "Prorrata_Retiros_AAMM_pre/def.xlsx", 1, "falta", str(error).split("\n")[0]))
+
     # ---- Salidas --------------------------------------------------
     # Las dos salidas se desglosan igual que Centrales.xlsx: el
     # archivo y, adentro, una fila por hoja. Cada hoja se actualiza
@@ -649,5 +671,17 @@ SECCIONES_PAGOS = (
         f"{ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- no necesita el "
         f"archivo {CARPETA_FD_FMA}/.",
         (HOJA_CALCULO_RE545,),
+    ),
+    (
+        "prorrata_retiros",
+        HOJA_PRORRATA_RETIROS,
+        f"Usa la hoja 'Prorrata 15min' del Excel de {CARPETA_PRORRATA_RETIROS}/ y las dos hojas de calculo.",
+        (HOJA_PRORRATA_RETIROS,),
+    ),
+    (
+        "resumen",
+        HOJA_RESUMEN,
+        "Consolida por empresa cuanto RECIBE, PAGA y su NETO.",
+        (HOJA_RESUMEN,),
     ),
 )

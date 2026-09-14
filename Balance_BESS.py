@@ -450,6 +450,12 @@ def main():
         if id_fila == "db_subastas":
             return ("Traer subastas", traer_subastas)
 
+        if id_fila == "pagos:prorrata_retiros":
+            return ("Traer prorrata", lambda: actualizar_pagos({"prorrata_retiros"}))
+
+        if id_fila == "pagos:resumen":
+            return ("Asignar pagos", lambda: actualizar_pagos({"resumen"}))
+
         if id_fila == "consolidado":
             return ("Actualizar todo", lambda: actualizar_consolidado(None))
 
@@ -900,7 +906,8 @@ def main():
 
         lanzar(
             nucleo.generar_pagos_bess,
-            dict(carpeta_base=ruta, secciones_activas=secciones),
+            dict(carpeta_base=ruta, secciones_activas=secciones,
+                 aamm=var_aamm.get().strip()),
             nucleo.ARCHIVO_SALIDA_PAGOS,
         )
 

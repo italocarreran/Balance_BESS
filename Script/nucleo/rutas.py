@@ -9,7 +9,8 @@ from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
     ARCHIVO_SALIDA_PAGOS, CARPETA_AUXILIARES, CARPETA_CMG,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_FD_FMA_ANTIGUA,
-    CARPETA_MEDIDAS, CARPETA_OFERTAS, CARPETA_SUBASTAS,
+    CARPETA_MEDIDAS, CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS,
+    CARPETA_SUBASTAS,
     CARPETA_TRABAJO_MEDIDAS, EXTENSIONES_EXCEL, PATRON_AAMM,
     PATRON_NOMBRE_OFERTAS, PATRON_NOMBRE_SSCC_DESEMPENO,
     PATRON_NOMBRE_SUBASTAS,
@@ -40,6 +41,7 @@ def resolver_rutas(carpeta_base):
     if not fd_fma_dir.is_dir() and (base / CARPETA_FD_FMA_ANTIGUA).is_dir():
         fd_fma_dir = base / CARPETA_FD_FMA_ANTIGUA
     subastas_dir = base / CARPETA_SUBASTAS
+    prorrata_retiros_dir = base / CARPETA_PRORRATA_RETIROS
 
     return {
         "base": base,
@@ -49,6 +51,7 @@ def resolver_rutas(carpeta_base):
         "cmg_dir": cmg_dir,
         "sscc_desempeno_dir": fd_fma_dir,
         "subastas_dir": subastas_dir,
+        "prorrata_retiros_dir": prorrata_retiros_dir,
         "db_subastas_dir": subastas_dir / CARPETA_DB_SUBASTAS,
         "medidas_sae": medidas_dir / ARCHIVO_MEDIDAS_SAE,
         "trabajo_medidas": medidas_dir / CARPETA_TRABAJO_MEDIDAS,

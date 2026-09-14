@@ -42,6 +42,7 @@ Script/
         re545_reservas.py      <- RE545 AC:AT y AU
         re545_resumen.py       <- RE545 AW:BG y BV
         re545_componentes.py   <- RE545 BI:CE
+        prorrata_retiros.py    <- prorrata 15-min, pagos y resumen por empresa
         medidores.py           <- la hoja Medidores
         escritura.py           <- los dos libros de salida
         proceso.py             <- los dos procesos completos
@@ -118,6 +119,8 @@ importable como cualquier módulo.
   | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
   | `Pagos_BESS.xlsx` | **Calcular todo** | `generar_pagos_bess` con todas |
   | cada `hoja '...'` de esa salida | **Calcular** | `generar_pagos_bess` con esa sola |
+  | `Pagos_BESS.xlsx/PRORRATA_RETIROS` | **Traer prorrata** | valida `Prorrata 15min` y asigna por cuarto |
+  | `Pagos_BESS.xlsx/Resumen` | **Asignar pagos** | consolida `RECIBE`, `PAGA` y `NETO` por empresa |
 
   Las dos salidas se desglosan por hoja igual que `Centrales.xlsx`: lo que
   no se actualiza se **conserva** tal cual estaba en el archivo (no se
