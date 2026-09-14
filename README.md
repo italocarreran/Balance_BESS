@@ -63,9 +63,14 @@ python Balance_BESS.py
      que no se actualiza se conserva tal cual estaba; si el archivo todavía
      no existe, se crea.
    - `PRORRATA_RETIROS` tiene **Traer prorrata**: consume `Prorrata 15min`
-     del Excel de `Prorrata retiros/`, valida la prorrata por cuarto y asigna
-     la compensación. `Resumen` tiene **Asignar pagos** y muestra cuánto
-     `RECIBE`, `PAGA` y el `NETO` de cada empresa.
+     del Excel de `Prorrata retiros/` (A: cuarto de hora, B: suministrador,
+     C: prorrata) y reparte, cuarto de hora por cuarto de hora, el monto a
+     compensar de `Calculo E Costos` + `Calculo RE545` entre las empresas
+     que retiraron en ese mismo cuarto, según su peso. La hoja queda con
+     tres cuadros: el monto de cada cuarto, el reparto de ese monto entre
+     las empresas, y el total del mes de cada empresa. `Resumen` tiene
+     **Asignar pagos** y muestra cuánto `RECIBE`, `PAGA` y el `NETO` de
+     cada empresa.
 
 Durante el cálculo, el registro muestra líneas con la **severidad** y el **id
 del control** (`[ALTA] MAE-001: ...`) cuando una homologación no encuentra

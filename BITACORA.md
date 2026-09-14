@@ -3018,7 +3018,6 @@ período por hoja (`CTX-001`); la regla de la hora repetida del cambio de horari
 33 pruebas, incluida una que corre `generar_pagos_bess()` de punta a punta sobre
 un caso sintético y verifica que el libro salga con las dos hojas nuevas.
 
----
 
 ## Sesión 2026-09-14 (sexta pasada) — PRORRATA_RETIROS y Resumen
 
@@ -3307,3 +3306,51 @@ una sola que dice cuántas son, cuáles, y que su FMA CPF **queda en 0**.
 
 Lo que NO se probó: la corrida completa con el `Canal` corregido (no hay
 acceso a las APIs del Coordinador desde acá).
+
+---
+
+## 2026-09-14 — PRORRATA_RETIROS rearmada: repartir, no validar
+
+El usuario corrió la hoja con el archivo real del período y no obtuvo hoja
+sino un error de entrada: `RET-004/005/006: Prorrata negativa: 14`. Pidió dos
+cosas: dejar de lado por ahora las alertas de ese tipo y rearmar la prorrata.
+
+**Qué estaba mal, además de las alertas.** El monto de cada cuarto de hora se
+armaba sumando `Bloque Mes Descarga` (columna `Y` de `Calculo E Costos`) con
+`Bloque horario` de `Calculo RE545`. `Bloque Mes Descarga` no es el cuarto de
+hora del mes: es la posición del bloque dentro de la curva monótona de CMg. O
+sea, se sumaba plata de dos numeraciones distintas y después se repartía como
+si fuera un mismo cuarto. Ahora las dos hojas se agrupan por `Bloque horario`,
+que sí es el "Cuarto de Hora" cronológico del mes renombrado.
+
+**Cómo reparte ahora.** Para cada cuarto de hora: monto del cuarto × peso
+relativo de la empresa dentro de ese cuarto (`prorrata / suma de prorratas del
+cuarto`). Dividir por la suma es lo que hace que sea un reparto "según peso":
+si la columna `C` ya viene normalizada la división no cambia nada, y si no
+viene normalizada el cuarto igual se reparte entero en vez de caerse.
+
+**Las alertas duras se fueron.** `leer_prorrata_retiros()` ya no levanta
+`RET-001/004..007` ni `construir_prorrata_retiros()` `RET-002/003/008/009`.
+Prorratas negativas, cuartos que no suman 1 y filas repetidas (estas últimas
+se suman, que es lo que significan dos retiros de la misma empresa en el mismo
+cuarto) se informan por el log y la corrida sigue. Quedan como error de
+entrada sólo tres cosas: que el archivo no se pueda abrir, que le falte la
+hoja `Prorrata 15min` y que no quede ninguna fila utilizable.
+
+**La fuente se lee por posición.** `A` cuarto de hora, `B` suministrador, `C`
+prorrata, primera fila encabezado, sin mirar el texto del encabezado (venía
+exigiendo los nombres exactos `Cuarto de Hora`/`Suministrador`/`Prorrata`).
+
+**La hoja quedó con tres cuadros**, en el orden en que se leen: `B:C` el monto
+a compensar de cada cuarto de hora; `F:I` la prorrata leída (cuarto,
+suministrador, peso) con el monto que le toca pagar a esa empresa en ese
+cuarto; `L:M` el total del mes de cada empresa. Antes el detalle iba primero y
+el monto por cuarto al medio.
+
+**Verificación:** `python -m unittest discover` en 60 pruebas (antes 56; las
+de prorrata se reescribieron y son seis) y una corrida sintética de punta a
+punta que escribió la hoja y se revisó celda por celda con `openpyxl`, con
+pesos negativos y cuartos que no suman 1 adentro para ver que no corta. Falta
+correrla contra el archivo real del período.
+
+---

@@ -252,27 +252,37 @@ def escribir_pagos_bess(
             _preservar_o_avisar(writer, HOJA_CALCULO_RE545)
 
         if HOJA_PRORRATA_RETIROS in regenerar:
-            if df_prorrata_retiros is not None:
+            if df_prorrata_retiros is not None or df_compensacion_cuarto is not None:
                 escritas.append(HOJA_PRORRATA_RETIROS)
-                df_prorrata_retiros.to_excel(
-                    writer, sheet_name=HOJA_PRORRATA_RETIROS, index=False,
-                    startrow=2, startcol=1,
-                )
-                ws = writer.sheets[HOJA_PRORRATA_RETIROS]
-                ws.cell(1, 2, "Prorrata de retiro y cálculo de asignación de pagos")
-                ws.cell(2, 2, "Cuadro N° 1 — asignación por cuarto de hora")
-                if df_compensacion_cuarto is not None:
-                    df_compensacion_cuarto.to_excel(
+                # Tres cuadros, uno al lado del otro, en el orden en que
+                # se leen: primero cuanto hay que compensar en cada
+                # cuarto de hora, despues como se reparte ese monto
+                # entre las empresas que retiraron en ese cuarto, y al
+                # final el total del mes de cada empresa.
+                cuadros = [
+                    (df_compensacion_cuarto, 1,
+                     "Cuadro N° 1 — monto a compensar por cuarto de hora"),
+                    (df_prorrata_retiros, 5,
+                     "Cuadro N° 2 — reparto del monto del cuarto según la prorrata"),
+                    (df_pagos_suministrador, 11,
+                     "Cuadro N° 3 — total a pagar de cada empresa"),
+                ]
+                primero = True
+                for df_cuadro, col, titulo in cuadros:
+                    if df_cuadro is None:
+                        continue
+                    df_cuadro.to_excel(
                         writer, sheet_name=HOJA_PRORRATA_RETIROS, index=False,
-                        startrow=2, startcol=7,
+                        startrow=2, startcol=col,
                     )
-                    ws.cell(2, 8, "Cuadro N° 2 — compensación por cuarto")
-                if df_pagos_suministrador is not None:
-                    df_pagos_suministrador.to_excel(
-                        writer, sheet_name=HOJA_PRORRATA_RETIROS, index=False,
-                        startrow=2, startcol=13,
-                    )
-                    ws.cell(2, 14, "Cuadro N° 3 — pago mensual por suministrador")
+                    ws = writer.sheets[HOJA_PRORRATA_RETIROS]
+                    if primero:
+                        ws.cell(
+                            1, 2,
+                            "Prorrata de retiro y cálculo de asignación de pagos",
+                        )
+                        primero = False
+                    ws.cell(2, col + 1, titulo)
         else:
             _preservar_o_avisar(writer, HOJA_PRORRATA_RETIROS)
 
