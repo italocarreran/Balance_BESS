@@ -361,12 +361,17 @@ def calcular_fma_subastas(
             sin_dato["otro"] += 1
             valores.append(0.0)
 
-    for central in sorted(centrales_cpf_sin_equivalencia):
+    if centrales_cpf_sin_equivalencia:
+        # Se tolera -el FMA de esas filas queda en 0, igual que el
+        # IFERROR de la formula original- pero se dice fuerte: es una
+        # celda vacia en el Diccionario, no un dato que no exista.
         registrar(
-            f"  [AVISO] sin equivalencia de nomenclatura CPF para "
-            f"'{central}' (bloque '{TITULO_BLOQUE_FMA_CPF}' de "
-            f"{HOJA_DICCIONARIO} en {ARCHIVO_CENTRALES}): se probo con "
-            f"el nombre tal cual."
+            f"  [AVISO] {len(centrales_cpf_sin_equivalencia)} central(es) "
+            f"sin nombre en la columna '{TITULO_BLOQUE_FMA_CPF.upper()}' "
+            f"de la hoja {HOJA_DICCIONARIO} de {ARCHIVO_CENTRALES}: "
+            f"{', '.join(repr(c) for c in sorted(centrales_cpf_sin_equivalencia))}. "
+            f"Se probo con el nombre tal cual, no se encontro, y el FMA "
+            f"de sus filas CPF queda en 0."
         )
 
     for tipo, cuenta in sin_dato.items():

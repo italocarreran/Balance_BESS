@@ -273,8 +273,39 @@ def construir_dic_fd_bloque(df_fd, columna_id, columna_mas, columna_menos):
     return dic
 
 
+def unidades_bloque_fd(df_fd, columna_unidad="Unidad"):
+    """
+    Las unidades que trae un bloque de la hoja FD, como
+    {nombre normalizado: nombre tal cual}. Se usa para distinguir "a
+    esta unidad le falta una hora" de "a esta unidad no la tiene nadie
+    en este bloque", y para poder listarle al usuario, con su
+    ortografia real, los nombres entre los que tiene que elegir.
+    """
+
+    if df_fd is None or columna_unidad not in getattr(df_fd, "columns", []):
+        return {}
+
+    unidades = {}
+
+    for valor in df_fd[columna_unidad]:
+        if _tiene_valor(valor):
+            unidades.setdefault(normalizar(valor), _texto_seguro(valor))
+
+    return unidades
+
+
+def _nombres_unidades(unidades):
+    """Los nombres tal cual, venga un dict de unidades_bloque_fd o un set."""
+
+    if isinstance(unidades, dict):
+        return list(unidades.values())
+
+    return list(unidades)
+
+
 def calcular_fd_prorrateado(
-    df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf, registrar=print
+    df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf, registrar=print,
+    unidades_fd_csf=None, unidades_fd_cpf=None,
 ):
     """
     Replica AM, AN, AP, AQ: homologa la central ("clave") contra
@@ -285,6 +316,23 @@ def calcular_fd_prorrateado(
     diccionarios de FD (CPF da AM/AP, CSF da AN/AQ); si no hay match
     en FD, queda en 0 (fiel al original: ahi solo se registra un
     aviso, no se propaga un error).
+
+    unidades_fd_csf / unidades_fd_cpf: los nombres de unidad que trae
+    cada bloque de la hoja FD (`unidades_bloque_fd()`). Sirven para
+    separar dos cosas MUY distintas que antes se informaban igual:
+
+      - a una unidad que SI esta en el bloque le falta alguna hora
+        suelta -> FD-005, una alerta por clave, como pide el catalogo;
+      - una unidad no aparece NUNCA en el bloque -> FD-007, UNA alerta
+        por central, con la lista de unidades que si estan.
+
+    El segundo caso es una homologacion que no cruza, no un dato
+    faltante, y repetirlo una vez por hora es lo que hacia inservible
+    la hoja Alertas: en la primera corrida real del usuario, 2.232
+    alertas FD-005 eran en realidad 3 hechos (una central sin ninguna
+    fila en FD, y otra sin ninguna fila en el bloque CSF). Por eso, en
+    ese caso, NO se emiten ademas las 744 FD-005 de esa unidad: son la
+    misma frase repetida.
     """
 
     y_num = pd.to_numeric(df_ecostos["Y"], errors="coerce").fillna(0.0)
@@ -293,10 +341,19 @@ def calcular_fd_prorrateado(
     bloque_y = y_num.map(_calcular_bloque)
     bloque_ac = ac_num.map(_calcular_bloque)
 
+    unidades_fd_cpf = unidades_fd_cpf or {}
+    unidades_fd_csf = unidades_fd_csf or {}
+
     am, an, ap, aq = [], [], [], []
     sin_diccionario = set()
     sin_fd_cpf = set()
     sin_fd_csf = set()
+
+    # central -> unidad homologada, para poder nombrar a las dos en el
+    # aviso (el usuario piensa en la central, la hoja FD en la unidad).
+    unidad_de_central = {}
+    ausentes_cpf = {}
+    ausentes_csf = {}
 
     for central, by, bac in zip(df_ecostos["clave"], bloque_y, bloque_ac):
 
@@ -311,6 +368,10 @@ def calcular_fd_prorrateado(
             continue
 
         mapeo_texto = _normaliza_valor_vba(mapeo)
+        unidad = normalizar(mapeo_texto)
+
+        texto_central = _texto_seguro(central)
+        unidad_de_central.setdefault(texto_central, _texto_seguro(mapeo))
 
         clave_y = normalizar(f"{int(by)}{mapeo_texto}")
         clave_ac = normalizar(f"{int(bac)}{mapeo_texto}")
@@ -319,12 +380,23 @@ def calcular_fd_prorrateado(
         csf_y = dic_fd_csf.get(clave_y)
         csf_ac = dic_fd_csf.get(clave_ac)
 
-        if cpf_y is None:
+        # Si la unidad no esta en el bloque, el faltante no es de esta
+        # hora: es de la central entera (FD-007 mas abajo).
+        ausente_cpf = unidades_fd_cpf and unidad not in unidades_fd_cpf
+        ausente_csf = unidades_fd_csf and unidad not in unidades_fd_csf
+
+        if ausente_cpf:
+            ausentes_cpf[texto_central] = ausentes_cpf.get(texto_central, 0) + 1
+        elif cpf_y is None:
             sin_fd_cpf.add(clave_y)
-        if csf_y is None:
-            sin_fd_csf.add(clave_y)
-        if csf_ac is None:
-            sin_fd_csf.add(clave_ac)
+
+        if ausente_csf:
+            ausentes_csf[texto_central] = ausentes_csf.get(texto_central, 0) + 1
+        else:
+            if csf_y is None:
+                sin_fd_csf.add(clave_y)
+            if csf_ac is None:
+                sin_fd_csf.add(clave_ac)
 
         ap.append(cpf_y[0] if cpf_y is not None else 0.0)
         am.append(cpf_y[1] if cpf_y is not None else 0.0)
@@ -352,6 +424,48 @@ def calcular_fd_prorrateado(
             f"({HOJA_DICCIONARIO} A:B): "
             f"{', '.join(repr(v) for v in sorted(sin_diccionario))}. "
             f"AM, AN, AP y AQ quedan vacias para esas centrales.",
+        )
+
+    # FD-007 (control nuevo): la unidad homologada no aparece en NINGUNA
+    # fila del bloque. Una alerta por central, no una por hora.
+    for etiqueta, ausentes, disponibles in (
+        ("CPF", ausentes_cpf, unidades_fd_cpf),
+        ("CSF", ausentes_csf, unidades_fd_csf),
+    ):
+        if not ausentes:
+            continue
+        anotar_muchas(
+            registrar,
+            [
+                Alerta(
+                    "FD-007", ALTA, "Calculo E Costos",
+                    f"La unidad homologada no aparece en ninguna fila "
+                    f"del bloque {etiqueta} de la hoja FD.",
+                    central=central,
+                    clave=unidad_de_central.get(central, ""),
+                    valor_encontrado=f"{filas:,} fila(s) sin {etiqueta}",
+                    valor_esperado=(
+                        f"la unidad en el bloque {etiqueta} de la hoja FD"
+                    ),
+                    accion=f"el FD {etiqueta} de esa central queda en 0",
+                    hoja="FD",
+                    origen_control="CONTROL NUEVO",
+                )
+                for central, filas in sorted(ausentes.items())
+            ],
+            f"  [{ALTA}] FD-007: FD de Calculo E Costos: "
+            f"{len(ausentes)} central(es) no aparecen en NINGUNA fila del "
+            f"bloque {etiqueta} de la hoja FD, asi que su FD {etiqueta} "
+            f"queda en 0: "
+            + "; ".join(
+                f"{central} -> {unidad_de_central.get(central, '')!r}"
+                for central in sorted(ausentes)
+            )
+            + f". Unidades que SI trae ese bloque: "
+            f"{', '.join(sorted(_nombres_unidades(disponibles)))}. "
+            f"Revisar la homologacion "
+            f"en la hoja {HOJA_DICCIONARIO}, o confirmar que esa central "
+            f"no presta {etiqueta}.",
         )
 
     # FD-005 del catalogo: se guardan TODAS las claves faltantes, no

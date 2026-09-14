@@ -58,9 +58,11 @@ estado, no un historial.
   real: confirmar la forma de la respuesta y que el `intervalo` de las dos
   APIs sea el inicio del cuarto de hora en las dos (de eso depende el cruce
   contra el calendario compartido).
-- Confirmar si la columna `Canal` de la hoja `Gen real` tiene que significar
-  algo: la API de operación real no expone canales, así que hoy se acepta
-  (para que la hoja tenga la misma forma que `homol`) pero se ignora.
+- ~~Confirmar si la columna `Canal` de la hoja `Gen real` tiene que
+  significar algo~~ — **resuelto**: sí. La API de operación real no expone
+  canales, pero sí devuelve **MWh**, y todo el balance trabaja en **kWh**.
+  Esa columna es ahora la **unidad** de la medida (`MWh`/`kWh`, vacía =
+  MWh) y es lo que decide el factor de conversión.
 - Confirmar si la columna `Flujo` de la hoja `Gen real` hace falta o si todas
   las centrales van con 1 (el script original no aplicaba signo).
 - Abrir la ventana en Windows y confirmar el ancho de la columna "Acción"
@@ -179,13 +181,23 @@ estado, no un historial.
   script viejo tiene un `cambio_de_hora: -1` en las variables
   mensuales, pero no está claro si es un día o un signo). Mientras
   tanto, el log avisa si algún día del mes no trae 24 horas.
-- Confirmar con el usuario dos rarezas de la propuesta nueva del
-  `Diccionario` (`Centrales_Propuesta_de_mejora.xlsx`), que se cargó tal
-  cual porque es un dato del usuario, no código: (a) `FMA_CPF` está
-  cruzado entre Andes 3 y Andes 4 —`SAE-CRCA-PFV-ANDES3` apunta a
-  "Andes Solar 4 - PFV" y `SAE-CRCA-PFV-ANDES4` a "Andes Solar 3 - PFV"—;
-  (b) `SAE-CRCA-PFV-NUEVO-QUILLAGUA-2` y `SAE-CRCA-PFV-VICTOR-JARA` no
-  tienen `FMA_CPF`, así que el FMA de sus filas CPF va a quedar en 0.
+- ~~Confirmar dos rarezas de la propuesta nueva del `Diccionario`~~ —
+  resueltas por el usuario: el `FMA_CPF` cruzado entre Andes 3 y Andes 4
+  era un error suyo y ya lo corrigió en su archivo; que Nuevo Quillagua 2
+  y Víctor Jara no tengan `FMA_CPF` **está bien**, y pidió que se tolere
+  pero se advierta igual (hecho: el aviso ahora dice cuántas centrales
+  son, cuáles, y que su FMA CPF queda en 0).
+- **Confirmar la homologación FD de `SAE-CRCA-PFV-NUEVO-QUILLAGUA-2`**: el
+  `Diccionario` la mapea a sí misma y la hoja `FD` no tiene ninguna unidad
+  con ese nombre. Pero sí trae una unidad que **ninguna** central reclama:
+  `BESS PFV MARIA ELENA`. Muy probablemente sean la misma central (la
+  barra de Nuevo Quillagua 2 es `PEQ___________220`). Si lo es, hay que
+  escribirlo en la columna `FD` del `Diccionario` y desaparecen 1.488 de
+  las 2.232 alertas.
+- **Confirmar que `SAE-CRCA-PFV-ANDES4` no presta CSF**: su unidad
+  (`BESS PFV ANDES SOLAR IV`) está en el bloque CPF de la hoja `FD` pero
+  no en el CSF, así que su FD CSF queda en 0 (las 744 alertas restantes).
+  Si es correcto, no hay nada que arreglar.
 - Medir contra un caso real cuánto baja la generación del FMA CPF con el
   índice de carpeta nuevo (antes: >6 minutos, el usuario la tuvo que
   cortar). En sintético se comprobó que el árbol se recorre 1 vez en vez
@@ -3191,3 +3203,107 @@ pierde es la conciliación.
 Lo que NO se probó: nada de esto se corrió todavía contra el caso real del
 usuario. En particular, el número real de la mejora del FMA CPF y si con
 el `Diccionario` nuevo desaparecen del todo las diferencias de CSF.
+
+---
+
+## 2026-09-14 (2) — La unidad de la generación real y las 2.232 alertas FD-005
+
+Segunda tanda de la misma corrida real. Dos correcciones, y las dos
+resultaron ser otra cosa de lo que parecían a primera vista.
+
+### La generación que viene de la API de operación real estaba ×1000
+
+Reporte del usuario: *"la generación que viene de Generación real está por
+1000, o sea en MWh, y creo que hay que corregir el factor. En canal ahora
+le puse MWh pero no he probado si afecta"*.
+
+Tenía razón, y **el `Canal` no afectaba nada**: esa columna se leía sólo
+para descartarla (la API de operación real no expone canales). Confirmado
+con su `Consolidado_entradas.xlsx` real, comparando `Medidores!Gen_Unidad`
+por central:
+
+| central | Pmax | máximo por cuarto de hora | camino |
+|---|---|---|---|
+| `SAE-TOCOPILLA` | 116 MW | 29.493 | punto de medida (kWh) |
+| `SAE-CRCA-PFV-ANDES3` | 170,78 MW | **44,07** | Gen real (MWh) |
+| `SAE-CRCA-PFV-ANDES4` | 129,72 MW | **17,81** | Gen real (MWh) |
+
+170,78 MW × 0,25 h = 42,7 — o sea los 44 son MWh y los 29.493 son kWh:
+exactamente el factor 1000.
+
+La corrección **le da sentido a la columna `Canal`**, que era un pendiente
+abierto de hace varias sesiones: en la hoja `Gen real` esa columna es
+ahora la **unidad** de la medida. `MWh` (o vacía, o cualquier otro texto)
+= ×1000; `kWh` = ×1. El default tiene que ser MWh porque es lo que
+devuelve la API: un default de "no convertir" dejaría el bug en pie para
+quien no escriba nada. Qué unidad se le aplicó a cada central queda dicho
+en el log — un factor de 1000 no se ve a simple vista en la hoja
+`Medidores`, sólo al comparar una central contra otra.
+
+### Las 2.232 alertas FD-005 del CPF
+
+Reporte del usuario: *"el cálculo RE545, el CPF me dice 2.232 alertas
+FD-005. Está buscando en el archivo original, pero debería buscar en el
+consolidado. No sé si es eso pero por ahí va, porque en la hoja FD no
+tengo diferencias en el consolidado"*.
+
+**No era eso** (y la hoja `FD` del consolidado está bien, como él decía).
+Dos cosas:
+
+1. `FD-005` sale de **`Calculo E Costos`** (`AM:AR`), no de RE545 — RE545
+   no usa el FD.
+2. Lo de "busca en el archivo original" ya se había arreglado en la tanda
+   anterior; y de todos modos no cambiaba nada, porque las claves que se
+   buscan son idénticas vengan del archivo o del consolidado.
+
+Reproducido contra su archivo real, las 2.232 se explican enteras:
+
+| central | homologada a | falta en |
+|---|---|---|
+| `SAE-CRCA-PFV-NUEVO-QUILLAGUA-2` | `SAE-CRCA-PFV-NUEVO-QUILLAGUA-2` (a sí misma) | CPF (744) y CSF (744) |
+| `SAE-CRCA-PFV-ANDES4` | `BESS PFV ANDES SOLAR IV` | CSF (744) |
+
+744 × 3 = 2.232. Y la hoja `FD` trae una unidad que **ninguna** central
+reclama: `BESS PFV MARIA ELENA`. Casi seguro es Nuevo Quillagua 2 (su
+barra es `PEQ___________220`) — queda como pendiente para que el usuario
+lo confirme.
+
+**El cambio de código** no es arreglarle el diccionario, es dejar de
+gritar 2.232 veces la misma frase. `calcular_fd_prorrateado()` ahora
+separa dos cosas que informaba igual:
+
+- a una unidad que **sí está** en el bloque le falta una hora suelta →
+  `FD-005`, una alerta por clave, como pide el catálogo;
+- una unidad **no aparece nunca** en el bloque → `FD-007` (control nuevo),
+  **una alerta por central**, con la unidad a la que está homologada,
+  cuántas filas quedan en 0 y **la lista de unidades que sí trae ese
+  bloque** — que es justo donde aparece `BESS PFV MARIA ELENA`.
+
+Lo segundo no es un dato faltante: es una homologación que no cruza, o una
+central que no presta ese servicio. Sobre el archivo real, las 2.232
+alertas pasan a ser **3**, y las 3 dicen qué hacer. Cuando se emite
+`FD-007` para una unidad, no se emiten además las 744 `FD-005` de sus
+horas: es una excepción deliberada a "guardar todos los faltantes" del
+catálogo, anotada ahí mismo.
+
+### Y el `FMA_CPF` vacío
+
+El usuario confirmó que las celdas vacías de `FMA_CPF` (Nuevo Quillagua 2
+y Víctor Jara) **están bien**, y pidió tolerar pero advertir. El aviso
+pasó de una línea por central diciendo "se probó con el nombre tal cual" a
+una sola que dice cuántas son, cuáles, y que su FMA CPF **queda en 0**.
+
+### Verificación
+
+- 57 pruebas (eran 49), todas verdes, sin avisos de `pyflakes`.
+- `tests/test_unidades_y_fd.py` (nuevo): la conversión MWh→kWh (incluido
+  el default y la combinación con el signo de `Flujo`), la lectura de la
+  unidad desde `Canal`, y los tres casos de FD (unidad ausente → una
+  `FD-007` por central; hora suelta → `FD-005`; sin la lista de unidades →
+  se comporta como antes).
+- Contra el `Consolidado_entradas.xlsx` real: las 2.232 alertas quedan en
+  3, y el mensaje lista `BESS PFV MARIA ELENA` entre las unidades
+  disponibles.
+
+Lo que NO se probó: la corrida completa con el `Canal` corregido (no hay
+acceso a las APIs del Coordinador desde acá).

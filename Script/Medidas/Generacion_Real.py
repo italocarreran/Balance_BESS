@@ -25,6 +25,14 @@ que si se informa en el log es cuantos grupos venian duplicados.
 La API entrega el dato HORARIO; el balance trabaja en cuartos de hora,
 asi que cada hora se reparte en 4 partes iguales (energia/4), igual
 que el script original.
+
+Y lo entrega en **MWh**, mientras que el balance entero trabaja en
+**kWh**: la conversion la hace expandir_a_cuartos() con la unidad que
+dice la columna "Canal" de la hoja "Gen real" (ver UNIDADES_GEN_REAL en
+Homologacion.py). Sin esa conversion estas centrales entraban mil veces
+mas chicas que las que vienen por punto de medida -- se detecto con un
+caso real, comparando Andes Solar III (Pmax 170,78 MW, maximo 44 por
+cuarto de hora) contra Tocopilla (116 MW, maximo 29.493).
 """
 
 import time
@@ -32,6 +40,10 @@ import time
 import pandas as pd
 
 from .comun import ErrorMedidas, leer_clave_api, CLAVE_GENERACION_REAL
+from .Homologacion import (
+    ETIQUETA_UNIDAD_GEN_REAL, UNIDADES_GEN_REAL,
+    UNIDAD_GEN_REAL_POR_DEFECTO,
+)
 
 
 URL_OPREAL = "https://operacion.api.coordinador.cl/opreal-medidas/v1/bydate"
@@ -235,9 +247,19 @@ def expandir_a_cuartos(df_horario, centrales, registrar=print):
     if df_horario.empty:
         return pd.DataFrame(columns=["intervalo", "clave", "Gen_Unidad"])
 
+    # topologyName -> (clave, factor de signo, factor de unidad).
+    #
+    # El factor de unidad es la correccion que faltaba: la API entrega
+    # MWh y el balance entero trabaja en kWh (ver UNIDADES_GEN_REAL).
+    # Sin el, estas centrales entraban mil veces mas chicas que las que
+    # vienen por punto de medida.
     mapa = {
         str(c["topologyName"]).strip().casefold(): (
-            str(c["clave"]).strip(), float(c.get("factor", 1) or 1)
+            str(c["clave"]).strip(),
+            float(c.get("factor", 1) or 1),
+            UNIDADES_GEN_REAL[
+                c.get("unidad") or UNIDAD_GEN_REAL_POR_DEFECTO
+            ],
         )
         for c in centrales
     }
@@ -262,8 +284,12 @@ def expandir_a_cuartos(df_horario, centrales, registrar=print):
         [par[1] if isinstance(par, tuple) else 1.0 for par in claves_factores],
         index=df.index,
     )
+    unidades = pd.Series(
+        [par[2] if isinstance(par, tuple) else 1.0 for par in claves_factores],
+        index=df.index,
+    )
 
-    df["Gen_Unidad"] = (df[COLUMNA_VALOR] / 4) * factores
+    df["Gen_Unidad"] = (df[COLUMNA_VALOR] / 4) * factores * unidades
 
     df = df.dropna(subset=["clave"])
 
@@ -277,6 +303,17 @@ def expandir_a_cuartos(df_horario, centrales, registrar=print):
         f"  filas cuarto-horarias generadas: {len(salida):,} "
         f"({salida['clave'].nunique()} clave(s))"
     )
+
+    # Que unidad se le aplico a cada central queda dicho en el log: es
+    # un factor de 1000 y una equivocacion ahi no se ve a simple vista
+    # en la hoja Medidores, solo al comparar contra otra central.
+    for central in centrales:
+        unidad = central.get("unidad") or UNIDAD_GEN_REAL_POR_DEFECTO
+        registrar(
+            f"    {central['clave']}: la medida se lee en "
+            f"{ETIQUETA_UNIDAD_GEN_REAL[unidad]} y se pasa a kWh "
+            f"(x{UNIDADES_GEN_REAL[unidad]:g})"
+        )
 
     return salida
 

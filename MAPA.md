@@ -201,7 +201,7 @@ importable como cualquier módulo.
 
   | Módulo | Script original | Qué hace |
   |---|---|---|
-  | `Homologacion.py` | `0_diccionario_prmte_a_claves_balance.py` | lee las dos hojas del Excel de homologación: `homol` (`Punto de Medida` + `Canal` → `clave` + `Flujo`) y `Gen real` |
+  | `Homologacion.py` | `0_diccionario_prmte_a_claves_balance.py` | lee las dos hojas del Excel de homologación: `homol` (`Punto de Medida` + `Canal` → `clave` + `Flujo`) y `Gen real` (ahí `Canal` es la unidad, `MWh`/`kWh`) |
   | `Descarga_PRMTE.py` | `1_generacion_prmte.py` | baja las medidas de cada punto, por lotes, reanudable |
   | `Claves_Balance.py` | `2_generacion_claves_Balance.py` | calendario de cuartos de hora + agrupación por clave |
   | `Generacion_Real.py` | `3_Generacion_Real.py` | agrega las centrales de la hoja `Gen real` desde la API de operación real |
@@ -220,7 +220,15 @@ importable como cualquier módulo.
     no llegan por el otro camino — el paso 3 las **agrega**, con la `clave`
     que diga esa hoja. Mismas cuatro columnas que `homol`, con el
     `topologyName` de la API en la columna `Punto de Medida` (esa API no
-    tiene puntos de medida) y `Canal` sin uso;
+    tiene puntos de medida) y `Canal` = la **unidad** de la medida
+    (`MWh`/`kWh`). Esa columna estaba sin uso —la API no expone canales— y
+    ahora decide el factor de conversión: **la API devuelve MWh y todo el
+    balance trabaja en kWh** (`UNIDADES_GEN_REAL` en `Homologacion.py`, se
+    aplica en `expandir_a_cuartos()`). Vacía o con otro texto = MWh. Sin
+    esa conversión estas centrales entraban mil veces más chicas que las
+    que vienen por punto de medida: se detectó comparando, en un caso
+    real, Andes Solar III (Pmax 170,78 MW, máximo 44 por cuarto de hora)
+    contra Tocopilla (116 MW, máximo 29.493);
   - el `user_key` de las dos APIs sale de una sola constante
     (`comun.USER_KEY`). Sigue en el código, a pedido explícito del usuario,
     pero deja de estar repetido en dos archivos y con valores distintos;
@@ -683,7 +691,8 @@ importable como cualquier módulo.
     contenga "SOC" y el AAMM ingresado por el usuario (no hay un nombre de
     archivo fijo; debe existir exactamente uno)
   - `<CARPETA_BASE>/Auxiliares/<algo>Homologacion<algo>.xlsx` (hoja `homol`:
-    `Punto de Medida` + `Canal` → `clave` + `Flujo`; hoja `Gen real`,
+    `Punto de Medida` + `Canal` → `clave` + `Flujo`; hoja `Gen real`
+    (ahí `Canal` es la unidad de la medida, `MWh`/`kWh`),
     opcional: las centrales que se miden por la API de operación real), solo
     para generar `Medidas_SAE.xlsx`
   - `<CARPETA_BASE>/Auxiliares/Centrales.xlsx` (hojas `Resumen BESS` y
