@@ -43,12 +43,17 @@ python Balance_BESS.py
      no existe, se crea.
 
 Durante el cálculo, el registro muestra líneas **`[AVISO]`** cuando una
-homologación no encuentra correspondencia (por ejemplo: central sin
-propietario, barra, capacidad, eficiencia o Pmax; central ausente del
-`Diccionario`; claves de FD/CMg inexistentes). El cálculo conserva el
-comportamiento de la planilla —algunos faltantes quedan vacíos y otros se
-rellenan con cero—, pero ahora informa la causa, las centrales/claves
-afectadas y el impacto antes de continuar.
+homologación no encuentra correspondencia: central sin barra, capacidad,
+eficiencia o Pmax en `Resumen BESS` (o con Pmax en 0, que deja `AE`/`AF`
+vacías); central ausente del `Diccionario`; claves de FD o de CMg
+inexistentes; central sin ninguna hora en la Prorrata SSCC; central que no
+aparece en ninguna fila de `Subastas` (sus reservas y `AU` quedan en 0). El
+cálculo conserva el comportamiento de la planilla —algunos faltantes quedan
+vacíos y otros se rellenan con cero—, pero ahora informa la causa, las
+centrales/claves afectadas y el impacto antes de continuar.
+
+Las pruebas de estos avisos se corren con `python -m unittest discover`
+desde la raíz del repositorio.
 
 ## Estructura del repositorio
 

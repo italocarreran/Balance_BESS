@@ -242,11 +242,16 @@ def _avisar_claves_sin_mapeo(
     con una linea por cada cuarto de hora.
     """
 
+    # Las columnas de entrada tienen una fila por cuarto de hora
+    # (decenas de miles); los valores distintos son unas pocas
+    # centrales. Se deduplica ANTES de normalizar para no repetir el
+    # normalizar() -- que hace unicodedata + regex -- una vez por fila.
+    distintos = {valor for valor in valores if _tiene_valor(valor)}
+
     faltantes = sorted({
         _texto_seguro(valor)
-        for valor in valores
-        if _tiene_valor(valor)
-        and not _tiene_valor(mapa.get(normalizar(valor)))
+        for valor in distintos
+        if not _tiene_valor(mapa.get(normalizar(valor)))
     })
 
     if not faltantes:
@@ -4365,7 +4370,7 @@ def construir_dic_reservas_subastas(df_subastas):
     return tuple(diccionarios)
 
 
-def calcular_reservas_re545(df_re545, dics_reservas):
+def calcular_reservas_re545(df_re545, dics_reservas, registrar=print):
     """
     Replica AC:AT (los tres bloques de 6 columnas) y AU:
 
@@ -4422,6 +4427,29 @@ def calcular_reservas_re545(df_re545, dics_reservas):
                 ],
                 index=df.index,
             )
+
+    # Un SUMIFS sin coincidencias da 0 y eso es legitimo hora a hora.
+    # Lo que no es legitimo es una central que no aparece en NINGUNA
+    # clave de Subastas: ahi las 18 reservas quedan en 0, AU sale 0 y
+    # la central se paga como si no hubiera tenido reservas.
+    centrales_en_subastas = {
+        clave[0] for dic in dics_reservas for clave in dic
+    }
+
+    sin_subastas = sorted({
+        _texto_seguro(central)
+        for central, normalizada in zip(df["clave"], centrales)
+        if _tiene_valor(central)
+        and normalizada not in centrales_en_subastas
+    })
+
+    if sin_subastas:
+        registrar(
+            f"  [AVISO] Calculo RE545: {len(sin_subastas):,} central(es) "
+            f"no aparecen en ninguna fila de la hoja Subastas "
+            f"({', '.join(repr(v) for v in sin_subastas[:15])}); sus "
+            f"reservas (AC:AT) y AU quedan en 0."
+        )
 
     au = pd.Series(0.0, index=df.index)
 
@@ -4930,7 +4958,7 @@ def _mapa_resumen_por_grupo(df_resumen_re545, columna):
 
 
 def calcular_componentes_re545(
-    df_re545, df_resumen_re545, dic_factor
+    df_re545, df_resumen_re545, dic_factor, registrar=print
 ):
     """
     Replica BI:CE (menos BV, que ya calcula calcular_bv_re545) y
@@ -4944,6 +4972,15 @@ def calcular_componentes_re545(
 
     df = df_re545.reset_index(drop=True).copy()
     n = len(df)
+
+    # Sin Pmax, BN queda vacio; BQ = BS + BN lo convierte en 0 con
+    # fillna(0.0), asi que el faltante desaparece sin dejar rastro.
+    # El aviso va antes de calcular nada para que salga igual si algo
+    # mas adelante falla.
+    _avisar_claves_sin_mapeo(
+        df["clave"], dic_factor, "Calculo RE545: central sin Pmax (MW)",
+        f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+    )
 
     bi, bj = calcular_bi_bj_re545(df)
     df["BI"] = bi
@@ -5237,7 +5274,9 @@ def completar_calculo_re545(
 
     dics_reservas = construir_dic_reservas_subastas(df_subastas)
 
-    for interno, serie in calcular_reservas_re545(df, dics_reservas).items():
+    for interno, serie in calcular_reservas_re545(
+        df, dics_reservas, registrar=registrar
+    ).items():
         df[interno] = serie
 
     participa = int(df["L"].sum())
@@ -5621,7 +5660,7 @@ def _calcular_asignacion_energia(bloque, energia_maxima, factor):
     return proporcion * factor / 4.0 * 1000.0
 
 
-def calcular_ae_af(df_ecostos, dic_factor):
+def calcular_ae_af(df_ecostos, dic_factor, registrar=print):
     """
     Replica AE ("Energía descargada") y AF ("Energía cargada"):
     asigna, dentro de cada grupo (central+ventana), la energia
@@ -5646,6 +5685,25 @@ def calcular_ae_af(df_ecostos, dic_factor):
     factor = df_ecostos["clave"].map(
         lambda valor: dic_factor.get(normalizar(valor), pd.NA)
     )
+
+    # _avisar_claves_sin_mapeo() cubre el Pmax ausente o en blanco; el
+    # Pmax que SI esta pero vale 0 (o no es numero) tambien deja AE/AF
+    # vacias y no lo veria nadie, asi que se avisa aparte.
+    sin_factor_util = sorted({
+        _texto_seguro(central)
+        for central, f in zip(df_ecostos["clave"], factor)
+        if _tiene_valor(central)
+        and _tiene_valor(f)
+        and (not isinstance(f, (int, float)) or f == 0)
+    })
+
+    if sin_factor_util:
+        registrar(
+            f"  [AVISO] Calculo E Costos: Pmax (MW) en 0 o no numerico "
+            f"para {len(sin_factor_util):,} central(es) "
+            f"({', '.join(repr(v) for v in sin_factor_util[:15])}); "
+            f"AE y AF quedan vacias para esas centrales."
+        )
 
     ae, af = [], []
 
@@ -5784,7 +5842,7 @@ def construir_dic_prorrata(tabla_prorrata, registrar=print):
     return dic
 
 
-def calcular_prorratas(df_ecostos, dic_prorrata):
+def calcular_prorratas(df_ecostos, dic_prorrata, registrar=print):
     """
     Replica AG/AH (y sus duplicados AJ/AK, ver comentario de
     completar_calculo_e_costos_grupos): busca central+"Hora Mes" en
@@ -5799,6 +5857,44 @@ def calcular_prorratas(df_ecostos, dic_prorrata):
     )
 
     valores = clave.map(lambda k: dic_prorrata.get(k, (0.0, 0.0)))
+
+    sin_match = ~clave.isin(set(dic_prorrata))
+
+    # Una hora suelta sin prorrata puede ser legitima (esa hora no tuvo
+    # SSCC); una central que NO aparece en NINGUNA hora es otra cosa:
+    # la homologacion contra Subastas!Configuración no esta cruzando y
+    # AG/AH -- y con ellas todo el prorrateo de costos SSCC -- quedan
+    # en 0 para esa central sin que nada lo diga.
+    faltantes_por_central = sorted({
+        _texto_seguro(central)
+        for central, falta in zip(df_ecostos["clave"], sin_match)
+        if falta and _tiene_valor(central)
+    })
+
+    con_match_por_central = {
+        _texto_seguro(central)
+        for central, falta in zip(df_ecostos["clave"], sin_match)
+        if not falta
+    }
+
+    sin_ninguna = [
+        central for central in faltantes_por_central
+        if central not in con_match_por_central
+    ]
+
+    if sin_ninguna:
+        registrar(
+            f"  [AVISO] Calculo E Costos: {len(sin_ninguna):,} central(es) "
+            f"no tienen ninguna hora en la Prorrata SSCC "
+            f"({', '.join(repr(v) for v in sin_ninguna[:15])}); AG/AH "
+            f"quedan en 0 y con ellas todo el prorrateo de SSCC."
+        )
+    elif faltantes_por_central:
+        registrar(
+            f"  [AVISO] Calculo E Costos: {int(sin_match.sum()):,} fila(s) "
+            f"sin prorrata SSCC para su central+'Hora Mes'; AG/AH quedan "
+            f"en 0 en esas filas."
+        )
 
     ag = valores.map(lambda v: v[0])
     ah = valores.map(lambda v: v[1])
@@ -6474,7 +6570,7 @@ def completar_calculo_e_costos_grupos(
     df["AC"] = ac.reset_index(drop=True)
     df["AD"] = ad.reset_index(drop=True)
 
-    ae, af = calcular_ae_af(df, dic_factor)
+    ae, af = calcular_ae_af(df, dic_factor, registrar=registrar)
     df["AE"] = ae
     df["AF"] = af
 
@@ -6486,7 +6582,7 @@ def completar_calculo_e_costos_grupos(
     tabla_prorrata = construir_prorrata_sscc(df_subastas)
     dic_prorrata = construir_dic_prorrata(tabla_prorrata, registrar=registrar)
 
-    ag, ah = calcular_prorratas(df, dic_prorrata)
+    ag, ah = calcular_prorratas(df, dic_prorrata, registrar=registrar)
     df["AG"] = ag
     df["AH"] = ah
     df["AI"] = 0.0
@@ -7696,7 +7792,8 @@ def generar_pagos_bess(
 
         registrar("  Calculo RE545: Componente 1 y Componente 2 (BI:CE)...")
         for interno, serie in calcular_componentes_re545(
-            df_re545_base, df_resumen_re545, dic_factor
+            df_re545_base, df_resumen_re545, dic_factor,
+            registrar=registrar,
         ).items():
             df_re545_base[interno] = serie
 
