@@ -63,9 +63,11 @@ from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
     ARCHIVO_SALIDA_PAGOS, CARPETA_AUXILIARES, CARPETA_CMG,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_FD_FMA_ANTIGUA,
-    CARPETA_MEDIDAS, CARPETA_OFERTAS, CARPETA_SUBASTAS,
+    CARPETA_MEDIDAS, CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS,
+    CARPETA_SUBASTAS,
     CARPETA_TRABAJO_MEDIDAS, COLUMNAS_AI, COLUMNAS_VACIAS,
     EXTENSIONES_EXCEL, HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
+    HOJA_PRORRATA_RETIROS, HOJA_RESUMEN,
     HOJA_CMG_ORIGEN, HOJA_CPF_HORARIO, HOJA_CSF_HORARIO,
     HOJA_DICCIONARIO, HOJA_MEDIDAS_SAE, HOJA_RESUMEN_BESS,
     HOJA_SUBASTAS_ORIGEN, INICIO_VENTANA, LETRA_A_CAMPO, PATRON_AAMM,
@@ -98,6 +100,11 @@ from .rutas import (
 from .estructura import (
     SECCIONES_CONSOLIDADO, SECCIONES_PAGOS, _fila, _filas_de_hojas,
     hojas_con_datos, hojas_de, revisar_estructura,
+)
+from .prorrata_retiros import (
+    COLUMNAS_ORIGEN, HOJA_ORIGEN, TOLERANCIA_PRORRATA,
+    buscar_archivo_prorrata, construir_compensacion_total,
+    construir_prorrata_retiros, construir_resumen, leer_prorrata_retiros,
 )
 from .lectura import (
     _bloques_columnas_diccionario, _leer_hoja_con_encabezado,
@@ -214,9 +221,11 @@ __all__ = [
     "ARCHIVO_SALIDA", "ARCHIVO_SALIDA_PAGOS", "CARPETA_AUXILIARES",
     "CARPETA_CMG", "CARPETA_DB_SUBASTAS", "CARPETA_FD_FMA",
     "CARPETA_FD_FMA_ANTIGUA", "CARPETA_MEDIDAS", "CARPETA_OFERTAS",
+    "CARPETA_PRORRATA_RETIROS",
     "CARPETA_SUBASTAS", "CARPETA_TRABAJO_MEDIDAS", "COLUMNAS_AI",
     "COLUMNAS_VACIAS", "EXTENSIONES_EXCEL", "HOJA_CALCULO_ECOSTOS",
-    "HOJA_CALCULO_RE545", "HOJA_CMG_ORIGEN", "HOJA_CPF_HORARIO",
+    "HOJA_CALCULO_RE545", "HOJA_PRORRATA_RETIROS", "HOJA_RESUMEN",
+    "HOJA_CMG_ORIGEN", "HOJA_CPF_HORARIO",
     "HOJA_CSF_HORARIO", "HOJA_DICCIONARIO", "HOJA_MEDIDAS_SAE",
     "HOJA_RESUMEN_BESS", "HOJA_SUBASTAS_ORIGEN", "INICIO_VENTANA",
     "LETRA_A_CAMPO", "PATRON_AAMM", "PATRON_NOMBRE_OFERTAS",
@@ -229,6 +238,10 @@ __all__ = [
     "buscar_archivo_sscc_desempeno", "buscar_archivo_subastas",
     "buscar_soc", "periodo_desde_aamm", "resolver_rutas",
     "validar_aamm", "SECCIONES_CONSOLIDADO", "SECCIONES_PAGOS", "_fila",
+    "COLUMNAS_ORIGEN", "HOJA_ORIGEN", "TOLERANCIA_PRORRATA",
+    "buscar_archivo_prorrata", "leer_prorrata_retiros",
+    "construir_prorrata_retiros", "construir_compensacion_total",
+    "construir_resumen",
     "_filas_de_hojas", "hojas_con_datos", "hojas_de",
     "revisar_estructura", "_bloques_columnas_diccionario",
     "_leer_hoja_con_encabezado", "_leer_resumen_bess",

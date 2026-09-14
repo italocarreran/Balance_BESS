@@ -5,9 +5,9 @@ Herramienta en Python que reemplaza, hoja por hoja, el cálculo hecho hoy en
 usa solo como referencia de validación; el proceso Python no depende de
 información almacenada exclusivamente en ese libro.
 
-Etapas implementadas hasta ahora: **Medidores** (incluye Ofertas SSCC), la
-carga de **CMg**, **FD** y **Subastas**, y las dos hojas de cálculo del libro
-completas: **Calculo E Costos** y **Calculo RE545**.
+Etapas implementadas: **Medidores** (incluye Ofertas SSCC), la carga de
+**CMg**, **FD** y **Subastas**, las hojas **Calculo E Costos** y **Calculo
+RE545**, y el cierre económico mediante **PRORRATA_RETIROS** y **Resumen**.
 
 ## Instalación
 
@@ -62,6 +62,10 @@ python Balance_BESS.py
      (el de la fila del archivo, **Actualizar todo**, las hace todas). Lo
      que no se actualiza se conserva tal cual estaba; si el archivo todavía
      no existe, se crea.
+   - `PRORRATA_RETIROS` tiene **Traer prorrata**: consume `Prorrata 15min`
+     del Excel de `Prorrata retiros/`, valida la prorrata por cuarto y asigna
+     la compensación. `Resumen` tiene **Asignar pagos** y muestra cuánto
+     `RECIBE`, `PAGA` y el `NETO` de cada empresa.
 
 Durante el cálculo, el registro muestra líneas con la **severidad** y el **id
 del control** (`[ALTA] MAE-001: ...`) cuando una homologación no encuentra
@@ -141,9 +145,12 @@ Ver `MAPA.md` para qué hace cada módulo.
 ├── Subastas/
 │   └── <algún archivo Excel cuyo nombre empiece con
 │        "3_REMUNERACIÓN_SUBASTAS_E_ID_">
+├── Prorrata retiros/
+│   └── Prorrata_Retiros_<AAMM>_pre.xlsx o _def.xlsx
+│       (hoja "Prorrata 15min")
 ├── Consolidado_entradas.xlsx    <- salida (una fila por hoja en la
 │                                   ventana, cada una con "Actualizar")
-└── Pagos_BESS.xlsx              <- salida, idem (nombre provisorio)
+└── Pagos_BESS.xlsx              <- incluye PRORRATA_RETIROS y Resumen
 ```
 
 Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:

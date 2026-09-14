@@ -11,11 +11,17 @@ import pandas as pd
 from .alertas import ALTA, Alerta
 
 from .ecostos import GRUPOS_CALCULO_E_COSTOS, NOMBRES_CALCULO_E_COSTOS
-from .parametros import HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545
+from .parametros import (
+    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_PRORRATA_RETIROS,
+    HOJA_RESUMEN,
+)
 from .re545 import GRUPOS_CALCULO_RE545, NOMBRES_CALCULO_RE545
 
 
-_HOJAS_PAGOS = (HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545)
+_HOJAS_PAGOS = (
+    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_PRORRATA_RETIROS,
+    HOJA_RESUMEN,
+)
 
 
 def _escribir_encabezados_grupo(ws, columnas_internas, grupos, fila=1, columna_inicio=1):
@@ -99,6 +105,10 @@ def escribir_pagos_bess(
     df_ecostos=None,
     df_re545=None,
     df_resumen_re545=None,
+    df_prorrata_retiros=None,
+    df_compensacion_cuarto=None,
+    df_pagos_suministrador=None,
+    df_resumen=None,
     ruta_existente=None,
     hojas_regenerar=None,
     registrar=print,
@@ -237,6 +247,38 @@ def escribir_pagos_bess(
                     )
         else:
             _preservar_o_avisar(writer, HOJA_CALCULO_RE545)
+
+        if HOJA_PRORRATA_RETIROS in regenerar:
+            if df_prorrata_retiros is not None:
+                escritas.append(HOJA_PRORRATA_RETIROS)
+                df_prorrata_retiros.to_excel(
+                    writer, sheet_name=HOJA_PRORRATA_RETIROS, index=False,
+                    startrow=2, startcol=1,
+                )
+                ws = writer.sheets[HOJA_PRORRATA_RETIROS]
+                ws.cell(1, 2, "Prorrata de retiro y cálculo de asignación de pagos")
+                ws.cell(2, 2, "Cuadro N° 1 — asignación por cuarto de hora")
+                if df_compensacion_cuarto is not None:
+                    df_compensacion_cuarto.to_excel(
+                        writer, sheet_name=HOJA_PRORRATA_RETIROS, index=False,
+                        startrow=2, startcol=7,
+                    )
+                    ws.cell(2, 8, "Cuadro N° 2 — compensación por cuarto")
+                if df_pagos_suministrador is not None:
+                    df_pagos_suministrador.to_excel(
+                        writer, sheet_name=HOJA_PRORRATA_RETIROS, index=False,
+                        startrow=2, startcol=13,
+                    )
+                    ws.cell(2, 14, "Cuadro N° 3 — pago mensual por suministrador")
+        else:
+            _preservar_o_avisar(writer, HOJA_PRORRATA_RETIROS)
+
+        if HOJA_RESUMEN in regenerar:
+            if df_resumen is not None:
+                escritas.append(HOJA_RESUMEN)
+                df_resumen.to_excel(writer, sheet_name=HOJA_RESUMEN, index=False)
+        else:
+            _preservar_o_avisar(writer, HOJA_RESUMEN)
 
         _escribir_control(
             writer, registro, manifiesto, conciliacion, periodo, escritas,

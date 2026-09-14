@@ -34,6 +34,11 @@ from .ofertas_sscc import construir_resumen_ventana_oferta
 from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, HOJA_DICCIONARIO,
+    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
+)
+from .prorrata_retiros import (
+    buscar_archivo_prorrata, construir_compensacion_total,
+    construir_prorrata_retiros, construir_resumen, leer_prorrata_retiros,
 )
 from .re545 import (
     completar_calculo_re545, completar_checks_resumen_re545,
@@ -341,7 +346,7 @@ def generar_consolidado(
 
 
 def generar_pagos_bess(
-    carpeta_base, secciones_activas, registrar=print, progreso=None
+    carpeta_base, secciones_activas, registrar=print, progreso=None, aamm=None
 ):
     """
     Genera/actualiza Pagos_BESS.xlsx, recalculando solo las hojas de
@@ -384,6 +389,8 @@ def generar_pagos_bess(
 
     quiere_ecostos = "ecostos" in secciones_activas
     quiere_re545 = "re545" in secciones_activas
+    quiere_prorrata = "prorrata_retiros" in secciones_activas
+    quiere_resumen = "resumen" in secciones_activas
 
     hojas_regenerar = set()
     for id_seccion, _, _, hojas in SECCIONES_PAGOS:
@@ -493,6 +500,10 @@ def generar_pagos_bess(
     df_ecostos = None
     df_re545 = None
     df_resumen_re545 = None
+    df_prorrata_retiros = None
+    df_compensacion_cuarto = None
+    df_pagos_suministrador = None
+    df_resumen = None
 
     # La version de RE545 con los nombres internos de columna. La que
     # se escribe (df_re545) ya paso por renombrar_calculo_re545(), y
@@ -581,6 +592,58 @@ def generar_pagos_bess(
 
     avanzar(90)
 
+    archivo_prorrata = None
+    if quiere_prorrata or quiere_resumen:
+        # Estas hojas tienen botones independientes. Si las hojas de calculo
+        # no se recalcularon en esta misma accion, se consumen las versiones
+        # ya guardadas en Pagos_BESS.xlsx.
+        def calculo_existente(nombre):
+            try:
+                return pd.read_excel(
+                    rutas["salida_pagos"], sheet_name=nombre, header=1
+                )
+            except (FileNotFoundError, ValueError) as error:
+                raise ErrorEntrada(
+                    f"Primero calcula la hoja '{nombre}' de Pagos_BESS.xlsx."
+                ) from error
+
+        df_ecostos_asignacion = (
+            df_ecostos if df_ecostos is not None
+            else calculo_existente(HOJA_CALCULO_ECOSTOS)
+        )
+        df_re545_asignacion = (
+            df_re545 if df_re545 is not None
+            else calculo_existente(HOJA_CALCULO_RE545)
+        )
+        archivo_prorrata = buscar_archivo_prorrata(
+            rutas["prorrata_retiros_dir"], aamm
+        )
+        if archivo_prorrata is None:
+            raise ErrorEntrada(
+                f"No se encontro Prorrata_Retiros_AAMM_pre/def.xlsx en "
+                f"{rutas['prorrata_retiros_dir']}."
+            )
+        registrar(f"Leyendo {archivo_prorrata.name}/Prorrata 15min...")
+        fuente_prorrata = leer_prorrata_retiros(archivo_prorrata)
+        (
+            df_prorrata_retiros,
+            df_compensacion_cuarto,
+            df_pagos_suministrador,
+        ) = construir_prorrata_retiros(
+            fuente_prorrata, df_ecostos_asignacion, df_re545_asignacion
+        )
+        registrar(
+            f"  {len(df_prorrata_retiros):,} asignaciones; "
+            f"{len(df_pagos_suministrador):,} suministradores."
+        )
+        if quiere_resumen:
+            compensacion_total = construir_compensacion_total(
+                df_ecostos_asignacion, df_re545_asignacion, resumen
+            )
+            df_resumen = construir_resumen(
+                compensacion_total, df_pagos_suministrador
+            )
+
     registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
     # TRA: la energia de Medidores tiene que repartirse entera entre
     # las dos hojas. Va antes de escribir: si no cuadra, la corrida
@@ -595,6 +658,7 @@ def generar_pagos_bess(
         ("Centrales", rutas["centrales"]),
         ("cmg", rutas["cmg"]),
         ("SSCC_Desempeño (FD)", archivo_sscc),
+        ("Prorrata retiros", archivo_prorrata),
     ])
 
     escribir_pagos_bess(
@@ -602,6 +666,10 @@ def generar_pagos_bess(
         df_ecostos,
         df_re545,
         df_resumen_re545,
+        df_prorrata_retiros,
+        df_compensacion_cuarto,
+        df_pagos_suministrador,
+        df_resumen,
         ruta_existente=rutas["salida_pagos"],
         hojas_regenerar=hojas_regenerar,
         registrar=registrar,

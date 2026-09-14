@@ -101,12 +101,9 @@ estado, no un historial.
   confirmar que ahora sí aparecen filas `L=1` (participa en subasta) y
   que las Prorratas/reservas de RE545 no quedan todas en 0. Es el
   siguiente paso natural después de esta sesión.
-- `Calculo E Costos` y `Calculo RE545` están **completas** (ver plan §25
-  y §26). Lo que sigue son las hojas de salida que las consumen:
-  `PRORRATA_RETIROS`, `Compensacion total`, `Resumen` y el CSV
-  (`Verificacion_CSV`) — ninguna analizada todavía. El documento de
-  trazabilidad las marca como "capa de cálculo masiva, necesita rastreo
-  aguas arriba dedicado" (§7 de ese documento).
+- `Calculo E Costos`, `Calculo RE545`, `PRORRATA_RETIROS` y `Resumen` están
+  implementadas. Queda pendiente el CSV (`Verificacion_CSV`) y validar las
+  dos hojas nuevas contra el libro real completo de un período.
 - Confirmar contra un caso real cuál de las columnas de `Subastas` suma
   cada bloque de reservas de `Calculo RE545` (`AC:AH`, `AI:AN`, `AO:AT`).
   Se siguió la fórmula (posición `O`/`P`/`Q`), pero los nombres reales de
@@ -2983,3 +2980,25 @@ período por hoja (`CTX-001`); la regla de la hora repetida del cambio de horari
 
 33 pruebas, incluida una que corre `generar_pagos_bess()` de punta a punta sobre
 un caso sintético y verifica que el libro salga con las dos hojas nuevas.
+
+---
+
+## Sesión 2026-09-14 (sexta pasada) — PRORRATA_RETIROS y Resumen
+
+Se cerró la asignación económica por empresa. El caso ahora reconoce la carpeta
+`Prorrata retiros/` y el archivo `Prorrata_Retiros_AAMM_pre/def.xlsx`; usa
+exclusivamente `Prorrata 15min`, sin reconstruir la prorrata desde las hojas
+mensual u horaria.
+
+Se agregó `nucleo/prorrata_retiros.py`, que valida tipos, vacíos, negativos,
+duplicados y suma uno por cuarto (`RET-001`, `RET-004..007`), cruza la
+compensación de `Calculo E Costos` y `Calculo RE545`, calcula `Pago =
+Compensación × Prorrata` y verifica conservación por cuarto y mensual
+(`RET-002/003/008/009`). `Pagos_BESS.xlsx` recibe las hojas
+`PRORRATA_RETIROS` (detalle más consolidado mensual) y `Resumen` (`RECIBE`,
+`PAGA`, `NETO`). Las cuatro hojas de negocio conservan el mismo comportamiento
+de actualización independiente que ya tenían las dos hojas de cálculo.
+
+La ventana muestra **Traer prorrata** en la fila de `PRORRATA_RETIROS` y
+**Asignar pagos** en `Resumen`. Se añadieron cuatro pruebas unitarias; la suite
+completa quedó en 37 pruebas.
