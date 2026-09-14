@@ -2748,3 +2748,60 @@ queda vacia, y el FMA de la central que no participo queda en 0 mientras la que 
 conserva su valor base. Ademas, un caso end-to-end que escribe `Consolidado_entradas.xlsx` con las
 seis filas completas: `FD` con dato en todas y `FMA` = 0,3201 / 0,5 / 0 segun corresponda.
 **Falta compararlo contra un `DB!Y` y un `DB!AC` reales** (§30 del documento).
+
+---
+
+## Sesión 2026-09-14 — alertas para cruces que antes fallaban en silencio
+
+- Se agregó un diagnóstico común que agrupa y nombra centrales sin barra,
+  Pmax, capacidad o eficiencia en `Resumen BESS`, incluyendo también valores
+  existentes pero vacíos. El aviso aclara que los resultados dependientes
+  pueden terminar vacíos o en cero.
+- `Calculo E Costos` ahora marca explícitamente como `[AVISO]` las filas sin
+  CMg y reporta centrales que no aparecen en `Diccionario!A:B`, además de las
+  claves CPF/CSF homologadas que no existen en FD y que se completan con cero.
+- `Calculo RE545` ahora alerta por barra, CMg, CMg Promedio, capacidad y
+  eficiencia faltantes. Se conserva el resultado compatible con la planilla;
+  cambia la visibilidad del problema, no la fórmula.
+- Se agregaron pruebas unitarias para el agrupamiento de alertas y para los
+  dos caminos de FD faltante (vacío por diccionario y cero por clave FD).
+
+---
+
+## Sesión 2026-09-14 (segunda pasada) — los cruces que quedaron sin aviso
+
+Revisión del commit anterior (`Alertar cruces faltantes antes de completar con
+cero`). Lo que hacía está bien y los dos tests pasan; lo que sigue son los
+huecos que quedaron y cómo se cerraron.
+
+- **`tests/` no era importable**: `python -m unittest discover` desde la raíz
+  devolvía `Ran 0 tests ... OK` — un falso verde, justo en el commit que iba
+  sobre errores silenciosos. Se agregó `tests/__init__.py`.
+- **Pmax faltante solo se avisaba en `Calculo E Costos`**. `Calculo RE545` usa
+  el mismo `dic_factor` en `calcular_componentes_re545()` (BN): sin Pmax, BN
+  queda vacío y `BQ = BS + BN` lo pasa a 0 con `fillna(0.0)`. Ahora avisa, y el
+  aviso va al principio de la función para que salga aunque algo más adelante
+  falle.
+- **Pmax presente pero en 0** (o no numérico) deja `AE`/`AF` vacías en
+  `calcular_ae_af()` y no lo cubría `_avisar_claves_sin_mapeo()`, que solo mira
+  ausente/vacío. Aviso propio con las centrales afectadas.
+- **Prorrata SSCC** (`calcular_prorratas()`, AG/AH): sin match, 0. Se distingue
+  el caso legítimo (una hora suelta sin SSCC → aviso por filas) del que no lo es
+  (una central sin **ninguna** hora en la prorrata → la homologación contra
+  `Subastas!Configuración` no está cruzando y se cae todo el prorrateo de SSCC
+  de esa central).
+- **Reservas de RE545** (`calcular_reservas_re545()`): un SUMIFS sin
+  coincidencias da 0 y eso es correcto hora a hora, pero una central que no
+  aparece en ninguna clave de `Subastas` se queda con las 18 reservas y `AU` en
+  0 — se paga como si no hubiera tenido reservas. Aviso por central.
+- **Rendimiento**: `_avisar_claves_sin_mapeo()` llamaba a `normalizar()`
+  (unicodedata + regex) una vez por fila, o sea decenas de miles de veces por
+  aviso para unas pocas centrales distintas. Ahora deduplica antes de
+  normalizar.
+- **README**: decía que se avisa por "central sin propietario"; ese aviso no
+  existe. Se corrigió la lista y se documentó cómo correr las pruebas.
+
+Queda a la vista, sin tocar (son agregaciones internas, no homologaciones):
+los `dic_bc` / `dic_bf` / `dic_bg` de `calcular_componentes_re545()` usan
+`.get(clave, 0.0)`; si una central+ventana faltara ahí sería una inconsistencia
+interna del propio cálculo, no un cruce contra un archivo de entrada.
