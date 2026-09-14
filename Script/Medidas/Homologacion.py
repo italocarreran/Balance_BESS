@@ -44,8 +44,13 @@ HOJA_HOMOL = "homol"
 #                   real (ej. "SAE PFV Andes Solar III (Inyección)"):
 #                   es lo que identifica a la central en esa API, que
 #                   no tiene el concepto de punto de medida
-#   Canal           no se usa: esa API no expone canales. Se acepta
-#                   para que la hoja tenga la misma forma que 'homol'
+#   Canal           la UNIDAD en la que viene la medida ("MWh" o
+#                   "kWh"). Esa API no expone canales, asi que la
+#                   columna quedaba sin uso; el usuario le escribio
+#                   "MWh" y preguntó si afectaba. Ahora si: es lo que
+#                   decide el factor de conversion (ver
+#                   UNIDADES_GEN_REAL). Vacia o con cualquier otro
+#                   texto = MWh, que es lo que devuelve la API
 #   Flujo           +1 / -1, igual que en 'homol' (retiros en -1)
 #
 # La hoja es opcional: un caso sin centrales de este tipo es valido.
@@ -55,6 +60,29 @@ COLUMNA_PUNTO = "Punto de Medida"
 COLUMNA_CANAL = "Canal"
 COLUMNA_CLAVE = "clave"
 COLUMNA_FLUJO = "Flujo"
+
+# Unidades que se reconocen en la columna "Canal" de la hoja
+# "Gen real", y el factor que lleva cada una a kWh, que es la unidad en
+# la que trabaja TODO el balance (Medidores!Gen_Unidad y, mas
+# adelante, "Descarga kWh"/"Carga kWh").
+#
+# La API de operacion real devuelve MWh: sin esta conversion, las
+# centrales que se miden por ahi entran al balance mil veces mas
+# chicas que las demas. Se vio con un caso real: Andes Solar III
+# (Pmax 170,78 MW) llegaba con un maximo de 44 por cuarto de hora
+# cuando Tocopilla (116 MW) llegaba con 29.493 -- los 44 son MWh y los
+# 29.493 son kWh.
+UNIDADES_GEN_REAL = {
+    "mwh": 1000.0,
+    "kwh": 1.0,
+}
+
+# Como se escribe cada una en el log.
+ETIQUETA_UNIDAD_GEN_REAL = {"mwh": "MWh", "kwh": "kWh"}
+
+# Lo que se usa cuando la columna "Canal" viene vacia o con un texto
+# que no es ninguna de las dos unidades: la API devuelve MWh.
+UNIDAD_GEN_REAL_POR_DEFECTO = "mwh"
 
 
 def buscar_archivo_homologacion(carpeta_auxiliares):
@@ -153,8 +181,12 @@ def _buscar_hoja(excel, nombre):
 def leer_gen_real(ruta):
     """
     Lee la hoja "Gen real" y devuelve una lista de dicts con
-    'topologyName', 'clave' y 'factor' -- la forma que espera
-    Generacion_Real.
+    'topologyName', 'clave', 'factor' y 'unidad' -- la forma que
+    espera Generacion_Real.
+
+    'unidad' sale de la columna "Canal" ("MWh"/"kWh"); vacia o con
+    cualquier otro texto vale MWh, que es lo que devuelve la API de
+    operacion real (ver UNIDADES_GEN_REAL).
 
     Si la hoja no existe, devuelve lista vacia y el proceso sigue: un
     caso sin centrales de operacion real es valido.
@@ -173,6 +205,7 @@ def leer_gen_real(ruta):
     columna_clave = columna_que_contenga(df, "clave")
     columna_punto = columna_que_contenga(df, "punto", "medida")
     columna_flujo = columna_que_contenga(df, "flujo")
+    columna_canal = columna_que_contenga(df, "canal")
 
     if columna_clave is None or columna_punto is None:
         raise ErrorMedidas(
@@ -204,11 +237,19 @@ def leer_gen_real(ruta):
                     f"({fila[columna_flujo]!r}). Usa 1 o -1."
                 )
 
+        unidad = UNIDAD_GEN_REAL_POR_DEFECTO
+
+        if columna_canal is not None:
+            texto = normalizar(fila[columna_canal])
+            if texto in UNIDADES_GEN_REAL:
+                unidad = texto
+
         centrales.append(
             {
                 "topologyName": str(topology).strip(),
                 "clave": str(clave).strip(),
                 "factor": factor,
+                "unidad": unidad,
             }
         )
 

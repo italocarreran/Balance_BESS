@@ -21,7 +21,7 @@ from .ecostos_prorratas import (
     calcular_as_at, calcular_au_av, calcular_fd_prorrateado,
     calcular_prorratas, construir_dic_fd_bloque,
     construir_dic_mapeo_diccionario, construir_dic_prorrata,
-    construir_prorrata_sscc,
+    construir_prorrata_sscc, unidades_bloque_fd,
 )
 from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_CMG, HOJA_CALCULO_ECOSTOS,
@@ -305,7 +305,9 @@ def completar_calculo_e_costos_grupos(
     dic_fd_cpf = construir_dic_fd_bloque(df_fd_cpf, "id", "CPF(+)", "CPF(-)")
 
     am, an, ap, aq = calcular_fd_prorrateado(
-        df, dic_mapeo, dic_fd_csf, dic_fd_cpf, registrar=registrar
+        df, dic_mapeo, dic_fd_csf, dic_fd_cpf, registrar=registrar,
+        unidades_fd_csf=unidades_bloque_fd(df_fd_csf),
+        unidades_fd_cpf=unidades_bloque_fd(df_fd_cpf),
     )
     df["AM"] = am
     df["AN"] = an

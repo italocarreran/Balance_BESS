@@ -170,6 +170,7 @@ from .ecostos_prorratas import (
     _calcular_bloque, _calcular_costo_ponderado, calcular_as_at,
     calcular_au_av, calcular_fd_prorrateado, calcular_prorratas,
     construir_dic_fd_bloque, construir_dic_mapeo_diccionario,
+    unidades_bloque_fd,
     construir_dic_prorrata, construir_prorrata_sscc,
 )
 from .ecostos_ciclo import (
@@ -293,6 +294,7 @@ __all__ = [
     "_calcular_costo_ponderado", "calcular_as_at", "calcular_au_av",
     "calcular_fd_prorrateado", "calcular_prorratas",
     "construir_dic_fd_bloque", "construir_dic_mapeo_diccionario",
+    "unidades_bloque_fd",
     "construir_dic_prorrata", "construir_prorrata_sscc",
     "_clave_central_ciclo", "calcular_aw_ax", "calcular_az",
     "calcular_subastas_ciclo", "construir_dic_umbrales_subastas",

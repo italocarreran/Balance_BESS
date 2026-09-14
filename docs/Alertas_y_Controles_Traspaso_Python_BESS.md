@@ -376,6 +376,21 @@ cantidad de nombres × días del mes
 - Registrar sector FD, clave, fila destino y columnas destino.
 - Recomendación: corrida `NO APROBADA` hasta revisión.
 
+### `FD-007` — Unidad homologada ausente de todo un bloque de FD *(control nuevo)*
+- **Severidad:** **ALTA**.
+- **Qué separa:** `FD-005` es "a esta unidad le falta **una hora**"; `FD-007` es
+  "esta unidad **no aparece nunca** en el bloque CPF/CSF de la hoja FD". Lo
+  segundo no es un dato faltante, es una homologación que no cruza (o una
+  central que no presta ese servicio), y repetirlo una vez por hora es lo que
+  hacía inservible la hoja `Alertas`: en la primera corrida real fueron
+  **2.232 alertas `FD-005` que eran 3 hechos**.
+- **Python:** una alerta **por central y bloque**, con la unidad a la que está
+  homologada, cuántas filas quedan en 0 y **la lista de unidades que sí trae
+  ese bloque** (que es la pista para encontrar el nombre correcto). Cuando se
+  emite `FD-007` para una unidad, NO se emiten además las `FD-005` de cada una
+  de sus horas: son la misma frase repetida.
+- **Origen:** `calcular_fd_prorrateado()`, con `unidades_bloque_fd()`.
+
 ### `FD-006` — Cantidad excesiva de claves FD faltantes
 - **Severidad:** CRÍTICA configurable.
 - Si supera umbral absoluto o porcentual definido por negocio, bloquear.
@@ -850,7 +865,8 @@ Revisión del catálogo contra el código, hecha el 2026-09-14.
 | `AUX-006` / `AUX-008` (parámetro maestro faltante) | `MAE-001` (barra), `MAE-002` (Pmax), `MAE-004` (capacidad), `MAE-005` (eficiencia), en las dos hojas de cálculo. |
 | `AUX-007` (parámetro numérico inválido) | `MAE-003`: Pmax presente pero en 0 o no numérico — deja `AE`/`AF` vacías. |
 | `CMG-004` (barra/cuarto sin CMg) | `construir_calculo_e_costos()` y `construir_calculo_re545()`. |
-| `FD-005` (clave no encontrada en FD) | `calcular_fd_prorrateado()`. **Se guardan todas**, no una muestra: el tope de 15 es solo de la línea que va a la pantalla. |
+| `FD-005` (clave no encontrada en FD) | `calcular_fd_prorrateado()`. **Se guardan todas**, no una muestra: el tope de 15 es solo de la línea que va a la pantalla. Excepción deliberada: si la unidad no está en NINGUNA fila del bloque, eso va como un solo `FD-007` y no como una `FD-005` por hora. |
+| `FD-007` (unidad ausente de todo un bloque de FD) | `calcular_fd_prorrateado()` + `unidades_bloque_fd()`. Una por central y bloque, con la lista de unidades disponibles. |
 | `TRA-001`, `TRA-005`, `TRA-006`, `TRA-007`, `TRA-008`, `TRA-009` | `nucleo/conciliacion.py`. Tolerancia fijada: relativa `1e-9`, piso absoluto `1e-6`; las dos quedan escritas en la hoja `Ejecucion` junto con la diferencia observada. |
 | §1 (estado de la corrida), §2 (formato de alerta), §20 (reporte final) | `nucleo/alertas.py` + hojas `Alertas` y `Ejecucion` de `Pagos_BESS.xlsx`. |
 | §19 parcial (cobertura de cruces) | Cada alerta de cruce trae la central/clave que falló; el conteo sale del propio registro. |
