@@ -2748,3 +2748,20 @@ queda vacia, y el FMA de la central que no participo queda en 0 mientras la que 
 conserva su valor base. Ademas, un caso end-to-end que escribe `Consolidado_entradas.xlsx` con las
 seis filas completas: `FD` con dato en todas y `FMA` = 0,3201 / 0,5 / 0 segun corresponda.
 **Falta compararlo contra un `DB!Y` y un `DB!AC` reales** (§30 del documento).
+
+---
+
+## Sesión 2026-09-14 — alertas para cruces que antes fallaban en silencio
+
+- Se agregó un diagnóstico común que agrupa y nombra centrales sin barra,
+  Pmax, capacidad o eficiencia en `Resumen BESS`, incluyendo también valores
+  existentes pero vacíos. El aviso aclara que los resultados dependientes
+  pueden terminar vacíos o en cero.
+- `Calculo E Costos` ahora marca explícitamente como `[AVISO]` las filas sin
+  CMg y reporta centrales que no aparecen en `Diccionario!A:B`, además de las
+  claves CPF/CSF homologadas que no existen en FD y que se completan con cero.
+- `Calculo RE545` ahora alerta por barra, CMg, CMg Promedio, capacidad y
+  eficiencia faltantes. Se conserva el resultado compatible con la planilla;
+  cambia la visibilidad del problema, no la fórmula.
+- Se agregaron pruebas unitarias para el agrupamiento de alertas y para los
+  dos caminos de FD faltante (vacío por diccionario y cero por clave FD).

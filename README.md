@@ -42,6 +42,14 @@ python Balance_BESS.py
      que no se actualiza se conserva tal cual estaba; si el archivo todavía
      no existe, se crea.
 
+Durante el cálculo, el registro muestra líneas **`[AVISO]`** cuando una
+homologación no encuentra correspondencia (por ejemplo: central sin
+propietario, barra, capacidad, eficiencia o Pmax; central ausente del
+`Diccionario`; claves de FD/CMg inexistentes). El cálculo conserva el
+comportamiento de la planilla —algunos faltantes quedan vacíos y otros se
+rellenan con cero—, pero ahora informa la causa, las centrales/claves
+afectadas y el impacto antes de continuar.
+
 ## Estructura del repositorio
 
 ```text

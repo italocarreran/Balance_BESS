@@ -605,6 +605,9 @@ importable como cualquier módulo.
     también requiere el archivo `SSCC_Desempeño_*` para `AM:AR`).
 - **Expone (funciones clave agregadas hasta ahora, además de las básicas
   de E/S y homologación):**
+  - Diagnóstico de homologaciones: `_avisar_claves_sin_mapeo()` agrupa por
+    valor los cruces faltantes o con dato vacío y los registra como
+    `[AVISO]`; se usa para barra, Pmax, capacidad y eficiencia.
   - Estructura del caso: `revisar_estructura(carpeta_base, aamm=None)` →
     `(rutas, filas)`, donde cada fila es un dict `{id, etiqueta, nivel,
     estado, detalle}` (`estado`: `ok`/`falta`/`pendiente`). El **nivel**

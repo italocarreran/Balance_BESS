@@ -231,6 +231,38 @@ class ErrorEntrada(Exception):
     """Problema en las entradas que impide continuar."""
 
 
+def _avisar_claves_sin_mapeo(
+    valores, mapa, descripcion, origen, registrar=print, maximo=15
+):
+    """Avisa, una vez por valor, las claves ausentes o con dato vacio.
+
+    Los VLOOKUP/diccionarios de la planilla suelen terminar en blanco y
+    varios calculos posteriores convierten ese blanco en cero. Este helper
+    hace visible el problema antes de esa conversion, sin inundar el log
+    con una linea por cada cuarto de hora.
+    """
+
+    faltantes = sorted({
+        _texto_seguro(valor)
+        for valor in valores
+        if _tiene_valor(valor)
+        and not _tiene_valor(mapa.get(normalizar(valor)))
+    })
+
+    if not faltantes:
+        return []
+
+    muestra = ", ".join(repr(valor) for valor in faltantes[:maximo])
+    resto = len(faltantes) - maximo
+    sufijo = f" (y {resto:,} mas)" if resto > 0 else ""
+    registrar(
+        f"  [AVISO] {descripcion}: {len(faltantes):,} valor(es) sin "
+        f"correspondencia en {origen}: {muestra}{sufijo}. Los resultados "
+        f"dependientes pueden quedar vacios o en 0."
+    )
+    return faltantes
+
+
 # ============================================================
 # RESOLUCION DE RUTAS
 # ============================================================
@@ -3611,6 +3643,11 @@ def construir_calculo_e_costos(
         lambda valor: mapa_barra.get(normalizar(valor), "")
     )
 
+    _avisar_claves_sin_mapeo(
+        df["clave"], mapa_barra, "Central sin barra de inyeccion",
+        f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+    )
+
     energia = pd.to_numeric(
         df_medidores["Gen_Unidad"], errors="coerce"
     ).fillna(0.0)
@@ -3639,13 +3676,13 @@ def construir_calculo_e_costos(
 
     if sin_barra:
         registrar(
-            f"  Calculo E Costos: {sin_barra:,} fila(s) sin barra de "
+            f"  [AVISO] Calculo E Costos: {sin_barra:,} fila(s) sin barra de "
             f"inyeccion (central no encontrada en '{HOJA_RESUMEN_BESS}')."
         )
 
     if sin_cmg:
         registrar(
-            f"  Calculo E Costos: {sin_cmg:,} fila(s) sin CMg (sin match "
+            f"  [AVISO] Calculo E Costos: {sin_cmg:,} fila(s) sin CMg (sin match "
             f"Barra+Cuarto de Hora en {ARCHIVO_CMG})."
         )
 
@@ -4060,6 +4097,11 @@ def construir_calculo_re545(
         lambda valor: mapa_barra.get(normalizar(valor), "")
     )
 
+    _avisar_claves_sin_mapeo(
+        df["clave"], mapa_barra, "Central sin barra de inyeccion",
+        f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+    )
+
     energia = pd.to_numeric(
         df_medidores["Gen_Unidad"], errors="coerce"
     ).fillna(0.0)
@@ -4090,6 +4132,16 @@ def construir_calculo_re545(
     ]
     df["CMg"] = [par[0] for par in pares]
     df["R"] = [par[1] for par in pares]
+
+    sin_cmg = int(df["CMg"].isna().sum())
+    sin_cmg_promedio = int(df["R"].isna().sum())
+    if sin_cmg or sin_cmg_promedio:
+        registrar(
+            f"  [AVISO] Calculo RE545: {sin_cmg:,} fila(s) sin CMg y "
+            f"{sin_cmg_promedio:,} sin CMg Promedio (sin match "
+            f"Barra+Cuarto de Hora en {ARCHIVO_CMG}). Los calculos "
+            f"posteriores pueden convertir esos faltantes en 0."
+        )
 
     filas_con_energia = int(va_a_re545.sum())
 
@@ -5174,6 +5226,15 @@ def completar_calculo_re545(
     df["U"] = u
     df["V"] = v
 
+    _avisar_claves_sin_mapeo(
+        df["clave"], dic_capacidad, "Central sin Capacidad (MWh)",
+        f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+    )
+    _avisar_claves_sin_mapeo(
+        df["clave"], dic_eficiencia, "Central sin Eficiencia",
+        f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+    )
+
     dics_reservas = construir_dic_reservas_subastas(df_subastas)
 
     for interno, serie in calcular_reservas_re545(df, dics_reservas).items():
@@ -5797,7 +5858,9 @@ def construir_dic_fd_bloque(df_fd, columna_id, columna_mas, columna_menos):
     return dic
 
 
-def calcular_fd_prorrateado(df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf):
+def calcular_fd_prorrateado(
+    df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf, registrar=print
+):
     """
     Replica AM, AN, AP, AQ: homologa la central ("clave") contra
     Diccionario!A->B; si no esta en el Diccionario, las 4 quedan en
@@ -5816,12 +5879,16 @@ def calcular_fd_prorrateado(df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf):
     bloque_ac = ac_num.map(_calcular_bloque)
 
     am, an, ap, aq = [], [], [], []
+    sin_diccionario = set()
+    sin_fd_cpf = set()
+    sin_fd_csf = set()
 
     for central, by, bac in zip(df_ecostos["clave"], bloque_y, bloque_ac):
 
         mapeo = dic_mapeo.get(normalizar(central))
 
         if mapeo is None:
+            sin_diccionario.add(_texto_seguro(central))
             am.append(pd.NA)
             an.append(pd.NA)
             ap.append(pd.NA)
@@ -5837,10 +5904,39 @@ def calcular_fd_prorrateado(df_ecostos, dic_mapeo, dic_fd_csf, dic_fd_cpf):
         csf_y = dic_fd_csf.get(clave_y)
         csf_ac = dic_fd_csf.get(clave_ac)
 
+        if cpf_y is None:
+            sin_fd_cpf.add(clave_y)
+        if csf_y is None:
+            sin_fd_csf.add(clave_y)
+        if csf_ac is None:
+            sin_fd_csf.add(clave_ac)
+
         ap.append(cpf_y[0] if cpf_y is not None else 0.0)
         am.append(cpf_y[1] if cpf_y is not None else 0.0)
         an.append(csf_y[1] if csf_y is not None else 0.0)
         aq.append(csf_ac[0] if csf_ac is not None else 0.0)
+
+    if sin_diccionario:
+        registrar(
+            f"  [AVISO] FD de Calculo E Costos: central(es) no presentes "
+            f"en el diccionario de nomenclatura ({HOJA_DICCIONARIO} A:B): "
+            f"{', '.join(repr(v) for v in sorted(sin_diccionario))}. "
+            f"AM, AN, AP y AQ quedan vacias para esas centrales."
+        )
+    if sin_fd_cpf:
+        registrar(
+            f"  [AVISO] FD de Calculo E Costos: {len(sin_fd_cpf):,} "
+            f"clave(s) CPF homologadas no aparecen en la hoja FD; sus "
+            f"valores se completan con 0. Ejemplos: "
+            f"{', '.join(sorted(sin_fd_cpf)[:10])}."
+        )
+    if sin_fd_csf:
+        registrar(
+            f"  [AVISO] FD de Calculo E Costos: {len(sin_fd_csf):,} "
+            f"clave(s) CSF homologadas no aparecen en la hoja FD; sus "
+            f"valores se completan con 0. Ejemplos: "
+            f"{', '.join(sorted(sin_fd_csf)[:10])}."
+        )
 
     return (
         pd.Series(am, index=df_ecostos.index),
@@ -6382,6 +6478,11 @@ def completar_calculo_e_costos_grupos(
     df["AE"] = ae
     df["AF"] = af
 
+    _avisar_claves_sin_mapeo(
+        df["clave"], dic_factor, "Central sin Pmax (MW)",
+        f"'{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}", registrar,
+    )
+
     tabla_prorrata = construir_prorrata_sscc(df_subastas)
     dic_prorrata = construir_dic_prorrata(tabla_prorrata, registrar=registrar)
 
@@ -6398,7 +6499,7 @@ def completar_calculo_e_costos_grupos(
     dic_fd_cpf = construir_dic_fd_bloque(df_fd_cpf, "id", "CPF(+)", "CPF(-)")
 
     am, an, ap, aq = calcular_fd_prorrateado(
-        df, dic_mapeo, dic_fd_csf, dic_fd_cpf
+        df, dic_mapeo, dic_fd_csf, dic_fd_cpf, registrar=registrar
     )
     df["AM"] = am
     df["AN"] = an
