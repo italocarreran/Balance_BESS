@@ -50,8 +50,8 @@ python Balance_BESS.py
    SoC del período dentro de `Medidas/` y el CSV de CMg dentro de `Cmg/`.
 3. La ventana detecta automáticamente las entradas y las dibuja como un
    diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
-4. **Cada acción es un botón en la fila que le corresponde** — no hay
-   ventanas intermedias ni un botón "Ejecutar" único:
+4. **Cada acción es un botón en la fila que le corresponde** (y además está
+   el botón **Ejecutar todo**, abajo de todo — ver más abajo):
    - `Medidas/Medidas_SAE.xlsx` → **Actualizar** (baja el mes completo de las
      dos APIs del Coordinador y arma el archivo).
    - `Cmg/cmg<AAMM>_def_15minutal.csv` → **Traer cmg_15min** (lo baja de la
@@ -71,6 +71,33 @@ python Balance_BESS.py
      las empresas, y el total del mes de cada empresa. `Resumen` tiene
      **Asignar pagos** y muestra cuánto `RECIBE`, `PAGA` y el `NETO` de
      cada empresa.
+
+### El botón "Ejecutar todo"
+
+Abre una ventana con el **plan de la corrida**: una fila por paso, tildada si
+hay que hacerlo, con su estado (`se genera` / `se rehace` / `al dia` /
+`bloqueada` / `sin tildar`) y, si no se puede, el motivo.
+
+- **Se hace solo lo que falta.** Lo que ya está al día no se rehace, salvo
+  que lo tildes; al tildarlo se tilda solo todo lo que sale de ahí (rehacer
+  `Medidores` sin rehacer los pagos dejaría el libro mezclado entre dos
+  corridas).
+- **El botón se bloquea si falta una entrada inicial** — `Centrales.xlsx` con
+  sus dos hojas, el Excel de homologación, el `*OfertasSSCC*`, el SoC del
+  período, o el período `AAMM` —, y dice cuál falta. El Excel de prorrata de
+  retiros, que suele llegar después, **no** bloquea: sus dos hojas quedan
+  fuera del plan (a la vista y con el motivo) y se tildan a mano cuando
+  aparece.
+- **Respeta las dependencias y aprovecha lo que puede ir en paralelo**: las
+  cuatro bajadas (medidas SAE, CSV de CMg, FD, subastas) y la generación de
+  FMA corren juntas; `cmg.xlsx` espera su CSV; el consolidado espera a todo
+  eso y se escribe **una sola vez** con todas sus hojas; `Pagos_BESS.xlsx`
+  espera al consolidado. Dos pasos que escriben en el mismo lugar nunca
+  corren a la vez, y si un paso falla no se corre nada que dependa de él.
+
+El grafo (quién depende de quién), el plan y la corrida viven en
+`Script/nucleo/orquestador.py`; la ventana solo los dibuja. No hay ningún
+cálculo nuevo ahí: llama a las mismas funciones que los botones sueltos.
 
 Durante el cálculo, el registro muestra líneas con la **severidad** y el **id
 del control** (`[ALTA] MAE-001: ...`) cuando una homologación no encuentra
@@ -340,6 +367,22 @@ Todas las hojas de los dos libros salen formateadas para leer (`formato.py`):
 nombres de columna en negrita, panel inmovilizado bajo el encabezado, ancho
 de columna según el contenido y separador de miles en las columnas
 numéricas. Es sólo aspecto: no toca un valor.
+
+Cada etapa abre **solo** lo que necesita, y lo que ya está en el consolidado
+sale de ahí:
+
+- `Pagos_BESS.xlsx` lee `Medidores`, `Ofertas SSCC`, `CMg`, `Subastas` y `FD`
+  del consolidado **con una sola apertura del archivo** (antes cada hoja
+  volvía a parsear el libro entero), y ya no reabre `cmg.xlsx`: el CMg es el
+  de la hoja `CMg` del consolidado, que es el mismo dato — así no puede pasar
+  que los pagos usen un CMg distinto del que quedó en la foto de las entradas.
+- Recalcular solo `PRORRATA_RETIROS` o el `Resumen` no abre el consolidado ni
+  `Centrales.xlsx` de más: esas dos hojas salen de las dos hojas de cálculo ya
+  escritas (el `Resumen` sí necesita `Centrales.xlsx` para el propietario de
+  cada central).
+- `Centrales.xlsx` se abre una vez por corrida, aunque lo necesiten dos
+  secciones, y la ventana no reabre las planillas grandes en cada repintado
+  (se acuerda de lo leído mientras el archivo no cambie).
 
 Las macros de Ofertas SSCC, CMg, FD y Subastas replicadas son solo las de
 **carga** de esas hojas.

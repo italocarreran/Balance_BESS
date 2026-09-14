@@ -472,3 +472,35 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   formateadas las hojas que se preservan de una corrida anterior, y
   cualquier hoja nueva sale igual sin tocar su escritura. La regla es que
   ese módulo no puede cambiar un valor: si lo hace, es un bug.
+- **"Ejecutar todo" es un grafo, no un script que llama a todo en fila.**
+  El orden, las dependencias y el paralelismo viven en
+  `Script/nucleo/orquestador.py` (`TAREAS`/`GRUPOS`), separado de la
+  ventana y de las funciones que hacen el trabajo: la ventana solo
+  dibuja el plan que devuelve `planificar()`, y el orquestador no
+  calcula nada propio, llama a las mismas funciones que los botones
+  sueltos. Tres invariantes que no se pueden romper al tocarlo: dos
+  tareas que escriben el mismo archivo comparten `recurso` (y por eso
+  las hojas de cada salida se mandan JUNTAS en una sola llamada, que
+  además escribe el libro una sola vez); una tarea corre solo si sus
+  dependencias están al día o se rehacen en la misma corrida; y si una
+  tarea falla no corre nada que dependa de ella. Agregar un paso nuevo
+  es agregar una `Tarea` (con su fila de estado de
+  `revisar_estructura`, sus requisitos y sus dependencias), no un
+  `if` en la ventana.
+- **Las entradas que pone la persona se dividen en dos.**
+  `ENTRADAS_INICIALES` (Centrales con sus dos hojas, homologación,
+  OfertasSSCC, SoC del período) bloquean el botón "Ejecutar todo": sin
+  ellas no hay corrida posible y decirlo es mejor que ofrecer media.
+  `ENTRADAS_TARDIAS` (el Excel de prorrata de retiros) no bloquean:
+  las hojas que dependen de ellas quedan fuera del plan, a la vista y
+  con el motivo. Mover una entrada de un grupo al otro es una decisión
+  de producto, no un detalle: se decide con el usuario.
+- **Lo que ya está en `Consolidado_entradas.xlsx` se lee de ahí, no de
+  su origen.** Vale para `Medidores`, `Ofertas SSCC`, `Subastas`, `FD`
+  y ahora también `CMg` (antes la etapa de pagos reabría `cmg.xlsx`).
+  El consolidado es la ÚNICA foto de las entradas con la que se paga:
+  si una entrada cambia después de generarlo, se regenera su hoja con
+  su botón, no se lee el archivo nuevo por un costado. Y al leer varias
+  hojas del mismo libro se abre UNA vez (`pd.ExcelFile`), porque cada
+  `pd.read_excel(ruta, sheet_name=...)` vuelve a parsear el archivo
+  entero.

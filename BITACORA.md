@@ -3438,3 +3438,98 @@ sale igual, sólo que sin separador de miles.
 Lo que NO se probó: la corrida contra el archivo real del período.
 
 ---
+
+## 2026-09-14 — Que no se abra de mas, y un boton que corre todo
+
+Tres pedidos del usuario en la misma tanda: *"1. Que no se abran planillas
+innecesarias. 2. Que si alguna información está en el consolidado que se
+saque de ahí, quitar redundancias, etc. Que quede optimizadito. 3. Quiero un
+botón que ejecute todo teniendo la información inicial necesaria [...] que el
+botón se bloquee si falta algo [...] que se calcule solo lo restante pero que
+yo pueda seleccionar si quiero repetir algún cálculo [...] Hay cosas que
+pueden ir en paralelo y cosas que dependen de otras. Con cuidado"*.
+
+Ningún número cambia: la corrida sintética de punta a punta da las mismas
+hojas celda por celda antes y después.
+
+### 1 y 2 — lo que se dejó de abrir
+
+| Antes | Ahora |
+|---|---|
+| `Pagos_BESS.xlsx` abría el consolidado **cinco veces** (una por hoja: cada `pd.read_excel(ruta, sheet_name=...)` parsea el libro entero) | una sola apertura (`pd.ExcelFile`) para las cinco (`_leer_entradas_del_consolidado`) |
+| ...y además reabría `cmg.xlsx` | el CMg sale de la hoja `CMg` del consolidado (`leer_cmg_consolidado`) |
+| Recalcular solo `PRORRATA_RETIROS` o el `Resumen` abría igual Medidores, Ofertas SSCC, Subastas, CMg y Centrales | esas dos hojas salen de las hojas de cálculo ya escritas; no se abre el consolidado (ni se exige que exista) |
+| `Centrales.xlsx` se abría dos veces por corrida del consolidado (una por "medidores", otra por "subastas") | una sola vez |
+| La ventana reabría Centrales, el Excel de homologación y las dos salidas **en cada repintado** (al cambiar el AAMM, al terminar cualquier botón) | se acuerda de lo leído mientras el archivo no cambie (clave: ruta + mtime + tamaño) |
+
+Lo del CMg es además una **redundancia peligrosa**, no solo lentitud: bastaba
+con dejar un `cmg.xlsx` más nuevo en la carpeta después de generar el
+consolidado para que los pagos usaran un CMg distinto del de la foto de las
+entradas. Es el mismo criterio que ya se había aplicado a `FD` en la tanda
+anterior. `cmg.xlsx` salió también del manifiesto de entradas de
+`Pagos_BESS.xlsx`: ya no es una entrada de esa etapa.
+
+Lo que NO se tocó: la hoja `Subastas` sigue leyendo el `SSCC_Desempeño_*`
+aunque la hoja `FD` del consolidado salga del mismo archivo. No es el mismo
+dato: de ahí saca el CTF y el Vector de Participación CSF, que la hoja `FD`
+no guarda.
+
+### 3 — "Ejecutar todo"
+
+Módulo nuevo, `Script/nucleo/orquestador.py`: 17 tareas agrupadas en 8 pasos,
+con sus dependencias. No calcula nada nuevo — llama a las mismas funciones
+que los botones sueltos.
+
+```
+Medidas_SAE ─┐
+cmg_csv → cmg.xlsx ─┤
+FD → FMA ────┼→ Consolidado (5 hojas, UNA escritura) → Pagos (4 hojas, UNA escritura)
+subastas ────┘
+```
+
+- **Se hace solo lo que falta.** Lo que está al día no se rehace salvo que se
+  tilde; al tildarlo se tilda solo todo lo que sale de ahí
+  (`propagar_seleccion`), porque rehacer `Medidores` sin rehacer los pagos
+  deja el libro mezclado entre dos corridas. Si se destilda algo de lo que
+  otra cosa depende, esa otra queda `bloqueada` y lo dice, en vez de calcular
+  con datos viejos.
+- **El botón se bloquea** si falta una entrada inicial (`Centrales.xlsx` y sus
+  dos hojas, el Excel de homologación con su hoja `homol`, el `*OfertasSSCC*`,
+  el SoC del período, o el `AAMM`), con el nombre de lo que falta. El Excel de
+  prorrata de retiros —que llega después— **no** bloquea: sus dos hojas quedan
+  fuera del plan, a la vista y con el motivo.
+- **Paralelismo, con tres seguros**: (a) dos tareas que escriben el mismo
+  archivo comparten `recurso` y nunca corren a la vez (por eso "Traer FD" y
+  "Generar FMA", que escriben en la misma carpeta, se turnan); (b) las hojas
+  de cada salida se mandan JUNTAS en una sola llamada, que además escribe el
+  libro una sola vez en vez de cinco; (c) si un paso falla, no se corre nada
+  que dependa de él (y el resumen final dice qué corrió y qué no).
+
+La ventana nueva (`ventana_ejecutar_todo` en `Balance_BESS.py`) solo dibuja el
+plan que devuelve `planificar()`: una fila por tarea con su checkbox, su
+estado y el motivo si no puede correr, más "Solo lo que falta" / "Rehacer
+todo" y el botón `Ejecutar`, que está `disabled` mientras haya bloqueos.
+
+### Verificación
+
+- 93 pruebas (eran 72), todas verdes, sin avisos de `pyflakes`.
+- `tests/test_orquestador.py` (nuevo, 18 pruebas): el plan de cero, el de
+  todo al día, el de "solo falta el Resumen", los bloqueos por entrada
+  inicial y por dependencia, la propagación al rehacer algo del medio, el
+  aviso de lo que queda viejo, el orden topológico, y la corrida real (con
+  grupos falsos) mirando paralelismo, recurso compartido, agrupación de hojas
+  en una escritura y corte de la rama que falla.
+- `tests/test_control_corrida.py`: una corrida de `prorrata_retiros` +
+  `resumen` **después de borrar** `Consolidado_entradas.xlsx` y `cmg.xlsx`,
+  que pasa — es la prueba de que no se abren.
+- La ventana se probó de verdad (Xvfb): abre, dibuja los 17 pasos con sus
+  estados, el botón queda habilitado cuando se puede y bloqueado al destildar
+  una dependencia.
+- Corrida sintética completa antes/después: las hojas de `Pagos_BESS.xlsx`
+  dan exactamente los mismos valores.
+
+Lo que NO se probó: la corrida real contra las APIs y la unidad de red (no
+hay acceso desde acá), así que el paralelismo de las cuatro bajadas está
+probado con funciones falsas, no contra el Coordinador.
+
+---

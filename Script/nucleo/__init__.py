@@ -136,7 +136,7 @@ from .hojas_entrada import (
     _construir_bloque_fd_cpf, _construir_bloque_fd_csf,
     _contiene_bess_o_sae_sin_bat, _dia_hora_mes_fd,
     _filtrar_bess_sae_posicional, _ordenar_subastas_por_hora_mes,
-    construir_fd, leer_cmg, leer_fd_consolidado,
+    construir_fd, leer_cmg, leer_cmg_consolidado, leer_fd_consolidado,
 )
 from .subastas_accdb import (
     COLUMNA_ENERGIA_SSCC_ACCDB, _control_desde_servicio,
@@ -211,6 +211,10 @@ from .escritura import (
     _escribir_tabla_con_titulo, escribir_pagos_bess, escribir_salida,
 )
 from .proceso import generar_consolidado, generar_pagos_bess
+from .orquestador import (
+    GRUPOS, GRUPO_POR_ID, TAREAS, TAREA_POR_ID, dependientes, ejecutar_plan,
+    planificar, propagar_seleccion,
+)
 from .traer import (
     barras_desde_resumen_bess, generar_cmg, generar_fma, traer_csv_cmg,
     traer_fd, traer_subastas,
@@ -241,7 +245,9 @@ __all__ = [
     "COLUMNAS_MEDIDORES_SALIDA", "COLUMNAS_AUXILIARES_E_COSTOS",
     "COLUMNAS_SALIDA_E_COSTOS", "COLUMNAS_AUXILIARES_RE545",
     "COLUMNAS_SALIDA_RE545", "reponer_auxiliares_medidores",
-    "formatear_hoja", "formatear_libro",
+    "formatear_hoja", "formatear_libro", "leer_cmg_consolidado",
+    "GRUPOS", "GRUPO_POR_ID", "TAREAS", "TAREA_POR_ID", "dependientes",
+    "ejecutar_plan", "planificar", "propagar_seleccion",
     "EXTENSIONES_EXCEL", "HOJA_CALCULO_ECOSTOS",
     "HOJA_CALCULO_RE545", "HOJA_PRORRATA_RETIROS", "HOJA_RESUMEN",
     "HOJA_CMG_ORIGEN", "HOJA_CPF_HORARIO",

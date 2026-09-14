@@ -7,8 +7,11 @@ periodo (AAMM) y debajo se dibuja el diagrama de la estructura del
 caso con el estado de cada entrada (OK/FALTA/PENDIENTE).
 
 Todo lo que el programa puede hacer sale de un boton en la fila que
-corresponde -no hay ventanas intermedias ni un boton "Ejecutar"
-unico-:
+corresponde. Ademas, abajo de todo hay un boton "Ejecutar todo": abre
+una ventana con el PLAN de la corrida (que falta, que esta al dia, que
+se puede rehacer y que bloquea la corrida) y lo ejecuta respetando las
+dependencias, en paralelo donde se puede. El grafo y el plan viven en
+Script/nucleo/orquestador.py; esta ventana solo los dibuja.
 
     <CARPETA_BASE>/
         Medidas/
@@ -911,11 +914,227 @@ def main():
         )
 
     # --------------------------------------------------------
+    # EJECUTAR TODO (una ventana con el plan de la corrida)
+    # --------------------------------------------------------
+
+    def ventana_ejecutar_todo():
+        """
+        Abre la ventana del plan: una fila por tarea, tildada si hay
+        que hacerla, con lo que falta para poder ejecutar. El boton
+        "Ejecutar" queda bloqueado mientras falte una entrada o una
+        dependencia (pedido del usuario).
+
+        El plan lo arma nucleo.planificar(): esta ventana solo lo
+        dibuja y devuelve la seleccion.
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        if corriendo["activo"]:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        # None = "lo que falte" (el arranque normal); despues pasa a
+        # ser el set que el usuario va tildando.
+        seleccion = {"ids": None}
+
+        top = tk.Toplevel(root)
+        top.title("Ejecutar todo")
+        top.geometry("900x640")
+        top.transient(root)
+
+        tk.Label(
+            top,
+            text=(
+                "Se hace solo lo que falta. Tilda tambien lo que quieras "
+                "rehacer: lo que sale de ahi se tilda solo."
+            ),
+            font=("Segoe UI", 9), anchor="w", justify="left",
+        ).pack(fill="x", padx=14, pady=(12, 4))
+
+        frame_pasos = tk.LabelFrame(top, text="Pasos", padx=8, pady=6)
+        frame_pasos.pack(fill="both", expand=True, padx=14, pady=4)
+
+        lienzo = tk.Canvas(frame_pasos, borderwidth=0, highlightthickness=0)
+        barra_pasos = tk.Scrollbar(
+            frame_pasos, orient="vertical", command=lienzo.yview
+        )
+        lienzo.configure(yscrollcommand=barra_pasos.set)
+        barra_pasos.pack(side="right", fill="y")
+        lienzo.pack(side="left", fill="both", expand=True)
+
+        lista = tk.Frame(lienzo)
+        ventana_lista = lienzo.create_window((0, 0), window=lista, anchor="nw")
+
+        def ajustar_lista(event=None):
+            lienzo.configure(scrollregion=lienzo.bbox("all"))
+            lienzo.itemconfig(ventana_lista, width=lienzo.winfo_width())
+
+        lista.bind("<Configure>", ajustar_lista)
+        lienzo.bind("<Configure>", ajustar_lista)
+
+        frame_avisos = tk.LabelFrame(
+            top, text="Para poder ejecutar", padx=8, pady=6
+        )
+        frame_avisos.pack(fill="x", padx=14, pady=4)
+
+        txt_avisos = tk.Text(
+            frame_avisos, height=6, font=("Segoe UI", 8), wrap="word"
+        )
+        txt_avisos.pack(fill="x")
+
+        frame_pie = tk.Frame(top)
+        frame_pie.pack(fill="x", padx=14, pady=(4, 12))
+
+        btn_ejecutar = tk.Button(
+            frame_pie, text="Ejecutar", font=("Segoe UI", 9, "bold"),
+            bg="#fdf0d5",
+        )
+
+        estado_plan = {"plan": None}
+
+        def repintar():
+
+            plan = nucleo.planificar(ruta, aamm, seleccion["ids"])
+            estado_plan["plan"] = plan
+
+            for hijo in lista.winfo_children():
+                hijo.destroy()
+
+            for tarea in plan["tareas"]:
+
+                fila = tk.Frame(lista)
+                fila.pack(fill="x", pady=1)
+
+                var = tk.BooleanVar(value=tarea["seleccionada"])
+
+                def alternar(id_tarea=tarea["id"], var=var):
+                    actual = {
+                        t["id"] for t in estado_plan["plan"]["tareas"]
+                        if t["seleccionada"]
+                    }
+                    if var.get():
+                        # Tildar algo arrastra lo que sale de ahi: si
+                        # no, queda mezclado con la corrida anterior.
+                        actual |= nucleo.propagar_seleccion({id_tarea})
+                    else:
+                        actual.discard(id_tarea)
+                    seleccion["ids"] = actual
+                    repintar()
+
+                tk.Checkbutton(
+                    fila, variable=var, command=alternar,
+                    state="disabled" if corriendo["activo"] else "normal",
+                ).pack(side="left")
+
+                tk.Label(
+                    fila, text=tarea["etiqueta"], width=44, anchor="w",
+                    font=("Consolas", 9),
+                ).pack(side="left")
+
+                color = {
+                    "al dia": COLOR_OK,
+                    "se genera": COLOR_BASE_OK,
+                    "se rehace": COLOR_PENDIENTE,
+                    "bloqueada": COLOR_FALTA,
+                    "sin tildar": COLOR_NEUTRO,
+                }[tarea["estado"]]
+
+                tk.Label(
+                    fila, text=tarea["estado"], width=12, anchor="w",
+                    fg=color, font=("Segoe UI", 9, "bold"),
+                ).pack(side="left")
+
+                motivo = ", ".join(
+                    tarea["faltan_requisitos"] + tarea["faltan_dependencias"]
+                )
+
+                tk.Label(
+                    fila,
+                    text=(f"falta: {motivo}" if motivo else ""),
+                    anchor="w", fg=COLOR_NEUTRO, font=("Segoe UI", 8),
+                ).pack(side="left", fill="x", expand=True)
+
+            txt_avisos.delete("1.0", "end")
+
+            if plan["bloqueos"]:
+                txt_avisos.insert(
+                    "end", "\n".join(f"- {b}" for b in plan["bloqueos"])
+                )
+            else:
+                pasos = " -> ".join(
+                    nucleo.GRUPO_POR_ID[g].etiqueta for g in plan["orden"]
+                )
+                txt_avisos.insert(
+                    "end", f"Todo listo. Orden de la corrida: {pasos}\n"
+                )
+
+            for aviso in plan["advertencias"]:
+                txt_avisos.insert("end", f"\n[AVISO] {aviso}")
+
+            btn_ejecutar.config(
+                state="normal" if plan["puede_ejecutar"] else "disabled"
+            )
+
+            ajustar_lista()
+
+        def solo_lo_que_falta():
+            seleccion["ids"] = None
+            repintar()
+
+        def tildar_todo():
+            seleccion["ids"] = {t.id for t in nucleo.TAREAS}
+            repintar()
+
+        def ejecutar():
+            plan = estado_plan["plan"]
+            if plan is None or not plan["puede_ejecutar"]:
+                return
+            ids = {
+                t["id"] for t in plan["tareas"] if t["seleccionada"]
+            }
+            top.destroy()
+            lanzar(
+                nucleo.ejecutar_plan,
+                dict(carpeta_base=ruta, aamm=aamm, seleccion=ids),
+                f"{nucleo.ARCHIVO_SALIDA} / {nucleo.ARCHIVO_SALIDA_PAGOS}",
+            )
+
+        btn_ejecutar.config(command=ejecutar)
+
+        tk.Button(
+            frame_pie, text="Solo lo que falta", command=solo_lo_que_falta,
+        ).pack(side="left", padx=(0, 8))
+
+        tk.Button(
+            frame_pie, text="Rehacer todo", command=tildar_todo,
+        ).pack(side="left", padx=8)
+
+        tk.Button(frame_pie, text="Cerrar", command=top.destroy).pack(
+            side="right", padx=8
+        )
+
+        btn_ejecutar.pack(side="right", padx=8)
+
+        repintar()
+
+    # --------------------------------------------------------
     # BOTONES FIJOS ABAJO
     # --------------------------------------------------------
 
     def abrir_salida():
         abrir_en_explorador(var_base.get())
+
+    tk.Button(
+        frame_botones,
+        text="Ejecutar todo",
+        font=("Segoe UI", 9, "bold"),
+        bg="#fdf0d5",
+        command=ventana_ejecutar_todo,
+    ).pack(side="left", padx=10, expand=True)
 
     btn_abrir_salida = tk.Button(
         frame_botones,

@@ -47,6 +47,7 @@ Script/
         escritura.py           <- los dos libros de salida
         formato.py             <- ancho/negrita/panel fijo de las hojas
         proceso.py             <- los dos procesos completos
+        orquestador.py         <- el grafo de "Ejecutar todo" (plan y corrida)
         traer.py               <- los botones Traer/Generar
         medidas_sae.py         <- Medidas_SAE.xlsx
     Cmg/

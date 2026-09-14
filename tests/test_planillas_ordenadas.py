@@ -260,3 +260,47 @@ class TestFormatoNoTocaLosDatos(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNoSeAbrenPlanillasDeMas(unittest.TestCase):
+    """
+    Pedido del usuario: "que no se abran planillas innecesarias" y
+    "si alguna informacion esta en el consolidado que se saque de ahi".
+    """
+
+    def test_el_cmg_de_los_pagos_sale_del_consolidado(self):
+        """
+        La hoja 'CMg' del consolidado y cmg.xlsx son el mismo dato: se
+        lee el consolidado (la foto de las entradas), no el archivo
+        original.
+        """
+
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / "Consolidado_entradas.xlsx"
+            cmg = pd.DataFrame({
+                "A": ["x"], "B": ["y"], "C": ["z"],
+                "D_Barra": ["BARRA A"], "E": [""], "F_CMg": [50.0],
+                "G": [""], "H_Cuarto": [1], "I_CMgProm": [45.0],
+            })
+            with pd.ExcelWriter(ruta) as w:
+                cmg.to_excel(w, sheet_name="CMg", index=False)
+
+            leido = nucleo.leer_cmg_consolidado(ruta, registrar=lambda *a: None)
+
+            self.assertEqual(len(leido.columns), 9)
+            self.assertEqual(
+                nucleo.construir_dic_cmg(leido),
+                nucleo.construir_dic_cmg(cmg),
+            )
+
+    def test_sin_la_hoja_cmg_el_error_dice_que_hay_que_generarla(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / "Consolidado_entradas.xlsx"
+            pd.DataFrame({"a": [1]}).to_excel(
+                ruta, sheet_name="Medidores", index=False
+            )
+
+            with self.assertRaises(nucleo.ErrorEntrada) as fallo:
+                nucleo.leer_cmg_consolidado(ruta, registrar=lambda *a: None)
+
+            self.assertIn("CMg", str(fallo.exception))

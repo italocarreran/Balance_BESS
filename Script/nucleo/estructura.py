@@ -30,12 +30,62 @@ from .utiles import ErrorEntrada, normalizar
 # VALIDACION DE ESTRUCTURA
 # ============================================================
 
+# Lo que ya se leyo de cada archivo, por (ruta, fecha de
+# modificacion, tamaño): la ventana llama a revisar_estructura() en
+# cada repintado (al elegir carpeta, al cambiar el AAMM, al terminar
+# cualquier boton), y sin esto cada repintado volvia a ABRIR
+# Centrales.xlsx, el archivo de homologacion y las dos salidas -que
+# son las planillas grandes- solo para preguntarles que hojas tienen.
+# Pedido del usuario: "que no se abran planillas innecesarias".
+#
+# La clave incluye mtime y tamaño: si el archivo cambia (lo regenero
+# el programa, o el usuario lo edito en Excel), la entrada vieja deja
+# de servir sola.
+_CACHE_HOJAS = {}
+_CACHE_MAXIMO = 64
+
+
+def _firma(ruta):
+    """(ruta, mtime, tamaño) o None si el archivo no esta."""
+
+    try:
+        est = ruta.stat()
+    except OSError:
+        return None
+
+    return (str(ruta), est.st_mtime_ns, est.st_size)
+
+
+def _con_cache(ruta, etiqueta, leer):
+    """
+    leer(ruta) una sola vez por version del archivo. 'etiqueta'
+    separa dos lecturas distintas del mismo archivo (los nombres de
+    hoja vs. que hojas tienen datos).
+    """
+
+    firma = _firma(ruta)
+
+    if firma is None:
+        return None
+
+    clave = (etiqueta,) + firma
+
+    if clave not in _CACHE_HOJAS:
+        if len(_CACHE_HOJAS) >= _CACHE_MAXIMO:
+            _CACHE_HOJAS.clear()
+        _CACHE_HOJAS[clave] = leer(ruta)
+
+    return _CACHE_HOJAS[clave]
+
+
 def hojas_de(ruta):
     """
     Nombres de hoja de un Excel, o None si no se puede abrir (no
     existe, esta abierto por Excel, corrupto). Se usa para mostrar el
     estado hoja por hoja de las dos SALIDAS, que se generan por
     partes: cada hoja puede estar o no estar.
+
+    Se cachea por version del archivo (ver _con_cache).
     """
 
     ruta = Path(ruta)
@@ -43,10 +93,14 @@ def hojas_de(ruta):
     if not ruta.is_file():
         return None
 
-    try:
-        return list(pd.ExcelFile(ruta).sheet_names)
-    except Exception:
-        return None
+    def _leer(ruta):
+        try:
+            with pd.ExcelFile(ruta) as libro:
+                return list(libro.sheet_names)
+        except Exception:
+            return None
+
+    return _con_cache(ruta, "hojas", _leer)
 
 
 def _fila(id_fila, etiqueta, nivel, estado, detalle=""):
@@ -84,15 +138,21 @@ def hojas_con_datos(ruta):
     if not ruta.is_file():
         return None
 
-    try:
-        libro = openpyxl.load_workbook(ruta, read_only=True)
-    except Exception:
-        return None
+    def _leer(ruta):
+        try:
+            libro = openpyxl.load_workbook(ruta, read_only=True)
+        except Exception:
+            return None
 
-    try:
-        return {hoja.title: (hoja.max_row or 0) > 1 for hoja in libro.worksheets}
-    finally:
-        libro.close()
+        try:
+            return {
+                hoja.title: (hoja.max_row or 0) > 1
+                for hoja in libro.worksheets
+            }
+        finally:
+            libro.close()
+
+    return _con_cache(ruta, "hojas_con_datos", _leer)
 
 
 def _filas_de_hojas(ruta_archivo, secciones, prefijo_id, nivel):
