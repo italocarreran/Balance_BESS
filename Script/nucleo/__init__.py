@@ -103,7 +103,7 @@ from .estructura import (
     hojas_con_datos, hojas_de, revisar_estructura,
 )
 from .prorrata_retiros import (
-    COLUMNAS_ORIGEN, HOJA_ORIGEN, TOLERANCIA_PRORRATA,
+    COLUMNAS_ORIGEN, HOJA_ORIGEN,
     buscar_archivo_prorrata, construir_compensacion_total,
     construir_prorrata_retiros, construir_resumen, leer_prorrata_retiros,
 )
@@ -248,7 +248,7 @@ __all__ = [
     "buscar_archivo_sscc_desempeno",
     "buscar_soc", "periodo_desde_aamm", "resolver_rutas",
     "validar_aamm", "SECCIONES_CONSOLIDADO", "SECCIONES_PAGOS", "_fila",
-    "COLUMNAS_ORIGEN", "HOJA_ORIGEN", "TOLERANCIA_PRORRATA",
+    "COLUMNAS_ORIGEN", "HOJA_ORIGEN",
     "buscar_archivo_prorrata", "leer_prorrata_retiros",
     "construir_prorrata_retiros", "construir_compensacion_total",
     "construir_resumen",

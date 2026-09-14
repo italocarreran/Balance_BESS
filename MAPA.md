@@ -119,7 +119,7 @@ importable como cualquier módulo.
   | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
   | `Pagos_BESS.xlsx` | **Calcular todo** | `generar_pagos_bess` con todas |
   | cada `hoja '...'` de esa salida | **Calcular** | `generar_pagos_bess` con esa sola |
-  | `Pagos_BESS.xlsx/PRORRATA_RETIROS` | **Traer prorrata** | valida `Prorrata 15min` y asigna por cuarto |
+  | `Pagos_BESS.xlsx/PRORRATA_RETIROS` | **Traer prorrata** | reparte el monto de cada cuarto de hora segun `Prorrata 15min` |
   | `Pagos_BESS.xlsx/Resumen` | **Asignar pagos** | consolida `RECIBE`, `PAGA` y `NETO` por empresa |
 
   Las dos salidas se desglosan por hoja igual que `Centrales.xlsx`: lo que

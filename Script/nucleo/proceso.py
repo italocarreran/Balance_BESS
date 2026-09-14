@@ -638,16 +638,20 @@ def generar_pagos_bess(
                 f"{rutas['prorrata_retiros_dir']}."
             )
         registrar(f"Leyendo {archivo_prorrata.name}/Prorrata 15min...")
-        fuente_prorrata = leer_prorrata_retiros(archivo_prorrata)
+        fuente_prorrata = leer_prorrata_retiros(
+            archivo_prorrata, registrar=registrar
+        )
         (
-            df_prorrata_retiros,
             df_compensacion_cuarto,
+            df_prorrata_retiros,
             df_pagos_suministrador,
         ) = construir_prorrata_retiros(
-            fuente_prorrata, df_ecostos_asignacion, df_re545_asignacion
+            fuente_prorrata, df_ecostos_asignacion, df_re545_asignacion,
+            registrar=registrar,
         )
         registrar(
-            f"  {len(df_prorrata_retiros):,} asignaciones; "
+            f"  {len(df_compensacion_cuarto):,} cuartos de hora con monto; "
+            f"{len(df_prorrata_retiros):,} asignaciones; "
             f"{len(df_pagos_suministrador):,} suministradores."
         )
         if quiere_resumen:
