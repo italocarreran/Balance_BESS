@@ -53,13 +53,13 @@ Medidas/_trabajo/ (los lotes que baja la API, la marca de
 reanudacion) NO aparece en el diagrama a pedido del usuario: no es una
 entrada ni una salida del caso, son andamios del proceso.
 
-El calculo vive en Script/ (ver Script/__init__.py), incluida la clave
-de las dos APIs del Coordinador que usa Medidas (Script/Medidas/
-comun.py, USER_KEY). La ubicacion de este .py no influye en nada salvo
+El calculo vive en Script/ (ver Script/__init__.py). Las dos claves de
+las APIs del Coordinador que usa Medidas NO estan en el codigo: salen
+de la seccion "claves_api" de config.json (ver Script/config.py y
+config.ejemplo.json). La ubicacion de este .py no influye en nada salvo
 en donde se guarda config.json.
 """
 
-import json
 import os
 import socket
 import subprocess
@@ -72,10 +72,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from Script import nucleo
+from Script import config, nucleo
 
-
-CONFIG_PATH = Path(__file__).parent / "config.json"
 
 COLOR_OK = "#1a6b1a"
 COLOR_FALTA = "#b00020"
@@ -119,29 +117,18 @@ def get_usuario():
 
 
 def leer_config():
-    if CONFIG_PATH.exists():
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                return json.load(f).get(get_usuario(), {})
-        except (json.JSONDecodeError, OSError):
-            return {}
-    return {}
+    """Lo que dejo guardado ESTE PC/usuario (carpeta base, AAMM)."""
+
+    return config.seccion(get_usuario())
 
 
 def guardar_config(data):
-    todo = {}
-    if CONFIG_PATH.exists():
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                todo = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            todo = {}
-    todo.setdefault(get_usuario(), {}).update(data)
-    try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(todo, f, ensure_ascii=False, indent=2)
-    except OSError:
-        pass
+    """
+    Guarda en la seccion de este PC/usuario, sin tocar el resto del
+    archivo -- ni las secciones de otros, ni "claves_api".
+    """
+
+    config.actualizar_seccion(get_usuario(), data)
 
 
 def abrir_en_explorador(ruta, es_archivo=False):

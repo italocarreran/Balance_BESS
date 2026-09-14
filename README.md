@@ -21,8 +21,29 @@ pip install -r requirements.txt
 python Balance_BESS.py
 ```
 
+0. **Solo la primera vez:** copiar `config.ejemplo.json` como `config.json`
+   (junto a `Balance_BESS.py`) y pegar adentro las dos claves de las APIs del
+   Coordinador. Son **distintas** entre sí y el valor es el mismo para todo
+   el equipo; `config.json` no se versiona, así que cada uno lo pega una vez
+   en su copia. Solo hace falta para el botón que baja `Medidas_SAE.xlsx`:
+   el resto del programa anda sin claves.
+
+   ```json
+   {
+     "claves_api": {
+       "prmte": "PEGAR_AQUI_LA_CLAVE",
+       "generacion_real": "PEGAR_AQUI_LA_CLAVE"
+     }
+   }
+   ```
+
+   `prmte` es la de `medidas.coordinador.cl` y `generacion_real` la de
+   `operacion.coordinador.cl`. Si falta alguna, el programa lo dice con el
+   formato exacto para pegar.
 1. Elegir la **carpeta base** del caso (ver estructura abajo). El programa
-   recuerda la última carpeta usada, por PC/usuario, en `config.json`.
+   recuerda la última carpeta usada, por PC/usuario, en el mismo
+   `config.json` (en su propia sección: guardar la carpeta no pisa las
+   claves).
 2. Ingresar el **período (AAMM)** en el recuadro de la ventana: 4 dígitos,
    año+mes simplificado (ej. `2607` para julio de 2026). No se adivina del
    nombre de ningún archivo — es el dato con el que el programa ubica el

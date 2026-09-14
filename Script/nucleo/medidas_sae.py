@@ -22,7 +22,8 @@ from .utiles import ErrorEntrada
 #
 # La logica vive en Script/Medidas/ (un modulo por cada uno de los
 # scripts sueltos que habia antes), incluida la clave de las dos APIs
-# (Script/Medidas/comun.py, USER_KEY). Aca queda lo que es del caso:
+# (Script/config.py, seccion "claves_api" de config.json). Aca queda
+# lo que es del caso:
 # resolver rutas, pegar las dos fuentes -las dos hojas del Excel de
 # homologacion- y escribir el Excel.
 #
@@ -79,9 +80,9 @@ def generar_medidas_sae(
     El paso 4 es opcional: si la hoja no existe o esta vacia, se
     escribe solo lo que viene del paso 3.
 
-    La clave de las dos APIs sale de USER_KEY, en
-    Script/Medidas/comun.py (a pedido del usuario vive en el codigo,
-    igual que en los scripts originales).
+    Las dos claves de las APIs (son distintas) salen de la seccion
+    "claves_api" de config.json, que no se versiona -- ver
+    Script/config.py y config.ejemplo.json.
     """
 
     def avanzar(valor):

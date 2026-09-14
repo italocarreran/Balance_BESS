@@ -2871,3 +2871,54 @@ antes y que los 20 `nucleo.<algo>` de `Balance_BESS.py` resuelvan.
 en un orquestador, pero si crece más conviene partirlo en
 `proceso_consolidado.py` / `proceso_pagos.py`, que son dos caminos
 independientes que hoy solo comparten el archivo.
+
+---
+
+## Sesión 2026-09-14 (cuarta pasada) — las claves de las APIs salen del código
+
+Pedido del usuario: las dos `user_key` (PRMTE y Generación real) van a
+`config.json`, en una sección que **no depende del usuario** — el valor es el
+mismo para todo el equipo.
+
+**Lo que estaba mal antes** (y que este cambio corrige de paso): había **una
+sola** constante `USER_KEY` en `Script/Medidas/comun.py`. La sesión que la
+unificó lo hizo creyendo que las dos APIs pedían la misma clave ("antes estaba
+repetida en dos archivos, y con valores distintos" — los valores distintos eran
+lo correcto, no el error). El usuario confirmó ahora que **son distintas**:
+`prmte` es la de `medidas.coordinador.cl` y `generacion_real` la de
+`operacion.coordinador.cl`.
+
+**Cómo quedó.** `Script/config.py` es ahora el único módulo que toca
+`config.json`. El archivo tiene dos clases de sección:
+
+- `"<hostname>_<usuario>"` — carpeta base y AAMM recordados, por PC/usuario.
+- `"claves_api"` — compartida, con las dos claves. Nombre reservado.
+
+`Balance_BESS.py` dejó de leer y escribir el JSON a mano: sus `leer_config()` /
+`guardar_config()` ahora delegan en `config.seccion()` /
+`config.actualizar_seccion()`, que mezclan sin pisar el resto del archivo. O
+sea: guardar la carpeta base **no puede** borrar las claves (hay una prueba que
+lo fija).
+
+`comun.leer_clave_api(cual)` traduce `ErrorConfig` a `ErrorMedidas`, que es lo
+que el resto de Medidas ya sabe convertir en `ErrorEntrada` para la ventana.
+La clave se lee **en el momento de usarla**, no al importar: así se puede
+completar el `config.json` con el programa ya abierto.
+
+**El error cuando falta** trae la ruta absoluta del archivo y el JSON exacto
+para pegar, y aclara cuál clave es de cuál API. Está fijado en las pruebas
+(`tests/test_config_claves.py`, 7 casos: cada clave por separado, archivo
+ausente, JSON roto, el `PEGAR_AQUI_LA_CLAVE` del ejemplo sin reemplazar, una
+puesta y la otra no, y el que las secciones no se pisan entre sí).
+
+**`config.ejemplo.json`** se versiona (no tiene ninguna clave adentro) y es lo
+que hay que copiar como `config.json`. `config.json` sigue en `.gitignore`.
+
+**Consecuencia buscada:** el repositorio ya no tiene ni un lugar donde poner
+credenciales. La nota de METODOLOGIA §5 que decía "queda versionada, así que el
+repositorio no puede volverse público sin rotarla antes" quedó sin efecto. Se
+revisó el historial completo (`git log --all -p` buscando cualquier
+`user_key`/`api_key` con un literal de 6+ caracteres): **nunca se commiteó una
+clave real** — `USER_KEY` siempre estuvo en `""`. Así que no hay nada que rotar
+por este motivo. Si en algún momento se hubiera commiteado una, sacarla del
+código no la saca del historial y habría que rotarla igual.

@@ -31,7 +31,7 @@ import time
 
 import pandas as pd
 
-from .comun import ErrorMedidas, USER_KEY
+from .comun import ErrorMedidas, leer_clave_api, CLAVE_GENERACION_REAL
 
 
 URL_OPREAL = "https://operacion.api.coordinador.cl/opreal-medidas/v1/bydate"
@@ -82,13 +82,7 @@ def descargar_mes(
             "requirements.txt)."
         ) from error
 
-    user_key = user_key or USER_KEY
-
-    if not user_key:
-        raise ErrorMedidas(
-            "Falta la clave de la API del Coordinador: cargala en "
-            "USER_KEY, en Script/Medidas/comun.py."
-        )
+    user_key = user_key or leer_clave_api(CLAVE_GENERACION_REAL)
 
     sesion = requests.Session()
     partes = []

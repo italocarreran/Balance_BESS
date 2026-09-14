@@ -10,8 +10,11 @@ de.
 
 ```
 Balance_BESS.py            <- la ventana (lo unico que se ejecuta)
+config.ejemplo.json        <- el formato de "claves_api" para copiar
+config.json                <- local, NO se versiona (claves + por usuario)
 Script/
     __init__.py
+    config.py              <- lo unico que lee y escribe config.json
     nucleo/                <- el calculo del caso, una etapa por modulo
         __init__.py            <- la fachada: nucleo.<lo que sea>
         externos.py            <- los paquetes hermanos, en un solo lugar
@@ -144,6 +147,42 @@ importable como cualquier módulo.
   la ventana usa para decidir qué botón le cuelga (`_boton_de_fila`): así
   `nucleo/` no sabe nada de botones.
 - **Depende de:** el paquete `Script/` (mismo directorio).
+
+---
+
+## `Script/config.py`
+
+- **Qué hace:** es el único lugar del proyecto que lee y escribe
+  `config.json` (que vive en la raíz, junto a `Balance_BESS.py`, y no se
+  versiona).
+
+- **Dos clases de sección, y la diferencia importa:**
+  - `"<hostname>_<usuario>"` — lo de cada PC/usuario: la última carpeta base
+    y el AAMM. Las escribe la ventana sola.
+  - `"claves_api"` — **compartida**: las dos claves de las APIs del
+    Coordinador. Nombre reservado (una sección de usuario nunca se llama
+    así). El valor es el mismo para todo el equipo, pero como el archivo es
+    local, cada uno lo pega una vez en su copia.
+
+- **Expone:** `leer_todo()`, `escribir_todo()`, `seccion(nombre)`,
+  `actualizar_seccion(nombre, datos)` — que mezcla sin pisar el resto del
+  archivo — y `clave_api(cual)`, con las constantes `CLAVE_PRMTE` y
+  `CLAVE_GENERACION_REAL`.
+
+- **`clave_api()`** levanta `ErrorConfig` con la ruta del archivo y el JSON
+  exacto para pegar cuando la clave falta, cuando el archivo no existe, o
+  cuando quedó el `PEGAR_AQUI_LA_CLAVE` del ejemplo sin reemplazar. Se llama
+  **en el momento de usar la clave**, no al importar: así se puede completar
+  el `config.json` con el programa ya abierto.
+
+- **Las dos claves son distintas** (`prmte` → `medidas.coordinador.cl`,
+  `generacion_real` → `operacion.coordinador.cl`). Antes había una sola
+  constante `USER_KEY` en el código, lo que además de dejarla versionada
+  forzaba a que las dos APIs compartieran clave.
+
+- **Quién lo usa:** `Balance_BESS.py` (su propia sección de usuario) y
+  `Script/Medidas/comun.py` (`leer_clave_api()`, que traduce `ErrorConfig` a
+  `ErrorMedidas` para que la ventana lo muestre igual que el resto).
 
 ---
 

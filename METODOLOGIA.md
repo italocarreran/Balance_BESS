@@ -80,10 +80,11 @@ con grep o por su encabezado (p. ej. "9.4" para la columna `Ventana`).
 - `Script/Medidas/*.py` — módulos de la etapa Medidas.
   Los nombres de archivo de los módulos usan guiones bajos, no espacios,
   para que sean importables.
-- `config.json` — configuración/estado por PC/usuario (última carpeta base
-  elegida). No se versiona (ver `.gitignore`). Vive junto a `Balance_BESS.py`
-  únicamente porque así lo resuelve `Path(__file__).parent` en el propio
-  script; el resto del código nunca debe depender de esa ruta.
+- `Script/config.py` — el único módulo que lee y escribe `config.json`.
+- `config.json` — estado por PC/usuario (última carpeta base elegida, AAMM) y
+  la sección compartida `claves_api`. No se versiona (ver `.gitignore`).
+- `config.ejemplo.json` — el formato de `claves_api` para copiar y pegar.
+  Este sí se versiona; no tiene ninguna clave real adentro.
 - `docs/Plan_Traspaso_Python_Balance_BESS.md` — documento de dominio.
 
 No hay hoy scripts satélite. Si `Balance_BESS.py` se mueve de carpeta,
@@ -187,24 +188,33 @@ resto del proceso es puro pandas y sí se puede verificar.
   función de `nucleo` en un hilo aparte reportando al log/barra de la
   ventana (helper `lanzar()`), y mientras algo corre quedan todos
   deshabilitados.
-- **Credenciales:** la `user_key` de las APIs del Coordinador vive en el
-  código (`Script/Medidas/comun.py`, constante `USER_KEY`), por decisión
-  explícita del usuario — los scripts originales ya la traían escrita
-  adentro. Lo que sí se exige es que haya **una sola**, en esa constante, y
-  no una copia por script: antes estaba repetida en dos archivos y con
-  valores distintos. Consecuencia asumida: queda versionada, así que el
-  repositorio no puede volverse público sin rotarla antes.
-- **Persistencia de configuración:** `config.json` junto al `.py`, con una
-  clave por PC/usuario (`get_usuario()` = `hostname_usuario`), para que
+- **Credenciales:** las `user_key` de las APIs del Coordinador son **dos y
+  distintas** (`prmte` para `medidas.coordinador.cl`, `generacion_real` para
+  `operacion.coordinador.cl`) y **no viven en el código**: salen de la
+  sección `claves_api` de `config.json`, que no se versiona. Se leen en el
+  momento de usarlas (`Script/config.py` → `clave_api()`), no al importar,
+  así se puede completar el archivo con el programa ya abierto. El valor no
+  depende de quién corra el programa — es el mismo para todo el equipo —,
+  pero como el archivo es local, cada uno lo pega una vez en su copia; el
+  formato está en `config.ejemplo.json` y el error de `clave_api()` lo
+  repite entero. (Antes estaban escritas en el código, en una sola
+  constante `USER_KEY`; eso las dejaba versionadas y, al ser una sola,
+  forzaba a que las dos APIs compartieran clave.)
+- **Persistencia de configuración:** `config.json` junto al `.py`. Tiene
+  dos clases de secciones: una **por PC/usuario** (`get_usuario()` =
+  `hostname_usuario`, con la carpeta base y el AAMM recordados), para que
   varias personas puedan compartir la misma copia del script sin pisarse la
-  carpeta recordada. Si el archivo existe pero no se puede leer/parsear, se
+  carpeta recordada, y la sección **compartida** `claves_api` (nombre
+  reservado), que es igual para todos. Todo el acceso al archivo pasa por
+  `Script/config.py`; `Balance_BESS.py` solo le pide su propia sección, de
+  modo que guardar la carpeta base nunca puede pisar las claves. Si el archivo existe pero no se puede leer/parsear, se
   ignora en silencio y se sigue — es preferible perder el ajuste recordado
   a que el programa no abra. La escritura reescribe el `config.json`
   completo (no es atómica todavía; ver §7).
 - **Rutas de un caso:** nunca rutas absolutas ni dependientes de
   `Path(__file__).parent` para los archivos de un caso. Todo se deriva de la
   carpeta base vía `resolver_rutas()` en `nucleo/rutas.py`. `Path(__file__).parent`
-  se usa únicamente para `CONFIG_PATH` en `Balance_BESS.py`.
+  se usa únicamente para ubicar `config.json` (en `Script/config.py`).
 - **Lectura de Excel:** con `pandas` (`read_excel`/`ExcelFile`) y escritura
   con `openpyxl` como engine. El SoC se extrae por **detección dinámica de
   bloques por encabezados** (`detectar_fila_nombres` → `detectar_bloques` →
@@ -337,7 +347,7 @@ causa raíz deje de existir en el código.
 
 | Trampa | Regla |
 |---|---|
-| `guardar_config()` reescribe `config.json` entero sin escritura atómica. Un corte a mitad de escritura puede dejar el archivo corrupto. | Al tocar esa función, evaluar escritura atómica (escribir a un temporal y `rename`). Mientras tanto, `leer_config()` ya tolera un JSON corrupto devolviendo `{}`, así que el peor caso es perder la carpeta recordada, no romper el programa. |
+| `Script/config.py` reescribe `config.json` entero sin escritura atómica. Un corte a mitad de escritura puede dejar el archivo corrupto. | Al tocar esa función, evaluar escritura atómica (escribir a un temporal y `rename`). Mientras tanto, `leer_config()` ya tolera un JSON corrupto devolviendo `{}`, así que el peor caso es perder la carpeta recordada, no romper el programa. |
 | Si `Medidas/` tiene más de un archivo `SOC_AAMM.xlsx`, `buscar_soc()` lanza `ErrorEntrada` a propósito — no elige el más reciente. | No "arreglar" esto para que elija automáticamente por fecha de modificación: es una decisión deliberada del plan (§3.4) para no tomar en silencio el mes equivocado. |
 | Las columnas `K, M, P, Q, R, S, T` de `Medidores` están en `COLUMNAS_PENDIENTES` como `pd.NA` porque su lógica exacta o su fuente (Ofertas SSCC) todavía no está definida. | No inventar una fórmula para completarlas "para que quede bonito". Cerrar primero la regla exacta en `docs/Plan_Traspaso_Python_Balance_BESS.md` §9, con el humano que conoce la planilla 11, y recién ahí implementar. |
 | `calcular_ventana()` reinicia el contador por **bloque de filas consecutivas con la misma clave**, no por `groupby` sobre toda la central. | Si los datos de entrada no vienen ordenados por `clave` e `intervalo` antes de llamar a esta función, el resultado no coincide con la fórmula de Excel. `construir_medidores()` ya ordena con `sort_values(["clave", "intervalo"])` antes de calcularla; no quitar ese paso ni reordenar después. |

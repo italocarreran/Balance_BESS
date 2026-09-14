@@ -15,20 +15,44 @@ class ErrorMedidas(Exception):
 
 
 # ============================================================
-# CLAVE DE LA API DEL COORDINADOR
+# CLAVES DE LAS APIS DEL COORDINADOR
 #
-# Las dos APIs que usa Medidas (medidas.* y operacion.*) piden la
-# misma user_key. Va aca, en el codigo, a pedido explicito del
-# usuario: los scripts originales la traian escrita adentro y asi se
-# queda. Un solo lugar para las dos (antes estaba repetida en dos
-# archivos, y con valores distintos).
+# Son DOS y son distintas entre si: la de medidas.coordinador.cl
+# (PRMTE) no sirve para operacion.coordinador.cl (Gen real) ni al
+# reves. Antes vivian escritas en el codigo; ahora salen de la seccion
+# "claves_api" de config.json, que no se versiona.
 #
-# Ojo con dos cosas:
-#   - queda versionada: quien tenga acceso al repositorio la tiene;
-#   - si el Coordinador la cambia, se cambia aca y nada mas.
+# El valor no depende de quien corra el programa -es el mismo para
+# todo el equipo-, pero como config.json es local, cada uno lo pega
+# una vez en su copia. El formato para pegar esta en
+# config.ejemplo.json, y el error de Script/config.py lo repite
+# entero cuando falta.
+#
+# Se leen en el momento de usarlas, no al importar: asi se puede
+# completar el config con el programa abierto.
 # ============================================================
 
-USER_KEY = ""
+try:
+    from ..config import (
+        ErrorConfig, clave_api, CLAVE_PRMTE, CLAVE_GENERACION_REAL,
+    )
+except ImportError:  # pragma: no cover - depende de como se importe
+    from config import (
+        ErrorConfig, clave_api, CLAVE_PRMTE, CLAVE_GENERACION_REAL,
+    )
+
+
+def leer_clave_api(cual):
+    """
+    clave_api(), pero el error sale como ErrorMedidas: el resto de
+    Medidas ya sabe traducir ese a ErrorEntrada, y la ventana lo
+    muestra tal cual.
+    """
+
+    try:
+        return clave_api(cual)
+    except ErrorConfig as error:
+        raise ErrorMedidas(str(error)) from error
 
 
 EXTENSIONES_EXCEL = (".xlsx", ".xlsm", ".xlsb", ".xls")
@@ -67,3 +91,10 @@ def columna_que_contenga(df, *fragmentos):
             return columna
 
     return None
+
+
+__all__ = [
+    "ErrorMedidas", "leer_clave_api", "CLAVE_PRMTE",
+    "CLAVE_GENERACION_REAL", "EXTENSIONES_EXCEL", "normalizar",
+    "columna_que_contenga",
+]
