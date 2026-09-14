@@ -9,7 +9,7 @@ from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_MEDIDAS_SAE, COLUMNAS_AI,
     HOJA_DICCIONARIO, HOJA_MEDIDAS_SAE, HOJA_RESUMEN_BESS,
 )
-from .utiles import ErrorEntrada, _tiene_valor, normalizar
+from .utiles import ErrorEntrada, _texto_seguro, _tiene_valor, normalizar
 
 
 # ============================================================
@@ -167,6 +167,156 @@ def _bloques_columnas_diccionario(diccionario):
     return bloques
 
 
+# ============================================================
+# HOJA "Diccionario": los dos formatos
+# ============================================================
+#
+# FORMATO VIEJO (el que trae Centrales.xlsx hasta hoy): varias tablas
+# de equivalencia independientes puestas lado a lado, separadas por
+# columnas completamente vacias, con el titulo de cada una en la
+# primera fila y sin titulo en el resto de sus columnas:
+#
+#     A: FD           E: Subastas              G: ofertas
+#     -----------     ---------------------    --------------
+#     SAE-TOCOPILLA   SAE-TOCOPILLA            (vacio)
+#     SAE TOCOPILLA   BAT_TOCOPILLA
+#
+# Ese formato tiene dos agujeros que el usuario ya sufrio:
+#   - no hay lugar para la nomenclatura de FMA CPF (el bloque
+#     "FMA CPF" nunca existio), asi que el FMA de las filas CPF se
+#     buscaba con la Configuración tal cual y no encontraba nada; y
+#   - el bloque "FD" arranca en la columna del nombre Balance_BESS,
+#     asi que homologar la Configuración de Subastas (que para
+#     Tocopilla es BAT_TOCOPILLA) contra el nombre del archivo de
+#     desempeño tampoco encontraba.
+#
+# FORMATO NUEVO (propuesta del usuario, Centrales_Propuesta_de_mejora):
+# UNA sola tabla, con una fila de encabezados que nombra cada columna
+# y una fila por central:
+#
+#     Balance_BESS   FD                 Subastas        Ofertas   FMA_CPF
+#     ------------   ----------------   -------------   -------   -----------------
+#     SAE-TOCOPILLA  SAE TOCOPILLA      BAT_TOCOPILLA             Tocopilla - BESS
+#
+# La primera columna es el nombre canonico (el que usa el resto del
+# programa) y cada una de las demas dice como se llama esa misma
+# central en cada origen.
+#
+# Se aceptan los dos: si la hoja tiene la fila de encabezados del
+# formato nuevo se usa esa, y si no se cae al recorrido por bloques de
+# siempre. Ninguna de las dos lecturas cambia de resultado para las
+# centrales que ya funcionaban.
+
+ROL_BALANCE_BESS = "balance_bess"
+ROL_FD = "fd"
+ROL_SUBASTAS = "subastas"
+ROL_OFERTAS = "ofertas"
+ROL_FMA_CPF = "fma_cpf"
+
+# Encabezado (normalizado, con "_" tratado como espacio) -> rol.
+TITULOS_DICCIONARIO = {
+    "balance bess": ROL_BALANCE_BESS,
+    "fd": ROL_FD,
+    "subastas": ROL_SUBASTAS,
+    "ofertas": ROL_OFERTAS,
+    "fma cpf": ROL_FMA_CPF,
+}
+
+# Cuantas filas de arriba se miran buscando la fila de encabezados: el
+# archivo real empieza con una fila vacia, asi que nunca es la 0 fija.
+FILAS_ENCABEZADO_DICCIONARIO = 10
+
+
+def _clave_titulo(valor):
+    """'FMA_CPF' -> 'fma cpf' (para comparar encabezados)."""
+
+    return normalizar(valor).replace("_", " ")
+
+
+def encabezado_diccionario(
+    diccionario, filas_a_revisar=FILAS_ENCABEZADO_DICCIONARIO
+):
+    """
+    Ubica la fila de encabezados del FORMATO NUEVO de la hoja
+    Diccionario y devuelve (indice_de_esa_fila, {rol: indice_columna}).
+
+    Devuelve (None, {}) si la hoja esta en el formato viejo de bloques:
+    ahi no hay ninguna fila que nombre la columna "Balance_BESS", que
+    es justamente lo que distingue un formato del otro.
+    """
+
+    limite = min(filas_a_revisar, len(diccionario))
+
+    for indice in range(limite):
+
+        columnas = {}
+
+        for col in range(diccionario.shape[1]):
+            rol = TITULOS_DICCIONARIO.get(
+                _clave_titulo(diccionario.iloc[indice, col])
+            )
+            if rol is not None and rol not in columnas:
+                columnas[rol] = col
+
+        # Hace falta la columna canonica y al menos un origen: una fila
+        # suelta que diga "FD" (el titulo de bloque del formato viejo)
+        # no alcanza para confundirla con un encabezado.
+        if ROL_BALANCE_BESS in columnas and len(columnas) >= 2:
+            return indice, columnas
+
+    return None, {}
+
+
+def filas_diccionario(diccionario):
+    """
+    Las filas de DATOS de la hoja Diccionario en el formato nuevo, como
+    lista de dicts {rol: texto}. Lista vacia si la hoja esta en el
+    formato viejo.
+    """
+
+    fila_encabezado, columnas = encabezado_diccionario(diccionario)
+
+    if fila_encabezado is None:
+        return []
+
+    filas = []
+
+    for indice in range(fila_encabezado + 1, len(diccionario)):
+
+        fila = {
+            rol: _texto_seguro(diccionario.iloc[indice, col])
+            for rol, col in columnas.items()
+        }
+
+        if not _tiene_valor(fila.get(ROL_BALANCE_BESS)):
+            continue
+
+        filas.append(fila)
+
+    return filas
+
+
+def mapa_diccionario(diccionario, rol_clave, rol_valor):
+    """
+    {nombre normalizado de rol_clave -> texto de rol_valor} en el
+    formato nuevo. Gana la primera aparicion, igual que el resto de las
+    lecturas de esta hoja. {} si la hoja esta en el formato viejo o si
+    alguno de los dos roles no esta.
+    """
+
+    mapa = {}
+
+    for fila in filas_diccionario(diccionario):
+
+        clave = normalizar(fila.get(rol_clave))
+        valor = fila.get(rol_valor)
+
+        if clave and _tiene_valor(valor) and clave not in mapa:
+            mapa[clave] = valor
+
+    return mapa
+
+
 def construir_homologacion(diccionario):
     """
     Arma un mapa nombre_origen -> nombre_canonico a partir de la
@@ -196,6 +346,26 @@ def construir_homologacion(diccionario):
     """
 
     mapa = {}
+
+    # FORMATO NUEVO: cada fila ya dice cual es el nombre canonico (la
+    # columna Balance_BESS), asi que no hay que adivinarlo con "el
+    # primer valor no vacio de la fila", y la fila de encabezados no se
+    # confunde con una central (era el riesgo de leerla como bloque:
+    # "Balance_BESS", "FD", "Subastas"... habrian quedado registrados
+    # como sinonimos entre si).
+    filas = filas_diccionario(diccionario)
+
+    if filas:
+
+        for fila in filas:
+
+            canonico = _texto_seguro(fila.get(ROL_BALANCE_BESS))
+
+            for valor in fila.values():
+                if _tiene_valor(valor):
+                    mapa.setdefault(normalizar(valor), canonico)
+
+        return mapa
 
     for columnas_bloque in _bloques_columnas_diccionario(diccionario):
 

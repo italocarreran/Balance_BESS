@@ -11,6 +11,9 @@ import pandas as pd
 from .alertas import ALTA, Alerta
 
 from .ecostos import GRUPOS_CALCULO_E_COSTOS, NOMBRES_CALCULO_E_COSTOS
+from .ofertas_sscc import (
+    HOJA_OFERTAS_SSCC, TITULO_OFERTAS_POR_DIA, TITULO_RESUMEN_VENTANA,
+)
 from .parametros import (
     HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_PRORRATA_RETIROS,
     HOJA_RESUMEN,
@@ -292,7 +295,6 @@ def escribir_pagos_bess(
     return ruta_salida
 
 
-HOJA_OFERTAS_SSCC = "Ofertas SSCC"
 
 
 def _escribir_tabla_con_titulo(
@@ -488,7 +490,7 @@ def escribir_salida(
                     writer,
                     HOJA_OFERTAS_SSCC,
                     df_wxy,
-                    "Ofertas SSCC por dia (equivalente a Medidores!W:Y)",
+                    TITULO_OFERTAS_POR_DIA,
                     columna_inicio=columna,
                 )
 
@@ -497,7 +499,7 @@ def escribir_salida(
                     writer,
                     HOJA_OFERTAS_SSCC,
                     df_resumen_ventana,
-                    "Resumen ventana oferta (equivalente a Medidores!AB:AE)",
+                    TITULO_RESUMEN_VENTANA,
                     columna_inicio=columna,
                 )
         else:

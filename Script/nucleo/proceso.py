@@ -16,6 +16,7 @@ from .diccionarios import (
 )
 from .ecostos import (
     completar_calculo_e_costos_grupos, construir_calculo_e_costos,
+    renombrar_calculo_e_costos,
 )
 from .manifiesto import construir_manifiesto
 from .ecostos_prorratas import construir_dic_mapeo_diccionario
@@ -25,12 +26,15 @@ from .fma import (
     TITULO_BLOQUE_FD, TITULO_BLOQUE_FMA_CPF, cargar_tablas_fma,
     construir_dic_bloque_diccionario,
 )
-from .hojas_entrada import construir_fd, construir_subastas, leer_cmg
+from .hojas_entrada import construir_fd, leer_cmg, leer_fd_consolidado
 from .lectura import (
     construir_homologacion, leer_centrales, leer_medidas_sae,
 )
-from .medidores import construir_medidores
-from .ofertas_sscc import construir_resumen_ventana_oferta
+from .medidores import (
+    completar_ofertas_en_medidores, construir_medidores,
+    construir_ofertas_sscc,
+)
+from .ofertas_sscc import leer_ofertas_sscc_consolidado
 from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, HOJA_DICCIONARIO,
@@ -48,8 +52,7 @@ from .re545_componentes import calcular_componentes_re545
 from .re545_resumen import construir_resumen_ventanas_re545
 from .rutas import (
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
-    buscar_archivo_subastas, buscar_soc, periodo_desde_aamm,
-    resolver_rutas, validar_aamm,
+    buscar_soc, periodo_desde_aamm, resolver_rutas, validar_aamm,
 )
 from .soc import extraer_soc
 from .subastas_accdb import (
@@ -71,11 +74,15 @@ def generar_consolidado(
 
     secciones_activas: iterable de ids de SECCIONES_CONSOLIDADO
     ("medidores", "ofertas_sscc", "cmg", "fd", "subastas") a
-    recalcular esta vez. "medidores" y "ofertas_sscc" comparten una
-    unica lectura/calculo (construir_medidores() arma las dos hojas
-    de una, porque Medidores!R:S:T depende de Ofertas SSCC) --
-    actualizar cualquiera de las dos dispara esa lectura; lo que cada
-    id decide por separado es solo que hoja se reescribe.
+    recalcular esta vez.
+
+    La dependencia entre "medidores" y "ofertas_sscc" se dio vuelta a
+    pedido del usuario: ahora es "Ofertas SSCC" la que necesita
+    Medidores (de ahi salen las centrales y las ventanas), y no al
+    reves. Consecuencia practica: actualizar SOLO "Medidores" no abre
+    el archivo *OfertasSSCC* ni lo exige; actualizar "Ofertas SSCC" si
+    recalcula Medidores en memoria, pero no lo reescribe si no se
+    pidio.
     """
 
     def avanzar(valor):
@@ -110,7 +117,9 @@ def generar_consolidado(
 
     avanzar(5)
 
-    if "medidores" in secciones_activas or "ofertas_sscc" in secciones_activas:
+    quiere_ofertas = "ofertas_sscc" in secciones_activas
+
+    if "medidores" in secciones_activas or quiere_ofertas:
 
         aamm_val = validar_aamm(aamm)
 
@@ -124,12 +133,18 @@ def generar_consolidado(
                 f"No se encontro {rutas['centrales']}"
             )
 
-        archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
-        if not archivo_ofertas:
-            raise ErrorEntrada(
-                f"No se encontro ningun archivo *OfertasSSCC* en "
-                f"{rutas['ofertas_dir']}"
-            )
+        # El archivo de ofertas SOLO hace falta para la hoja "Ofertas
+        # SSCC": Medidores ya no depende de el (pedido del usuario de
+        # independizar una hoja de la otra).
+        archivo_ofertas = None
+
+        if quiere_ofertas:
+            archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
+            if not archivo_ofertas:
+                raise ErrorEntrada(
+                    f"No se encontro ningun archivo *OfertasSSCC* en "
+                    f"{rutas['ofertas_dir']}"
+                )
 
         archivo_soc = buscar_soc(rutas["medidas_dir"], aamm_val)
         anio, mes = periodo_desde_aamm(aamm_val)
@@ -161,20 +176,19 @@ def generar_consolidado(
         avanzar(50)
 
         registrar("Construyendo Medidores...")
-        (
-            df_medidores,
-            avisos,
-            df_wxy,
-            df_resumen_ventana,
-        ) = construir_medidores(
-            df_sae,
-            df_soc,
-            anio,
-            mes,
-            archivo_ofertas,
-            diccionario,
-            registrar=registrar,
+        df_medidores, avisos = construir_medidores(
+            df_sae, df_soc, mes, registrar=registrar
         )
+
+        if quiere_ofertas:
+            registrar("Construyendo Ofertas SSCC...")
+            df_wxy, df_resumen_ventana, avisos_ofertas = (
+                construir_ofertas_sscc(
+                    df_medidores, archivo_ofertas, diccionario, anio, mes,
+                    registrar=registrar,
+                )
+            )
+            avisos.extend(avisos_ofertas)
 
         for aviso in avisos:
             registrar(f"  [AVISO] {aviso}")
@@ -272,11 +286,13 @@ def generar_consolidado(
 
             if not dic_cpf:
                 registrar(
-                    f"  [AVISO] {ARCHIVO_CENTRALES} no tiene el bloque "
-                    f"'{TITULO_BLOQUE_FMA_CPF}' en la hoja "
-                    f"{HOJA_DICCIONARIO} (Configuración -> central como "
-                    f"la nombra fma_cpf): el FMA de CPF se busca con el "
-                    f"nombre tal cual."
+                    f"  [AVISO] {ARCHIVO_CENTRALES} no tiene la columna "
+                    f"'FMA_CPF' en la hoja {HOJA_DICCIONARIO} "
+                    f"(Configuración -> central como la nombra fma_cpf): "
+                    f"el FMA de las filas CPF se busca con el nombre tal "
+                    f"cual y va a quedar en 0. Es el formato de "
+                    f"Diccionario de una sola tabla, con los encabezados "
+                    f"Balance_BESS | FD | Subastas | Ofertas | FMA_CPF."
                 )
 
             registrar(
@@ -295,29 +311,15 @@ def generar_consolidado(
             )
 
         else:
-            # Respaldo: los casos que todavia no tienen los Access
-            # copiados siguen andando con la planilla 3 de siempre.
-            archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
-
-            if not archivo_subastas:
-                raise ErrorEntrada(
-                    f"No hay de donde sacar las subastas del periodo "
-                    f"{aamm_val}:\n\n"
-                    f"  - {rutas['db_subastas_dir']} no tiene ningun "
-                    f"Access del periodo (traelos con el boton 'Traer "
-                    f"subastas'), y\n"
-                    f"  - tampoco hay un archivo "
-                    f"3_REMUNERACIÓN_SUBASTAS_E_ID_* de respaldo en "
-                    f"{rutas['subastas_dir']}."
-                )
-
-            registrar(
-                f"  [AVISO] no hay Access del periodo en "
-                f"{CARPETA_DB_SUBASTAS}/: se usa el respaldo "
-                f"{archivo_subastas.name} (planilla 3)."
-            )
-            df_subastas = construir_subastas(
-                archivo_subastas, registrar=registrar
+            # La planilla 3 (3_REMUNERACIÓN_SUBASTAS_E_ID_*) dejo de
+            # ser un respaldo: el usuario confirmo que ya no se usa, y
+            # tampoco era el origen (se arma pegando lo que sale de
+            # estos mismos Access). Sin Access no hay subastas.
+            raise ErrorEntrada(
+                f"No hay de donde sacar las subastas del periodo "
+                f"{aamm_val}: {rutas['db_subastas_dir']} no tiene "
+                f"ningun Access del periodo. Traelos con el boton "
+                f"'Traer subastas'."
             )
 
     avanzar(92)
@@ -426,6 +428,16 @@ def generar_pagos_bess(
 
     registrar(f"  filas: {len(df_medidores):,}")
 
+    # Las tres columnas que salen de Ofertas SSCC (R, S, T) ya no
+    # viven en la hoja Medidores: se reconstruyen aca a partir de las
+    # dos tablas de la hoja "Ofertas SSCC" del consolidado. T es la que
+    # decide, fila por fila, si la energia va a "Calculo E Costos" o a
+    # "Calculo RE545", asi que sin esto no hay calculo posible.
+    registrar(f"Leyendo hoja 'Ofertas SSCC' de {rutas['salida'].name}...")
+    df_wxy, df_resumen_ventana = leer_ofertas_sscc_consolidado(
+        rutas["salida"], registrar=registrar
+    )
+
     # La hoja Medidores de la que salen los dos calculos tiene que ser
     # de un solo mes: si trae dos, el libro quedo mezclado entre
     # corridas de periodos distintos y todo lo que siga paga mal.
@@ -451,13 +463,17 @@ def generar_pagos_bess(
 
     avanzar(10)
 
-    archivo_sscc = None
-
     if not rutas["centrales"].is_file():
         raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
 
     registrar("Leyendo Centrales.xlsx...")
     resumen, diccionario = leer_centrales(rutas["centrales"])
+
+    df_medidores, _ = completar_ofertas_en_medidores(
+        df_medidores, df_wxy, df_resumen_ventana, diccionario,
+        registrar=registrar,
+    )
+
     mapa_barra = construir_mapa_barra(resumen)
     dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
 
@@ -505,10 +521,11 @@ def generar_pagos_bess(
     df_pagos_suministrador = None
     df_resumen = None
 
-    # La version de RE545 con los nombres internos de columna. La que
-    # se escribe (df_re545) ya paso por renombrar_calculo_re545(), y
-    # ahi "Energia_Positiva" se llama como en el Excel: la
-    # conciliacion tiene que mirar esta, no aquella.
+    # Las dos hojas, con los nombres INTERNOS de columna. Las que se
+    # escriben (df_ecostos/df_re545) ya pasaron por su renombrar_*(), y
+    # ahi "Energia_Positiva" se llama "Descarga kWh": la conciliacion
+    # tiene que mirar estas, no aquellas.
+    df_ecostos_base = None
     df_re545_base = None
 
     if quiere_ecostos:
@@ -522,18 +539,17 @@ def generar_pagos_bess(
         )
         avanzar(50)
 
-        archivo_sscc = buscar_archivo_sscc_desempeno(
-            rutas["sscc_desempeno_dir"]
+        # AM:AR salen de la hoja 'FD' del consolidado, no de releer el
+        # SSCC_Desempeño_*: el consolidado es la foto de las entradas
+        # con la que se calcula todo (igual que 'Medidores' y
+        # 'Subastas'). Si la hoja FD esta vieja, se regenera con su
+        # propio boton 'Actualizar'.
+        registrar(
+            f"Leyendo la hoja 'FD' de {rutas['salida'].name}..."
         )
-        if not archivo_sscc:
-            raise ErrorEntrada(
-                f"No se encontro ningun archivo SSCC_Desempeño_* en "
-                f"{rutas['sscc_desempeno_dir']} (hace falta para AM:AR "
-                f"de Calculo E Costos)."
-            )
-
-        registrar(f"Leyendo {archivo_sscc.name}...")
-        df_fd_csf, df_fd_cpf = construir_fd(archivo_sscc, registrar=registrar)
+        df_fd_csf, df_fd_cpf = leer_fd_consolidado(
+            rutas["salida"], registrar=registrar
+        )
         avanzar(60)
 
         registrar(
@@ -541,11 +557,12 @@ def generar_pagos_bess(
             "AF, AG, AH, AI, AJ, AK, AL, AM, AN, AO, AP, AQ, AR, AS, AT, "
             "AU, AV, AW, AX, AZ..."
         )
-        df_ecostos = completar_calculo_e_costos_grupos(
+        df_ecostos_base = completar_calculo_e_costos_grupos(
             df_ecostos, df_subastas, dic_factor, umbral_soc_minimo,
             diccionario, df_fd_csf, df_fd_cpf,
             registrar=registrar,
         )
+        df_ecostos = renombrar_calculo_e_costos(df_ecostos_base)
 
     avanzar(70)
 
@@ -564,16 +581,13 @@ def generar_pagos_bess(
         )
 
         # AY ("Oferta Completa") del resumen por central+ventana sale
-        # de la misma tabla que ya alimenta Medidores!T, reconstruida
-        # aca a partir de la hoja Medidores ya generada.
-        resumen_ventana_oferta = construir_resumen_ventana_oferta(
-            df_medidores["clave"],
-            df_medidores["Ventana"],
-            df_medidores["Oferta_Completa_Dia"],
-            registrar=registrar,
-        )
+        # de la misma tabla que alimenta Medidores!T: la tabla
+        # "Resumen ventana oferta" de la hoja 'Ofertas SSCC' del
+        # consolidado, leida arriba. Antes se recalculaba aca a partir
+        # de la hoja Medidores; ahora se usa directamente la generada,
+        # que es el mismo dato y una cuenta menos.
         df_resumen_re545 = construir_resumen_ventanas_re545(
-            df_re545_base, resumen_ventana_oferta, dic_capacidad,
+            df_re545_base, df_resumen_ventana, dic_capacidad,
             registrar=registrar,
         )
 
@@ -649,15 +663,33 @@ def generar_pagos_bess(
     # las dos hojas. Va antes de escribir: si no cuadra, la corrida
     # queda NO APROBADA y eso se escribe en el libro.
     registrar("Conciliando energia Medidores -> E Costos + RE545...")
-    conciliacion = conciliar_energia(
-        df_medidores, df_ecostos, df_re545_base, registrar=registrar
-    )
+    # Y va dentro de un try: si la conciliacion revienta por algo
+    # inesperado, lo unico que se pierde tiene que ser la conciliacion
+    # -no todo lo calculado-. Antes un error aca dejaba la corrida sin
+    # archivo y sin nada que revisar (el KeyError 'Energia_Positiva'
+    # que reporto el usuario).
+    try:
+        conciliacion = conciliar_energia(
+            df_medidores, df_ecostos_base, df_re545_base,
+            registrar=registrar,
+        )
+    except Exception as error:  # noqa: BLE001 - se informa, no se tapa
+        anotar(registrar, Alerta(
+            "TRA-010", CRITICA, "Traspaso",
+            f"No se pudo conciliar la energia: {type(error).__name__}: "
+            f"{error}.",
+            accion="se escribe igual el archivo, sin conciliacion",
+            origen_control="CATALOGO TRA-010",
+        ))
+        conciliacion = {
+            "conciliacion_completa": False,
+            "error": f"{type(error).__name__}: {error}",
+        }
 
     manifiesto = construir_manifiesto([
         ("Consolidado_entradas", rutas["salida"]),
         ("Centrales", rutas["centrales"]),
         ("cmg", rutas["cmg"]),
-        ("SSCC_Desempeño (FD)", archivo_sscc),
         ("Prorrata retiros", archivo_prorrata),
     ])
 

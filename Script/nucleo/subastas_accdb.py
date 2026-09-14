@@ -245,8 +245,9 @@ def construir_subastas_desde_accdb(
     df = df.rename(columns=NOMBRES_SUBASTAS)
     df = _ordenar_subastas_por_hora_mes(df)
 
-    # FD (P) y FMA (Q): se calculan aca, con la hoja ya ordenada, para
-    # que queden alineadas fila a fila con lo que se escribe.
+    # FD (P) y FMA (Q): se calculan aca, con la hoja ya en su orden
+    # definitivo, para que queden alineadas fila a fila con lo que se
+    # escribe.
     if tablas_fd:
         df[NOMBRES_SUBASTAS["P"]] = calcular_fd_subastas(
             df, tablas_fd, dic_unidad_fd=dic_unidad_fd, registrar=registrar
@@ -291,7 +292,7 @@ def construir_subastas_desde_accdb(
     registrar(
         f"  Subastas: {len(df):,} fila(s) desde "
         f"{resumen['archivos_leidos']} Access (filtro Configuración "
-        f"contiene BESS/SAE), ordenadas por Hora_mes."
+        f"contiene BESS/SAE), en el orden del origen."
     )
 
     return df

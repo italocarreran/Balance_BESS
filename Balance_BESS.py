@@ -33,7 +33,6 @@ unico-:
             fma_cft_<AAMM>.xlsx            [Generar]
         Subastas/
             DB subastas/                   [Traer subastas]
-            3_REMUNERACIÓN_SUBASTAS_E_ID_<algo>.xlsx (respaldo)
         Consolidado_entradas.xlsx          [Actualizar todo]
             hoja 'Medidores'               [Actualizar]
             hoja 'Ofertas SSCC'            [Actualizar]

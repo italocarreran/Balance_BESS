@@ -13,6 +13,19 @@ import pandas as pd
 from Script import nucleo
 
 
+def escribir_tabla(writer, titulo, df, columna):
+    """La hoja 'Ofertas SSCC': titulo, encabezado y datos, en columna."""
+
+    pd.DataFrame([[titulo]]).to_excel(
+        writer, sheet_name=nucleo.HOJA_OFERTAS_SSCC, index=False,
+        header=False, startrow=0, startcol=columna,
+    )
+    df.to_excel(
+        writer, sheet_name=nucleo.HOJA_OFERTAS_SSCC, index=False,
+        startrow=1, startcol=columna,
+    )
+
+
 def medidores_de_prueba(energias, ventana_no_completa):
     return pd.DataFrame({
         "Mes": [7] * len(energias),
@@ -227,9 +240,14 @@ class PagosBessEndToEndTest(unittest.TestCase):
             "Ciclos max diarios": [2],
             "Eficiencia": [0.9],
         })
+        # Diccionario en el formato nuevo: una tabla con encabezados.
+        diccionario = pd.DataFrame([
+            ["Balance_BESS", "FD", "Subastas", "Ofertas", "FMA_CPF"],
+            ["SAE UNO", "SAE UNO", "SAE UNO", "SAE UNO", "SAE UNO"],
+        ])
         with pd.ExcelWriter(base / "Auxiliares" / "Centrales.xlsx") as w:
             centrales.to_excel(w, sheet_name="Resumen BESS", index=False)
-            pd.DataFrame({"A": ["SAE UNO"], "B": ["SAE UNO"]}).to_excel(
+            diccionario.to_excel(
                 w, sheet_name="Diccionario", index=False, header=False
             )
 
@@ -249,10 +267,26 @@ class PagosBessEndToEndTest(unittest.TestCase):
             "Ventana": [1] * cuartos,
             "Clave_Dia_HoraMes": [f"1|{i}" for i in range(1, cuartos + 1)],
             "Indicador_SoC": [0] * cuartos,
-            "Oferta_Completa_Dia": [1] * cuartos,
-            "Indicador_Ventana_Oferta": [1] * cuartos,
-            # Mitad a cada hoja: es justo lo que la conciliacion mide.
-            "Ventana_No_Completa": [1, 1, 1, 1, 0, 0, 0, 0],
+        })
+
+        # R, S y T ya no viven en la hoja Medidores: salen de las dos
+        # tablas de la hoja "Ofertas SSCC" (ver
+        # completar_ofertas_en_medidores). La ventana 1 queda
+        # incompleta (T=1 -> E Costos) y la 2 completa (T=0 -> RE545):
+        # es la mitad a cada hoja que mide la conciliacion.
+        medidores["Copia_Ventana"] = [1, 1, 1, 1, 2, 2, 2, 2]
+        medidores["Ventana"] = [1, 1, 1, 1, 2, 2, 2, 2]
+
+        ofertas_por_dia = pd.DataFrame({
+            "Nombre": ["SAE UNO"],
+            "Dia": [1],
+            "Oferta completa": [1],
+        })
+        resumen_ventana = pd.DataFrame({
+            "Central": ["SAE UNO", "SAE UNO"],
+            "Ventana T": [1, 2],
+            "Oferta": [4, 4],
+            "Completa": [0, 1],
         })
 
         # La hoja Subastas con sus 16 columnas reales (B:Q).
@@ -275,9 +309,33 @@ class PagosBessEndToEndTest(unittest.TestCase):
             "FMA": [1.0, 1.0],
         })
 
+        # La hoja FD: dos bloques lado a lado (CSF en A, CPF en Q), de
+        # donde "Calculo E Costos" saca AM:AR. Antes se releia el
+        # SSCC_Desempeño_*; ahora sale del consolidado.
+        fd_csf = pd.DataFrame(
+            [["1SAE UNO", 1, 1, "2026-07-01", 1, "SAE UNO",
+              1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1]]
+        ).set_axis(list(nucleo.NOMBRES_FD_CSF.values()), axis=1)
+        fd_cpf = pd.DataFrame(
+            [["1SAE UNO", 1, 1, "2026-07-01", 1, "SAE UNO",
+              1.0, 1.0, 1.0, 1.0, 1.0, "si", 1.0, 1.0, 1]]
+        ).set_axis(list(nucleo.NOMBRES_FD_CPF.values()), axis=1)
+
         with pd.ExcelWriter(base / "Consolidado_entradas.xlsx") as w:
             medidores.to_excel(w, sheet_name="Medidores", index=False)
             subastas.to_excel(w, sheet_name="Subastas", index=False)
+            fd_csf.to_excel(w, sheet_name="FD", index=False, startcol=0)
+            fd_cpf.to_excel(
+                w, sheet_name="FD", index=False,
+                startcol=nucleo._COLUMNA_Q_INDICE,
+            )
+            escribir_tabla(
+                w, nucleo.TITULO_OFERTAS_POR_DIA, ofertas_por_dia, 0
+            )
+            escribir_tabla(
+                w, nucleo.TITULO_RESUMEN_VENTANA, resumen_ventana,
+                len(ofertas_por_dia.columns) + 2,
+            )
 
         # cmg.xlsx se lee POR POSICION (A:I): D=Barra, F=CMg,
         # H=Cuarto de Hora, I=CMg Promedio (ver construir_dic_cmg).
@@ -306,7 +364,7 @@ class PagosBessEndToEndTest(unittest.TestCase):
                     base, {"re545"}, registrar=lineas.append
                 )
             except nucleo.ErrorEntrada as error:
-                self.skipTest(f"el caso sintetico no alcanza: {error}")
+                self.fail(f"el caso sintetico no corrio: {error}")
 
             salida = base / "Pagos_BESS.xlsx"
             hojas = pd.ExcelFile(salida).sheet_names
@@ -329,3 +387,37 @@ class PagosBessEndToEndTest(unittest.TestCase):
             # y el manifiesto quedo con el hash de las entradas reales
             texto = "\n".join(str(l) for l in lineas)
             self.assertIn("Conciliando energia", texto)
+
+
+    def test_las_dos_hojas_juntas_concilian(self):
+        """
+        Las dos hojas en la misma corrida: es el camino en el que se
+        rompia la conciliacion (df_ecostos llegaba ya renombrado y
+        'Energia_Positiva' se llamaba "Descarga kWh"), y ademas el
+        unico que ejerce el FD leido del consolidado.
+        """
+
+        with tempfile.TemporaryDirectory() as carpeta:
+            base, _ = self.armar_caso(carpeta)
+
+            lineas = []
+            try:
+                nucleo.generar_pagos_bess(
+                    base, {"ecostos", "re545"}, registrar=lineas.append
+                )
+            except nucleo.ErrorEntrada as error:
+                self.fail(f"el caso sintetico no corrio: {error}")
+
+            salida = base / "Pagos_BESS.xlsx"
+            ejecucion = pd.read_excel(salida, sheet_name="Ejecucion")
+            campos = dict(zip(ejecucion["campo"], ejecucion["valor"]))
+
+            self.assertTrue(bool(campos["conciliacion_completa"]))
+            # E Costos (ventana 1, T=1) 5.0-3.0+2.0-1.0 = 3.0
+            self.assertAlmostEqual(float(campos["energia_ecostos"]), 3.0)
+            self.assertAlmostEqual(float(campos["energia_re545"]), 2.5)
+            self.assertAlmostEqual(float(campos["energia_medidores"]), 5.5)
+            self.assertAlmostEqual(float(campos["diferencia"]), 0.0)
+
+            texto = "\n".join(str(l) for l in lineas)
+            self.assertNotIn("Energia_Positiva", texto)

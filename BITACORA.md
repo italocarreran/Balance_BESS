@@ -179,6 +179,31 @@ estado, no un historial.
   script viejo tiene un `cambio_de_hora: -1` en las variables
   mensuales, pero no está claro si es un día o un signo). Mientras
   tanto, el log avisa si algún día del mes no trae 24 horas.
+- Confirmar con el usuario dos rarezas de la propuesta nueva del
+  `Diccionario` (`Centrales_Propuesta_de_mejora.xlsx`), que se cargó tal
+  cual porque es un dato del usuario, no código: (a) `FMA_CPF` está
+  cruzado entre Andes 3 y Andes 4 —`SAE-CRCA-PFV-ANDES3` apunta a
+  "Andes Solar 4 - PFV" y `SAE-CRCA-PFV-ANDES4` a "Andes Solar 3 - PFV"—;
+  (b) `SAE-CRCA-PFV-NUEVO-QUILLAGUA-2` y `SAE-CRCA-PFV-VICTOR-JARA` no
+  tienen `FMA_CPF`, así que el FMA de sus filas CPF va a quedar en 0.
+- Medir contra un caso real cuánto baja la generación del FMA CPF con el
+  índice de carpeta nuevo (antes: >6 minutos, el usuario la tuvo que
+  cortar). En sintético se comprobó que el árbol se recorre 1 vez en vez
+  de 31 por versión, pero falta el número real sobre la unidad de red.
+- **FMA CSF en cero para algunas centrales** (reporte del usuario: "el FMA
+  de CSF es horario y sistémico, es raro que algunas centrales queden en
+  cero"). NO es la homologación: se midió contra el
+  `Consolidado_entradas.xlsx` real que mandó el usuario y las 9
+  `Configuración` de `Subastas` ya cruzaban 9/9 contra el bloque `FD` del
+  `Diccionario` viejo. El sospechoso que queda es el **Vector de
+  Participación CSF** (`_participacion_csf()` en
+  `Script/Fd/Desempeno_Horario.py`), que multiplica al FMA base y vale
+  **0** cuando el `SSCC_Desempeño_*` dice "No Participó" para esa unidad en
+  esa hora (y su alternativa TG/TV tampoco). Si eso es correcto, el cero
+  es el resultado esperado y no hay nada que arreglar. Falta que el
+  usuario tome una central+hora con FMA CSF en cero y la mire en la hoja
+  `CSF Horario` del `SSCC_Desempeño_*` para confirmarlo.
+
 - Confirmar el nombre definitivo de `Pagos_BESS.xlsx` (provisorio, elegido
   por el usuario como "pagos_bess o algo así por ahora").
 - Probar la ventana nueva (diagrama + botones "Generar") con una carpeta
@@ -3002,3 +3027,167 @@ de actualización independiente que ya tenían las dos hojas de cálculo.
 La ventana muestra **Traer prorrata** en la fila de `PRORRATA_RETIROS` y
 **Asignar pagos** en `Resumen`. Se añadieron cuatro pruebas unitarias; la suite
 completa quedó en 37 pruebas.
+
+---
+
+## 2026-09-14 — Ocho pedidos del usuario sobre la corrida real
+
+El usuario corrió el programa de punta a punta por primera vez sobre un
+caso real y mandó la lista de lo que anduvo y lo que no. Esta sesión
+resuelve los siete puntos que pedían un cambio de código.
+
+### 1. La planilla 3 se fue del programa
+
+`3_REMUNERACIÓN_SUBASTAS_E_ID_*` era el respaldo de la hoja `Subastas`
+para los casos que todavía no tenían los Access copiados. El usuario
+confirmó que **ya no se usa**. Se sacó la fila del diagrama de la ventana,
+el camino de respaldo de `generar_consolidado()` (ahora, sin Access del
+período, se corta con un error que dice qué botón apretar) y todo lo que
+colgaba de eso: `construir_subastas()`, `buscar_archivo_subastas()`,
+`PATRON_NOMBRE_SUBASTAS`, `HOJA_SUBASTAS_ORIGEN`.
+
+### 2. FMA CPF: 6 minutos que eran el mismo árbol recorrido 60 veces
+
+Reporte del usuario: *"se demora más de 6 minutos en correr, lo tuve que
+parar. Debe tener algún loop"*. No era un loop infinito.
+`buscar_tabla_resumen()` hacía un `rglob("*")` COMPLETO de la carpeta de
+respuesta del DCO **cada vez que se la llamaba**, y se la llama una vez
+por día del mes: primero desde `buscar_reportes_cpf()` (hasta 31 veces
+por cada versión del DCO que se revise) y después otras 31 desde
+`construir_fma_cpf()`. Sobre una unidad de red, 60-120 recorridas
+completas del árbol.
+
+Ahora el árbol se recorre **una vez por carpeta** (`_indice_excels()`,
+`os.walk` en vez de `rglob` para no pagar un `stat` por entrada) y las 62
+búsquedas se resuelven contra esa lista en memoria. El caché se vacía al
+empezar cada `generar_fma()`, para que dos apretadas seguidas del botón no
+se pisen si el usuario copió archivos en el medio.
+`buscar_carpeta_respuesta_cpf()` también pasó a `os.walk`, con corte
+apenas encuentra la carpeta.
+
+### 3. El `Diccionario` nuevo (y las diferencias de FMA CPF y CSF)
+
+El usuario adjuntó `Centrales_Propuesta_de_mejora.xlsx` con un formato
+nuevo para la hoja `Diccionario`: **una sola tabla** con encabezados
+`Balance_BESS | FD | Subastas | Ofertas | FMA_CPF`, en vez de las varias
+tablas sueltas puestas lado a lado y separadas por columnas vacías. Su
+diagnóstico era correcto: el formato viejo no tenía **dónde** poner la
+nomenclatura de FMA CPF (el bloque "FMA CPF" nunca existió), así que
+`construir_dic_bloque_diccionario()` devolvía `{}`, el FMA de las filas
+CPF se buscaba con la `Configuración` tal cual y no encontraba nada.
+
+Se aceptan **los dos formatos** (`encabezado_diccionario()` detecta cuál
+es; `filas_diccionario()` y `mapa_diccionario()` dan acceso por nombre de
+columna). Con el nuevo, además, las homologaciones de FD y de FMA CPF se
+buscan por el nombre de **Subastas** y no por el canónico — que es la
+segunda mitad del problema: la `Configuración` que trae el Access para
+Tocopilla es `BAT_TOCOPILLA`, y contra un diccionario con clave
+`SAE-TOCOPILLA` nunca iba a cruzar. Medido contra el
+`Consolidado_entradas.xlsx` real que mandó el usuario: la nomenclatura de
+FMA CPF pasó de homologar **0 de 9** `Configuración` a **7 de 9** (las dos
+que faltan son las que la propuesta dejó con la celda `FMA_CPF` vacía).
+
+Lo que este cambio **NO** explica es el reporte de CSF: en ese mismo
+archivo las 9 `Configuración` ya cruzaban 9/9 contra el bloque `FD` del
+`Diccionario` viejo, así que la homologación de la unidad no era el
+problema ahí. Queda como pendiente, con el Vector de Participación CSF
+como sospechoso.
+
+Las cuatro lecturas de la hoja (`construir_homologacion`,
+`construir_dic_mapeo_diccionario`, `_mapas_homologacion_fge`,
+`construir_dic_bloque_diccionario`) se verificaron una por una contra
+`docs/Centrales_real.xlsx` (formato viejo) y contra la propuesta (formato
+nuevo): dan lo mismo para las centrales que ya funcionaban.
+
+**Dos cosas de la propuesta quedaron como pendiente**, no se tocaron
+porque son datos del usuario: el `FMA_CPF` de Andes 3 y Andes 4 está
+cruzado, y Nuevo Quillagua 2 y Víctor Jara no tienen `FMA_CPF`.
+
+### 4. `Subastas` vuelve al orden del origen
+
+*"Al final que no esté ordenado por hora_mes, mala mía yo lo pedí pero
+no."* `_ordenar_subastas_por_hora_mes()` quedó como el único lugar donde
+se decide el orden de esa hoja (hoy, un `reset_index` y nada más), en vez
+de borrar los llamados: ninguna columna de más abajo depende del orden de
+las filas (todas cruzan por clave), así que si mañana hay que volver a
+ordenar se cambia una función y no cinco llamados.
+
+### 5. `Medidores` ya no depende de Ofertas SSCC
+
+*"Para construir Medidas se leen las ofertas, me gustaría sacar lo de
+ofertas de esa hoja y dejarlas en la hoja de ofertas."* Hecho, y la
+dependencia quedó **dada vuelta**: ahora `Ofertas SSCC` necesita
+`Medidores` (de ahí salen las centrales y las ventanas) y no al revés.
+
+- La hoja `Medidores` pasó de `A:U` a `A:Q + U`: R
+  (`Oferta_Completa_Dia`), S (`Indicador_Ventana_Oferta`) y T
+  (`Ventana_No_Completa`) ya no se escriben.
+- Las dos tablas de las que se derivan esas tres columnas ya estaban en la
+  hoja `Ofertas SSCC`; no hizo falta agregar ninguna.
+  `completar_ofertas_en_medidores()` las reconstruye en memoria cuando
+  hacen falta, que es en `generar_pagos_bess()`: **T es la que reparte
+  cada fila entre `Calculo E Costos` y `Calculo RE545`**, así que sin ella
+  no hay cálculo posible.
+- `leer_ofertas_sscc_consolidado()` lee las dos tablas ubicándolas por su
+  título, no por una posición fija de columna.
+- Consecuencia práctica: el botón **Actualizar** de `Medidores` ya no abre
+  el archivo `*OfertasSSCC*` ni lo exige.
+
+### 6. `Calculo E Costos` toma el FD del consolidado
+
+*"Ecostos: se leen los sscc_desempeño, ¿no debería apuntar al consolidado
+de entradas?"* Sí. `AM:AR` se armaba releyendo el `SSCC_Desempeño_*`, lo
+que significaba que la hoja `FD` del consolidado y el FD que usaba E
+Costos podían no ser el mismo dato (bastaba con dejar un archivo más
+nuevo en la carpeta después de generar el consolidado). Ahora sale de la
+hoja ya generada (`leer_fd_consolidado()`), igual que `Medidores` y
+`Subastas`: el consolidado es la única foto de las entradas.
+
+### 7. El `KeyError: 'Energia_Positiva'` y el archivo que no se guardaba
+
+Dos bugs en el mismo reporte.
+
+**El KeyError.** `completar_calculo_e_costos_grupos()` devolvía la hoja
+**ya renombrada** a los nombres del Excel, así que cuando
+`conciliar_energia()` pedía `Energia_Positiva` esa columna se llamaba
+"Descarga kWh". Y como `NOMBRES_CALCULO_E_COSTOS` tiene nombres repetidos
+a propósito (AG:AL y AM:AR comparten los seis CPF/CSF/CTF, y "Total" es U
+y AX), pandas ni siquiera avisaba "columna renombrada": tiraba un
+`KeyError` pelado desde `_get_loc_duplicates`. RE545 ya tenía resuelto
+esto (`renombrar_calculo_re545()` aparte, y `df_re545_base` con los
+nombres internos); E Costos no. Se le dio la misma forma
+(`renombrar_calculo_e_costos()` + `df_ecostos_base`), y `_energia_total()`
+ahora explica el problema en vez de tirar el `KeyError` a secas.
+
+**El archivo que no se guardaba.** *"Además no se guarda nada de lo
+progresado como para revisar."* La conciliación corre justo antes de
+escribir, así que cualquier excepción ahí se llevaba puesto todo lo
+calculado. Ahora va dentro de un `try`: si revienta, queda una alerta
+`TRA-010` (crítica) y el libro **se escribe igual**. Lo único que se
+pierde es la conciliación.
+
+### Verificación
+
+- `python -m py_compile` sobre todo y `python -m unittest discover`: **49
+  pruebas** (eran 37), todas verdes, sin avisos de `pyflakes`.
+- La prueba de punta a punta `PagosBessEndToEndTest` **dejó de saltearse**:
+  antes el caso sintético no alcanzaba y el test se auto-skipeaba (un
+  verde que no probaba nada). Ahora corre de verdad y se le agregó un
+  segundo caso con las **dos** hojas juntas, que es exactamente el camino
+  donde se rompía la conciliación — sin el arreglo, ese test falla.
+- `tests/test_hojas_del_consolidado.py` (nuevo): los dos formatos del
+  `Diccionario` lado a lado, el ida y vuelta de las hojas `FD` y
+  `Ofertas SSCC`, R/S/T reconstruidas, y el mensaje de error de la
+  conciliación.
+- **Contra el `Consolidado_entradas.xlsx` real que mandó el usuario**:
+  `leer_fd_consolidado()` devuelve los dos bloques (6.696 filas cada uno) y
+  `leer_ofertas_sscc_consolidado()` las dos tablas (310 y 288 filas). Y lo
+  más importante: `completar_ofertas_en_medidores()` reproduce
+  **exactamente** las columnas R, S y T que ese archivo ya tiene escritas
+  en `Medidores` — cero filas distintas en las tres.
+- El índice de carpetas del FMA CPF se probó con un árbol sintético:
+  31 búsquedas, **1** `os.walk`.
+
+Lo que NO se probó: nada de esto se corrió todavía contra el caso real del
+usuario. En particular, el número real de la mejora del FMA CPF y si con
+el `Diccionario` nuevo desaparecen del todo las diferencias de CSF.

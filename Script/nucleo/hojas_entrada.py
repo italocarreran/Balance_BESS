@@ -8,7 +8,6 @@ from pathlib import Path
 
 from .parametros import (
     HOJA_CMG_ORIGEN, HOJA_CPF_HORARIO, HOJA_CSF_HORARIO,
-    HOJA_SUBASTAS_ORIGEN,
 )
 from .utiles import ErrorEntrada, _texto_seguro
 
@@ -22,7 +21,13 @@ from .utiles import ErrorEntrada, _texto_seguro
 # todavia no implementada):
 #   - Cargar_CMg_Desde_Archivo               -> leer_cmg
 #   - Cargar_SSCC_Desempeno_En_FD            -> construir_fd
-#   - Cargar_Remuneracion_Subastas_Rapido    -> construir_subastas
+#
+# La tercera, Cargar_Remuneracion_Subastas_Rapido, leia la hoja DB de
+# la planilla 3 (3_REMUNERACIÓN_SUBASTAS_E_ID_*). Esa planilla no es el
+# origen de las subastas -se arma pegando lo que sale de los Access
+# OfertasSSCCAdj*.accdb- y el usuario confirmo que ya no se usa, asi
+# que se saco: la hoja Subastas la arma construir_subastas_desde_accdb
+# (Script/nucleo/subastas_accdb.py) leyendo esos Access.
 #
 # Ninguna de las tres tiene una hoja de referencia de dominio tan
 # detallada como la de Medidores (Plan_Traspaso...): no se conocen
@@ -338,122 +343,144 @@ NOMBRES_SUBASTAS = {
 
 def _ordenar_subastas_por_hora_mes(df):
     """
-    Deja la hoja Subastas ordenada por Hora_mes (pedido del usuario).
-    Se desempata por Configuración y Concepto para que dos corridas
-    sobre los mismos datos den exactamente el mismo archivo.
+    Ya NO ordena: deja la hoja Subastas en el orden en que viene del
+    origen (los Access de 'DB subastas/', o la planilla 3).
 
-    Ninguna columna de mas abajo depende del orden de las filas (todo
-    lo que consume Subastas lo hace por clave: calcular_l,
-    construir_prorrata_sscc, construir_dic_umbrales_subastas), asi que
-    ordenar es puramente de presentacion.
+    En una sesion anterior el usuario pidio ordenarla por Hora_mes y
+    en esta pidio deshacerlo explicitamente ("al final que no este
+    ordenado por hora_mes, mala mia yo lo pedi pero no"). Se conserva
+    la funcion -en vez de borrar los llamados- porque el orden de esta
+    hoja es puramente de presentacion: ninguna columna de mas abajo
+    depende de el (calcular_l, construir_prorrata_sscc y
+    construir_dic_umbrales_subastas cruzan por clave), asi que el
+    unico lugar donde se decide es aca.
     """
 
-    columnas_orden = [
-        NOMBRES_SUBASTAS["J"],   # Hora_mes
-        NOMBRES_SUBASTAS["K"],   # Configuración
-        NOMBRES_SUBASTAS["B"],   # Concepto
+    return df.reset_index(drop=True)
+
+
+# La hoja 'FD' del consolidado: los dos bloques quedan separados por
+# columnas vacias (escritura.py escribe el CSF en A y el CPF en Q).
+HOJA_FD_CONSOLIDADO = "FD"
+
+
+def _bloques_de_columnas(df):
+    """
+    Grupos de columnas contiguas NO vacias de un DataFrame leido con
+    header=None. Mismo criterio que _bloques_columnas_diccionario():
+    una columna separa dos bloques cuando esta vacia en todas sus
+    filas.
+    """
+
+    bloques = []
+    actual = []
+
+    for col in range(df.shape[1]):
+
+        vacia = df.iloc[:, col].map(lambda v: not _texto_seguro(v)).all()
+
+        if vacia:
+            if actual:
+                bloques.append(actual)
+                actual = []
+        else:
+            actual.append(col)
+
+    if actual:
+        bloques.append(actual)
+
+    return bloques
+
+
+def leer_fd_consolidado(ruta_consolidado, registrar=print):
+    """
+    Los dos bloques de la hoja 'FD' de Consolidado_entradas.xlsx, tal
+    como los dejo construir_fd(): (df_csf, df_cpf).
+
+    Por que existe esta funcion (pedido del usuario: "Ecostos: se leen
+    los sscc_desempeño, no deberia apuntar al consolidado de
+    entradas?"): "Calculo E Costos" necesita el FD para AM:AR, y hasta
+    ahora se lo armaba releyendo el archivo SSCC_Desempeño_* con
+    construir_fd(). Eso significaba que la hoja FD del consolidado y el
+    FD que usaba E Costos podian NO ser el mismo dato -- bastaba con
+    que alguien dejara un SSCC_Desempeño_* mas nuevo en la carpeta
+    despues de generar el consolidado. Ahora E Costos consume la hoja
+    ya generada, igual que ya hacia con 'Medidores' y 'Subastas': el
+    consolidado es la unica foto de las entradas.
+
+    Los encabezados vienen en la primera fila de cada bloque y pueden
+    estar REPETIDOS a proposito ("Hora Mes" sale dos veces en cada
+    bloque), asi que se leen con header=None y se aplican con
+    set_axis(), nunca con el header= de read_excel.
+    """
+
+    ruta_consolidado = Path(ruta_consolidado)
+
+    try:
+        crudo = pd.read_excel(
+            ruta_consolidado, sheet_name=HOJA_FD_CONSOLIDADO, header=None
+        )
+    except ValueError as error:
+        raise ErrorEntrada(
+            f"{ruta_consolidado.name} no tiene la hoja "
+            f"'{HOJA_FD_CONSOLIDADO}' todavia. Genera "
+            f"Consolidado_entradas.xlsx primero (tildando 'FD')."
+        ) from error
+
+    bloques = [
+        columnas for columnas in _bloques_de_columnas(crudo)
+        if len(columnas) > 1
     ]
 
-    presentes = [c for c in columnas_orden if c in df.columns]
+    esperados = {
+        len(NOMBRES_FD_CSF): ("csf", NOMBRES_FD_CSF),
+        len(NOMBRES_FD_CPF): ("cpf", NOMBRES_FD_CPF),
+    }
 
-    if not presentes:
-        return df
+    encontrados = {}
 
-    # Hora_mes puede venir como texto desde la planilla 3: se ordena
-    # por su valor numerico, no alfabeticamente ("10" antes que "9").
-    auxiliar = df.copy()
-    clave_numerica = "__orden_hora_mes__"
-    auxiliar[clave_numerica] = pd.to_numeric(
-        auxiliar[presentes[0]], errors="coerce"
-    )
+    for columnas in bloques:
 
-    auxiliar = auxiliar.sort_values(
-        by=[clave_numerica] + presentes[1:],
-        kind="stable",
-        na_position="last",
-    )
+        esperado = esperados.get(len(columnas))
 
-    return auxiliar.drop(columns=[clave_numerica]).reset_index(drop=True)
+        if esperado is None:
+            continue
 
+        tipo, nombres = esperado
 
-def construir_subastas(ruta_subastas, registrar=print):
-    """
-    Replica Cargar_Remuneracion_Subastas_Rapido.
+        if tipo in encontrados:
+            continue
 
-    La macro original consulta la hoja "DB" del archivo de origen por
-    ADO/SQL (equivalente a filtrar y seleccionar columnas de una
-    tabla); aca se lee directamente con pandas y se aplica el mismo
-    filtro y la misma seleccion de columnas.
+        bloque = crudo.iloc[1:, columnas].reset_index(drop=True)
 
-    Arma las columnas B:Q de Subastas (nombres reales en
-    NOMBRES_SUBASTAS, corregidos con el archivo real -- ver el
-    comentario de esa constante):
-      - Concepto:Propietario (B:L, 11 columnas): copia directa de
-        DB!B:L (filtrado por DB!K -- que en el archivo real resulta
-        ser "Configuración", no "Propietario"; el filtro sigue
-        siendo textualmente correcto porque los nombres de central
-        BESS/SAE empiezan con "SAE-", asi que "contiene BESS o SAE"
-        encuentra las mismas filas de cualquier forma).
-      - Clave horaria (M, formula): = Configuración & Dia & Hora_dia
-        (K&H&I con las letras REALES de Subastas; coincide con la
-        formula real M3=K3&H3&I3 del archivo).
-      - Ciclo (N): se deja vacia EN ESTA HOJA. Ya no es un calculo
-        desconocido (ver calcular_subastas_ciclo: es el "Ciclo de
-        Carga del mes" de Calculo E Costos homologado por Hora_mes +
-        Configuración), pero depende de Calculo E Costos, que se
-        arma despues y en el otro archivo (Pagos_BESS.xlsx). Se
-        calcula ahi, donde se usa. (Antes de esta sesion esta
-        columna se llamaba "Energía SSCC" -- nombre equivocado: lo
-        que la formula real trae es un numero de ciclo, no energia.)
-      - Energía SSCC, FD, FMA (O, P, Q): copias de DB!P, DB!Y, DB!V
-        respectivamente (asi lo indica la macro original) -- simples
-        copias, sin formula ni calculo dentro de Subastas.
-    """
-
-    ruta_subastas = Path(ruta_subastas)
-
-    excel = pd.ExcelFile(ruta_subastas)
-
-    if HOJA_SUBASTAS_ORIGEN not in excel.sheet_names:
-        raise ErrorEntrada(
-            f"No existe la hoja '{HOJA_SUBASTAS_ORIGEN}' en "
-            f"{ruta_subastas.name}."
+        # Los dos bloques tienen distinto largo y conviven en la misma
+        # hoja, asi que el mas corto viene con filas de relleno vacias
+        # al final (las que ocupa el otro): se cortan.
+        con_datos = bloque.map(lambda v: bool(_texto_seguro(v))).any(axis=1)
+        ultima = con_datos[con_datos].index.max()
+        bloque = (
+            bloque.iloc[: int(ultima) + 1]
+            if pd.notna(ultima) else bloque.iloc[:0]
         )
 
-    df_crudo = pd.read_excel(
-        ruta_subastas, sheet_name=HOJA_SUBASTAS_ORIGEN, header=None
-    )
+        encontrados[tipo] = bloque.set_axis(list(nombres.values()), axis=1)
 
-    # Fila 3 de Excel (1-indexada) = indice 2. Columnas B:Y (24).
-    bloque = df_crudo.iloc[2:, 1:25]
+    faltan = [t for t in ("csf", "cpf") if t not in encontrados]
 
-    # K es la 10ma columna del bloque B:Y (B=0 ... K=9).
-    filtrado = _filtrar_bess_sae_posicional(bloque, 9)
-
-    df = filtrado.iloc[:, 0:11].copy()
-    df.columns = list("BCDEFGHIJKL")
-    df = df.reset_index(drop=True)
-
-    df["M"] = (
-        df["K"].map(_texto_seguro)
-        + df["H"].map(_texto_seguro)
-        + df["I"].map(_texto_seguro)
-    )
-
-    df["N"] = pd.NA
-
-    # P, Y, V del bloque original (indices 14, 23, 20) -> O, P, Q.
-    df["O"] = filtrado.iloc[:, 14].reset_index(drop=True)
-    df["P"] = filtrado.iloc[:, 23].reset_index(drop=True)
-    df["Q"] = filtrado.iloc[:, 20].reset_index(drop=True)
-
-    df = df[list("BCDEFGHIJKLMNOPQ")]
-    df = df.rename(columns=NOMBRES_SUBASTAS)
-    df = _ordenar_subastas_por_hora_mes(df)
+    if faltan:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_FD_CONSOLIDADO}' de "
+            f"{ruta_consolidado.name} no trae el/los bloque(s) "
+            f"{[t.upper() for t in faltan]} (se esperaban dos bloques de "
+            f"{len(NOMBRES_FD_CSF)} y {len(NOMBRES_FD_CPF)} columnas, "
+            f"separados por columnas vacias; se encontraron bloques de "
+            f"{[len(c) for c in bloques]} columnas). Volve a generar la "
+            f"hoja 'FD' con su boton 'Actualizar'."
+        )
 
     registrar(
-        f"  Subastas: {len(df):,} fila(s) (filtro Propietario "
-        f"contiene BESS/SAE), ordenadas por Hora_mes"
+        f"  FD desde el consolidado: {len(encontrados['csf']):,} fila(s) "
+        f"CSF, {len(encontrados['cpf']):,} fila(s) CPF."
     )
 
-    return df
+    return encontrados["csf"], encontrados["cpf"]

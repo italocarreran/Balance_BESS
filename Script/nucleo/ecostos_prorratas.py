@@ -6,6 +6,7 @@ E Costos, etapa 3: AG:AL, AM:AR (FD), AS:AV.
 import math
 import pandas as pd
 
+from .lectura import ROL_BALANCE_BESS, ROL_FD, mapa_diccionario
 from .parametros import HOJA_DICCIONARIO
 from .alertas import ALTA, MEDIA, Alerta, anotar, anotar_muchas
 from .utiles import (
@@ -214,14 +215,23 @@ def calcular_prorratas(df_ecostos, dic_prorrata, registrar=print):
 def construir_dic_mapeo_diccionario(diccionario):
     """
     Replica CrearDiccionarioPrimerValor(datosDiccionario, 1, 2):
-    columna A -> columna B de la hoja Diccionario (header=None), la
-    primera coincidencia gana. Es un mapeo DISTINTO de
-    construir_homologacion() (usa toda la fila) y de
-    _mapas_homologacion_fge() (usa E/F/G) -- tres lecturas distintas
-    de la misma hoja Diccionario, no fusionar.
+    nombre canonico de la central -> nombre de esa central en el
+    archivo de desempeño (el FD), la primera coincidencia gana. Es un
+    mapeo DISTINTO de construir_homologacion() (usa toda la fila) y de
+    _mapas_homologacion_fge() (va de los otros origenes hacia el
+    canonico, no al reves) -- tres lecturas distintas de la misma hoja
+    Diccionario, no fusionar.
+
+    FORMATO NUEVO de la hoja (tabla unica con encabezados, ver
+    lectura.py): columna "Balance_BESS" -> columna "FD". FORMATO VIEJO
+    (bloques lado a lado): columna A -> columna B, que es justamente
+    donde vive el bloque "FD".
     """
 
-    dic = {}
+    dic = mapa_diccionario(diccionario, ROL_BALANCE_BESS, ROL_FD)
+
+    if dic:
+        return dic
 
     for _, fila in diccionario.iterrows():
 

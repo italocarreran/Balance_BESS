@@ -111,27 +111,21 @@ def calcular_clave_auxiliar(dia, hora_mes):
 def construir_medidores(
     df_sae,
     df_soc,
-    anio,
     mes,
-    ruta_ofertas,
-    diccionario,
     registrar=print,
 ):
     """
-    Arma la tabla equivalente a Medidores, incluyendo las columnas R,
-    S y T (dependientes de Ofertas SSCC).
+    Arma la tabla equivalente a Medidores (A:Q + U).
 
-    ruta_ofertas: archivo *OfertasSSCC* encontrado en Ofertas/.
-    diccionario:  hoja Diccionario de Centrales.xlsx (header=None), la
-                  misma que se usa para homologar el SoC.
+    NO lee el archivo de Ofertas SSCC ni depende de el: las columnas R,
+    S y T de la planilla original salen de ahi y se calculan aparte
+    (ver COLUMNAS_OFERTAS_EN_MEDIDORES y
+    completar_ofertas_en_medidores). Es el pedido del usuario de
+    "independizar Medidas de ofertas": el boton "Actualizar" de
+    Medidores anda aunque todavia no exista el *OfertasSSCC* del
+    periodo.
 
-    Devuelve (df_medidores, avisos, df_wxy, df_resumen_ventana). Estas
-    ultimas dos son las tablas auxiliares equivalentes a Medidores!W:Y
-    y a Medidores!AB:AE respectivamente (ver comentario de
-    LETRA_A_CAMPO). El resumen intermedio equivalente a la hoja
-    "Resumen Ofertas SSCC" (Nombre/Año/Mes/Día/servicios/Oferta
-    completa) es puramente auxiliar para calcular df_wxy: no se
-    devuelve ni se persiste, solo sirve como paso intermedio.
+    Devuelve (df_medidores, avisos).
     """
 
     avisos = []
@@ -271,8 +265,45 @@ def construir_medidores(
         df[columna] = pd.NA
 
     # --------------------------------------------------------
-    # OFERTAS SSCC: R, S, T (plan seccion 17-18, obligatorias)
+    # ORDEN FINAL DE COLUMNAS (A:Q + U, en el orden de insercion de
+    # LETRA_A_CAMPO)
     # --------------------------------------------------------
+
+    df = df[list(LETRA_A_CAMPO.values())]
+
+    registrar(
+        f"Medidores construido: {len(df):,} filas x "
+        f"{len(df.columns)} columnas (sin las columnas de Ofertas SSCC: "
+        f"ver la hoja 'Ofertas SSCC')"
+    )
+
+    return df, avisos
+
+
+# ============================================================
+# OFERTAS SSCC: LA HOJA PROPIA Y LAS TRES COLUMNAS DERIVADAS
+# ============================================================
+
+def construir_ofertas_sscc(
+    df_medidores, ruta_ofertas, diccionario, anio, mes, registrar=print
+):
+    """
+    Arma las dos tablas de la hoja "Ofertas SSCC" del consolidado:
+
+      df_wxy             equivalente a Medidores!W:Y (central x dia)
+      df_resumen_ventana equivalente a Medidores!AB:AE (central x ventana)
+
+    Necesita Medidores ya construido -las centrales y las ventanas
+    salen de ahi-, no al reves: esa es toda la inversion de dependencia
+    que pidio el usuario. El resumen intermedio equivalente a la hoja
+    "Resumen Ofertas SSCC" (Nombre/Año/Mes/Día/servicios/Oferta
+    completa) es puramente auxiliar para calcular df_wxy: no se
+    devuelve ni se persiste.
+
+    Devuelve (df_wxy, df_resumen_ventana, avisos).
+    """
+
+    avisos = []
 
     registrar(f"  Leyendo {Path(ruta_ofertas).name}...")
     df_resumen_ofertas = construir_resumen_ofertas_sscc(
@@ -281,7 +312,7 @@ def construir_medidores(
 
     df_wxy, periodo_ofertas, avisos_wxy = cargar_resumen_en_medidores(
         df_resumen_ofertas,
-        df["clave"].unique(),
+        df_medidores["clave"].unique(),
         diccionario,
         registrar=registrar,
     )
@@ -295,6 +326,44 @@ def construir_medidores(
         )
 
     r_valor, avisos_r = calcular_r(
+        df_medidores, df_wxy, diccionario, registrar=registrar
+    )
+    avisos.extend(avisos_r)
+
+    df_resumen_ventana = construir_resumen_ventana_oferta(
+        df_medidores["clave"],
+        df_medidores["Ventana"],
+        r_valor,
+        registrar=registrar,
+    )
+
+    return df_wxy, df_resumen_ventana, avisos
+
+
+def completar_ofertas_en_medidores(
+    df_medidores, df_wxy, df_resumen_ventana, diccionario, registrar=print
+):
+    """
+    Devuelve una copia de Medidores con las tres columnas que salen de
+    Ofertas SSCC (COLUMNAS_OFERTAS_EN_MEDIDORES), reconstruidas a
+    partir de las dos tablas de la hoja "Ofertas SSCC" del consolidado:
+
+      R (Oferta_Completa_Dia)      = VLOOKUP(dia + central) en df_wxy
+      S (Indicador_Ventana_Oferta) = formula sobre la Ventana y R
+      T (Ventana_No_Completa)      = 1 - Completa(central, ventana)
+
+    Es exactamente el mismo calculo que antes vivia dentro de
+    construir_medidores(); lo unico que cambio es de donde salen las
+    dos tablas -de la hoja ya generada, en vez de releer el archivo de
+    ofertas- y que el resultado ya no se persiste en la hoja Medidores.
+
+    Devuelve (df_medidores_con_ofertas, avisos).
+    """
+
+    avisos = []
+    df = df_medidores.copy()
+
+    r_valor, avisos_r = calcular_r(
         df, df_wxy, diccionario, registrar=registrar
     )
     avisos.extend(avisos_r)
@@ -302,13 +371,6 @@ def construir_medidores(
 
     df["Indicador_Ventana_Oferta"] = calcular_s(
         df["Ventana"], df["Oferta_Completa_Dia"]
-    )
-
-    df_resumen_ventana = construir_resumen_ventana_oferta(
-        df["clave"],
-        df["Ventana"],
-        df["Oferta_Completa_Dia"],
-        registrar=registrar,
     )
 
     t_valor, sin_match_t = calcular_t(
@@ -323,16 +385,7 @@ def construir_medidores(
             "calcular la columna T."
         )
 
-    # --------------------------------------------------------
-    # ORDEN FINAL DE COLUMNAS (A -> U, en el orden de insercion de
-    # LETRA_A_CAMPO)
-    # --------------------------------------------------------
+    for aviso in avisos:
+        registrar(f"  [AVISO] {aviso}")
 
-    df = df[list(LETRA_A_CAMPO.values())]
-
-    registrar(
-        f"Medidores construido: {len(df):,} filas x "
-        f"{len(df.columns)} columnas"
-    )
-
-    return df, avisos, df_wxy, df_resumen_ventana
+    return df, avisos
