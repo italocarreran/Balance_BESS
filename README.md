@@ -133,6 +133,12 @@ Ver `MAPA.md` para qué hace cada módulo.
 │        ej. SOC_2607.xlsx, "resumen soc julio 2607.xlsx">
 ├── Auxiliares/
 │   ├── Centrales.xlsx       (hojas "Resumen BESS" y "Diccionario")
+│   │                        El "Diccionario" acepta dos formatos: el
+│   │                        viejo (varias tablas lado a lado) y el nuevo,
+│   │                        una sola tabla con encabezados
+│   │                        Balance_BESS | FD | Subastas | Ofertas |
+│   │                        FMA_CPF. El nuevo es el único que permite
+│   │                        homologar la nomenclatura de FMA CPF.
 │   └── <algún archivo Excel cuyo nombre contenga "Homologacion">
 │                            (hojas "homol" y "Gen real")
 ├── Ofertas/
@@ -143,8 +149,8 @@ Ver `MAPA.md` para qué hace cada módulo.
 ├── SSCC_Desempeño/
 │   └── <algún archivo Excel cuyo nombre empiece con "SSCC_Desempeño_">
 ├── Subastas/
-│   └── <algún archivo Excel cuyo nombre empiece con
-│        "3_REMUNERACIÓN_SUBASTAS_E_ID_">
+│   └── DB subastas/                  (botón "Traer subastas")
+│       └── OfertasSSCCAdj*.accdb     <- el origen real de las subastas
 ├── Prorrata retiros/
 │   └── Prorrata_Retiros_<AAMM>_pre.xlsx o _def.xlsx
 │       (hoja "Prorrata 15min")
@@ -159,12 +165,13 @@ Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
   AAMM ingresado en la ventana. Si hay más de un archivo que cumple la
   condición, el programa se detiene y pide dejar solo el del período
   correspondiente (no elige por fecha de modificación).
-- **OfertasSSCC**, **SSCC_Desempeño_\*** y **3_REMUNERACIÓN_SUBASTAS_E_ID_\***:
-  cualquier archivo Excel (`.xlsx`/`.xlsm`/`.xlsb`/`.xls`) en su carpeta
-  correspondiente cuyo nombre contenga (Ofertas) o empiece con (los otros
-  dos) ese texto. Si hay más de uno, a diferencia del SoC, se toma
-  automáticamente el más reciente por fecha de modificación — así lo hacen
-  las macros originales de la planilla.
+- **OfertasSSCC** y **SSCC_Desempeño_\***: cualquier archivo Excel
+  (`.xlsx`/`.xlsm`/`.xlsb`/`.xls`) en su carpeta correspondiente cuyo
+  nombre contenga (Ofertas) o empiece con (el otro) ese texto. Si hay más
+  de uno, a diferencia del SoC, se toma automáticamente el más reciente por
+  fecha de modificación — así lo hacen las macros originales de la
+  planilla. La planilla `3_REMUNERACIÓN_SUBASTAS_E_ID_*` **ya no se usa**:
+  las subastas salen de los Access de `Subastas/DB subastas/`.
 - **Medidas_SAE.xlsx**: tampoco se arma a mano. El botón **Actualizar** de esa
   fila corre los cuatro pasos de un viaje:
 
@@ -252,27 +259,32 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 
 `Consolidado_entradas.xlsx` (antes `Hoja_Medidas.xlsx`) tiene seis hojas:
 
-- `Medidores` — columnas A:U (A:J entrada, K copia de L, L, N, O, R, S, T
-  calculadas; M, P, Q, U deliberadamente vacías por diseño).
+- `Medidores` — columnas A:Q + U (A:J entrada, K copia de L, L, N, O
+  calculadas; M, P, Q, U deliberadamente vacías por diseño). **No depende de
+  Ofertas SSCC**: su botón "Actualizar" no abre el archivo `*OfertasSSCC*`
+  ni lo exige.
 - `Ofertas SSCC` — las tablas auxiliares equivalentes a `Medidores!W:Y`
   ("Ofertas SSCC por dia") y `Medidores!AB:AE` ("Resumen ventana oferta"),
-  una al lado de la otra. El resumen intermedio equivalente a la hoja
-  "Resumen Ofertas SSCC" del `.xlsm` original es puramente auxiliar y no se
-  persiste.
+  una al lado de la otra. De ahí salen las columnas R
+  (`Oferta_Completa_Dia`), S (`Indicador_Ventana_Oferta`) y T
+  (`Ventana_No_Completa`) de la planilla original, que **ya no se escriben
+  en `Medidores`**: se reconstruyen en memoria cuando hacen falta (T es la
+  que reparte cada fila entre las dos hojas de cálculo). El resumen
+  intermedio equivalente a la hoja "Resumen Ofertas SSCC" del `.xlsm`
+  original es puramente auxiliar y no se persiste.
 - `CMg` — copia ordenada de `Cmg/cmg.xlsx` (replica
   `Cargar_CMg_Desde_Archivo`).
 - `FD` — datos de `CPF Horario`/`CSF Horario` filtrados por BESS/SAE, más
   sus columnas calculadas, con sus nombres reales de columna (replica
   `Cargar_SSCC_Desempeno_En_FD`). Los bloques CSF (A:M) y CPF (Q:AE) son dos
   tablas de distinto largo, lado a lado en la misma hoja.
-- `Subastas` — datos de la hoja `DB` filtrados por "Configuración" contiene
-  BESS/SAE (funcionalmente equivalente a filtrar por Propietario: los
-  nombres de central BESS empiezan con "SAE-"), más la columna "Clave
-  horaria" calculada, con sus nombres reales de columna (`Concepto`,
-  `Control`, `Sub_Baj`, ..., `Energía SSCC`, `FD`, `FMA` — corregidos en
-  una sesión posterior, ver `BITACORA.md`; replica
-  `Cargar_Remuneracion_Subastas_Rapido`). La columna "Ciclo" queda vacía:
-  depende de `Calculo E Costos`.
+- `Subastas` — datos de los Access de `Subastas/DB subastas/` filtrados por
+  "Configuración" contiene BESS/SAE (funcionalmente equivalente a filtrar
+  por Propietario: los nombres de central BESS empiezan con "SAE-"), más la
+  columna "Clave horaria" calculada, con sus nombres reales de columna
+  (`Concepto`, `Control`, `Sub_Baj`, ..., `Energía SSCC`, `FD`, `FMA`). Sale
+  en el orden del origen (no se ordena por `Hora_mes`). La columna "Ciclo"
+  queda vacía: depende de `Calculo E Costos`.
 - `Log` — avisos e incidencias detectadas durante el cálculo.
 
 `Pagos_BESS.xlsx` (nombre provisorio, a pedido del usuario) tiene dos hojas:
@@ -287,8 +299,9 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
   `cargada`, las Prorratas y el FD homologado (`CPF(±)`/`CSF(±)`/`CTF(±)`,
   este último siempre en 0 — confirmado que no existe), `Ingreso descarga`,
   `Costo carga`, `Descuento FD`, `Total` y `Monto a compensar`, entre otros.
-  Requiere ahora también el archivo `SSCC_Desempeño_*` (para el FD
-  homologado). La hoja queda **completa** (`A:AZ`, sin la columna `AY`, que
+  El FD homologado sale de la hoja `FD` del propio
+  `Consolidado_entradas.xlsx`, no de releer el `SSCC_Desempeño_*`. La hoja
+  queda **completa** (`A:AZ`, sin la columna `AY`, que
   la macro original tampoco escribe).
 - `Calculo RE545` — la hoja hermana, también **completa** (`A:CE`): mismo
   traspaso desde `Medidores` (la energía se reparte entre las dos hojas según

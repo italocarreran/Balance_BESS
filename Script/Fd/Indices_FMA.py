@@ -44,6 +44,7 @@ No importa nada de nucleo (solo pandas). Los errores previsibles
 salen como ErrorIndicesFma.
 """
 
+import os
 import shutil
 from pathlib import Path
 
@@ -190,21 +191,77 @@ def buscar_carpeta_respuesta_cpf(carpeta_version):
             ):
                 return hijo
 
+    # os.walk en vez de rglob("*"): rglob hace un stat por entrada para
+    # responder is_dir(), y sobre la unidad de red eso se nota. Aca
+    # alcanza con mirar los nombres de carpeta que ya trae os.walk, y
+    # se corta apenas aparece la primera.
     try:
-        for ruta in carpeta_version.rglob("*"):
-            if (
-                ruta.is_dir()
-                and PATRON_CARPETA_RESPUESTA_CPF in dco._normalizar(
-                    ruta.name
-                ).replace(" ", "_")
-            ):
-                return ruta
+        for raiz, carpetas, _ in os.walk(carpeta_version):
+            for nombre in carpetas:
+                if PATRON_CARPETA_RESPUESTA_CPF in dco._normalizar(
+                    nombre
+                ).replace(" ", "_"):
+                    return Path(raiz) / nombre
     except OSError as error:
         raise ErrorIndicesFma(
             f"No se pudo recorrer {carpeta_version}: {error}"
         ) from error
 
     return None
+
+
+# Indice de archivos por carpeta de respuesta, para no recorrer el arbol
+# una vez por dia.
+#
+# EL PROBLEMA QUE RESUELVE (reporte del usuario: "FMA CPF se demora mas
+# de 6 minutos, lo tuve que parar"): buscar_tabla_resumen() hacia un
+# rglob("*") COMPLETO de la carpeta de respuesta cada vez que se la
+# llamaba, y se la llama una vez por dia del mes. Peor: primero la llama
+# buscar_reportes_cpf() -hasta 31 veces, y una vez por cada version del
+# DCO que se revise- y despues construir_fma_cpf() otras 31. Sobre una
+# unidad de red eso son 60-120 recorridas completas del arbol: de ahi
+# salen los 6 minutos. No era un loop infinito, era el mismo arbol
+# recorrido decenas de veces.
+#
+# Ahora el arbol se recorre UNA sola vez por carpeta y queda en memoria;
+# las 62 busquedas se resuelven contra esa lista. El cache se limpia al
+# empezar cada generar_fma() para que dos corridas seguidas no se
+# pisen (el usuario puede copiar archivos entre una y otra).
+_INDICE_RESPUESTA_CPF = {}
+
+
+def limpiar_indice_cpf():
+    """Vacia el cache de archivos de las carpetas de respuesta de CPF."""
+
+    _INDICE_RESPUESTA_CPF.clear()
+
+
+def _indice_excels(carpeta):
+    """
+    [(stem normalizado, ruta), ...] de todos los Excel que cuelgan de
+    la carpeta, recorriendo el arbol UNA vez y guardando el resultado.
+    """
+
+    carpeta = Path(carpeta)
+    clave = str(carpeta)
+
+    if clave in _INDICE_RESPUESTA_CPF:
+        return _INDICE_RESPUESTA_CPF[clave]
+
+    entradas = []
+
+    try:
+        for raiz, _, archivos in os.walk(carpeta):
+            for nombre in archivos:
+                ruta = Path(raiz) / nombre
+                if ruta.suffix.lower() in EXTENSIONES_EXCEL:
+                    entradas.append((dco._normalizar(ruta.stem), ruta))
+    except OSError:
+        entradas = []
+
+    _INDICE_RESPUESTA_CPF[clave] = entradas
+
+    return entradas
 
 
 def buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia):
@@ -216,24 +273,20 @@ def buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia):
 
     Se acepta cualquier sufijo despues del año porque existen variantes
     con la zona horaria en el nombre (`..._UTC-4.xlsx`, `..._utc-3.xlsx`).
+
+    La busqueda va contra el indice de la carpeta (_indice_excels), que
+    recorre el arbol una sola vez: ver el comentario de
+    _INDICE_RESPUESTA_CPF.
     """
 
     prefijo = dco._normalizar(
         PLANTILLA_TABLA_RESUMEN.format(dia=dia, mes=mes, anio=anio)
     )
 
-    candidatos = []
-
-    try:
-        for ruta in Path(carpeta_respuesta).rglob("*"):
-            if (
-                ruta.is_file()
-                and ruta.suffix.lower() in EXTENSIONES_EXCEL
-                and dco._normalizar(ruta.stem).startswith(prefijo)
-            ):
-                candidatos.append(ruta)
-    except OSError:
-        return None
+    candidatos = [
+        ruta for stem, ruta in _indice_excels(carpeta_respuesta)
+        if stem.startswith(prefijo)
+    ]
 
     if not candidatos:
         return None
@@ -241,7 +294,7 @@ def buscar_tabla_resumen(carpeta_respuesta, anio, mes, dia):
     # El nombre "pelado" (sin sufijo de zona horaria) primero; si no,
     # el mas reciente.
     exactos = [
-        r for r in candidatos if dco._normalizar(r.stem) == prefijo
+        r for stem, r in _indice_excels(carpeta_respuesta) if stem == prefijo
     ]
 
     if exactos:
@@ -726,6 +779,12 @@ def generar_fma(
     Devuelve (escritos, faltantes, versiones), donde `versiones` dice
     que version del DCO termino usando cada tipo (pueden ser distintas).
     """
+
+    # El indice de archivos de las carpetas de respuesta de CPF es un
+    # cache de proceso: se vacia al empezar cada corrida para que, si el
+    # usuario copio archivos entre dos apretadas del boton, la segunda
+    # los vea.
+    limpiar_indice_cpf()
 
     anio, mes = dco.periodo_desde_aamm(aamm)
     carpeta_destino = Path(carpeta_destino)

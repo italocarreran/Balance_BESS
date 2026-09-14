@@ -233,8 +233,11 @@ def completar_calculo_e_costos_grupos(
     T, U, W, X, Y, AB, AC, AD, AE, AF, AG, AH, AI, AJ, AK, AL, AM,
     AN, AO, AP, AQ, AR, AS, AT, AU, AV, AW, AX y AZ a df_ecostos
     (que ya viene con la etapa base
-    de construir_calculo_e_costos), y renombra todas las columnas a
-    sus nombres reales (NOMBRES_CALCULO_E_COSTOS) antes de devolver.
+    de construir_calculo_e_costos). Devuelve la hoja con los nombres
+    INTERNOS de columna: el renombre a los nombres reales es un paso
+    aparte (renombrar_calculo_e_costos), igual que en RE545, porque
+    todo lo que consume esta hoja despues -la conciliacion de energia,
+    las prorratas- busca por nombre interno.
     Ver los comentarios de seccion mas arriba para el detalle y las
     advertencias de cada columna.
 
@@ -342,6 +345,27 @@ def completar_calculo_e_costos_grupos(
         f"marcadas como 'participa en subasta' (L=1)."
     )
 
-    return df[list(NOMBRES_CALCULO_E_COSTOS)].rename(
-        columns=NOMBRES_CALCULO_E_COSTOS
+    return df
+
+
+def renombrar_calculo_e_costos(df_ecostos):
+    """
+    Deja las columnas en el orden final de la hoja y las pasa de los
+    nombres internos a los nombres reales. Se hace aparte y al final
+    de todo -mismo criterio que renombrar_calculo_re545()- porque
+    NOMBRES_CALCULO_E_COSTOS tiene nombres REPETIDOS a proposito
+    (AG:AL y AM:AR comparten los seis nombres CPF/CSF/CTF, y "Total"
+    es U y AX): una vez renombrado, el DataFrame ya no se puede
+    indexar por nombre sin ambiguedad.
+
+    Devolver la hoja ya renombrada desde
+    completar_calculo_e_costos_grupos() era justamente el origen del
+    KeyError 'Energia_Positiva' de la conciliacion: esa columna pasa a
+    llamarse "Descarga kWh" y, con nombres duplicados en el indice,
+    pandas ni siquiera avisa "columna renombrada", tira KeyError.
+    """
+
+    return (
+        df_ecostos[list(NOMBRES_CALCULO_E_COSTOS)]
+        .rename(columns=NOMBRES_CALCULO_E_COSTOS)
     )

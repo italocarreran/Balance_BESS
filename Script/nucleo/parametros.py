@@ -66,8 +66,6 @@ HOJA_CMG_ORIGEN = "CMg"
 HOJA_CPF_HORARIO = "CPF Horario"
 HOJA_CSF_HORARIO = "CSF Horario"
 
-HOJA_SUBASTAS_ORIGEN = "DB"
-
 # Las subastas ya no salen de la planilla 3: salen de los Access
 # OfertasSSCCAdj*.accdb, que son su origen real (la planilla 3 tambien
 # se arma pegando lo que sale de ellos). Se copian de la unidad de red
@@ -95,9 +93,8 @@ HOJA_RESUMEN = "Resumen"
 PATRON_AAMM = re.compile(r"^\d{4}$")
 
 # Extensiones de Excel aceptadas para los archivos que se buscan por
-# patron de nombre (OfertasSSCC, SSCC_Desempeño_*, 3_REMUNERACIÓN_
-# SUBASTAS_E_ID_*) - no para SoC (siempre .xlsx) ni para cmg.xlsx
-# (nombre literal fijo).
+# patron de nombre (OfertasSSCC, SSCC_Desempeño_*) - no para SoC
+# (siempre .xlsx) ni para cmg.xlsx (nombre literal fijo).
 EXTENSIONES_EXCEL = {".xlsx", ".xlsm", ".xlsb", ".xls"}
 
 # Se derivan con .lower() en vez de transcribir el literal a mano: con
@@ -105,7 +102,6 @@ EXTENSIONES_EXCEL = {".xlsx", ".xlsm", ".xlsb", ".xls"}
 # al tipear (ya paso una vez, ver METODOLOGIA.md #7).
 PATRON_NOMBRE_OFERTAS = "OfertasSSCC".lower()
 PATRON_NOMBRE_SSCC_DESEMPENO = "SSCC_Desempeño_".lower()
-PATRON_NOMBRE_SUBASTAS = "3_REMUNERACIÓN_SUBASTAS_E_ID_".lower()
 
 
 # ============================================================
@@ -153,11 +149,32 @@ LETRA_A_CAMPO = {
     "O": "Indicador_SoC",
     "P": "P_VACIA",
     "Q": "Q_VACIA",
-    "R": "Oferta_Completa_Dia",
-    "S": "Indicador_Ventana_Oferta",
-    "T": "Ventana_No_Completa",
     "U": "U_VACIA",
 }
+
+# R, S y T de la planilla original: las tres SALEN DE OFERTAS SSCC y
+# por eso ya no viven en la hoja Medidores.
+#
+# Pedido explicito del usuario: "para construir Medidas se leen las
+# ofertas, me gustaria sacar lo de ofertas de esa hoja y dejarlas en la
+# hoja de ofertas para independizar Medidas de ofertas". Ahora el boton
+# "Actualizar" de Medidores no abre el archivo *OfertasSSCC* para nada;
+# la hoja "Ofertas SSCC" del consolidado guarda las dos tablas de las
+# que se derivan las tres columnas:
+#
+#   R (Oferta_Completa_Dia)      <- "Ofertas SSCC por dia" (central+dia)
+#   S (Indicador_Ventana_Oferta) <- R + la Ventana de Medidores
+#   T (Ventana_No_Completa)      <- "Resumen ventana oferta" (central+ventana)
+#
+# Quien las necesita (el calculo de Pagos_BESS.xlsx: el reparto entre
+# "Calculo E Costos" y "Calculo RE545" se hace con T) las reconstruye
+# con completar_ofertas_en_medidores() a partir de esas dos tablas, sin
+# volver a leer el archivo de ofertas.
+COLUMNAS_OFERTAS_EN_MEDIDORES = [
+    "Oferta_Completa_Dia",
+    "Indicador_Ventana_Oferta",
+    "Ventana_No_Completa",
+]
 
 # Columnas que el plan define como deliberadamente vacias (plan
 # seccion 16.3): no son trabajo pendiente, es el diseño confirmado.

@@ -13,7 +13,6 @@ from .parametros import (
     CARPETA_SUBASTAS,
     CARPETA_TRABAJO_MEDIDAS, EXTENSIONES_EXCEL, PATRON_AAMM,
     PATRON_NOMBRE_OFERTAS, PATRON_NOMBRE_SSCC_DESEMPENO,
-    PATRON_NOMBRE_SUBASTAS,
 )
 from .utiles import ErrorEntrada, normalizar
 
@@ -195,25 +194,6 @@ def buscar_archivo_sscc_desempeno(carpeta):
 
     return _buscar_archivo_excel_mas_reciente(
         carpeta, PATRON_NOMBRE_SSCC_DESEMPENO, desde_inicio=True
-    )
-
-
-def buscar_archivo_subastas(carpeta):
-    """
-    Replica BuscarArchivoSubastasMasRecienteRapido: busca dentro de
-    Subastas/ el archivo Excel mas reciente cuyo nombre empiece con
-    "3_REMUNERACIÓN_SUBASTAS_E_ID_".
-
-    Nota de arquitectura: la macro original buscaba este archivo
-    directamente en la carpeta del .xlsm (sin subcarpeta). Aca se le
-    da su propia carpeta (Subastas/) para ser consistente con el resto
-    de las entradas externas (Medidas/, Auxiliares/, Ofertas/, Cmg/,
-    SSCC_Desempeño/), cada una con su propia carpeta bajo la carpeta
-    base del caso.
-    """
-
-    return _buscar_archivo_excel_mas_reciente(
-        carpeta, PATRON_NOMBRE_SUBASTAS, desde_inicio=True
     )
 
 

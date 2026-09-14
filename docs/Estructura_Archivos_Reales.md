@@ -142,7 +142,28 @@ Maestro externo, nombre literal. Dos hojas.
 
 #### 3.b. Hoja `Diccionario`
 
-- **Estructura real, la trampa más importante de todo el archivo** (✅ `docs/Centrales_real.xlsx`):
+> **Formato nuevo (recomendado)** — ✅ `docs/Centrales_Diccionario_propuesta.xlsx`. El usuario
+> propuso reemplazar los bloques lado a lado por **UNA sola tabla** con una fila de encabezados:
+>
+> ```text
+> Balance_BESS                 FD                        Subastas        Ofertas         FMA_CPF
+> SAE-TOCOPILLA                SAE TOCOPILLA             BAT_TOCOPILLA                   Tocopilla - BESS
+> SAE-CRCA-PFV-ANDES3          BESS PFV ANDES SOLAR III  SAE-CRCA-PFV-ANDES3  BAT_ANDES_3_FV  ...
+> ```
+>
+> La primera columna es el nombre canónico (el que usa el resto del programa) y cada una de las
+> demás dice cómo se llama esa misma central en cada origen. Es el **único** formato que tiene
+> lugar para la nomenclatura de **FMA CPF**: con el formato viejo esa equivalencia no existía y
+> el FMA de las filas CPF se buscaba con la `Configuración` tal cual, sin encontrar nada.
+> Además, con el formato nuevo las homologaciones de FD y de FMA CPF se buscan por el nombre de
+> **Subastas** (`BAT_TOCOPILLA`), que es lo que trae el Access, y no por el canónico.
+>
+> Los dos formatos se aceptan: `encabezado_diccionario()` (en `Script/nucleo/lectura.py`)
+> detecta cuál es, y `filas_diccionario()` / `mapa_diccionario()` dan acceso por nombre de
+> columna. Lo que sigue describe el formato viejo, que no cambió.
+
+- **Estructura real del formato viejo, la trampa más importante de todo el archivo**
+  (✅ `docs/Centrales_real.xlsx`):
   **NO** es "una fila = todos los sinónimos de una central". Son **varias tablas de equivalencia
   independientes, una al lado de la otra**, separadas por columnas que están **enteramente en
   blanco en todas las filas** del archivo. En el caso real:
@@ -384,9 +405,11 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 - **Funciones que los leen**: `Script/Subastas/Fma.py` (leer + normalizar) y
   `nucleo.calcular_fma_subastas()` (el cruce contra cada fila de Subastas).
 - **Dependencia auxiliar**: la equivalencia `Configuración → central como la nombra fma_cpf` vive
-  en un bloque de la hoja `Diccionario` de `Centrales.xlsx` titulado **`FMA CPF`**
-  (`TITULO_BLOQUE_FMA_CPF`). Si ese bloque no está, se busca con el nombre tal cual y se avisa en
-  el log.
+  en la columna **`FMA_CPF`** de la hoja `Diccionario` de `Centrales.xlsx` (`TITULO_BLOQUE_FMA_CPF`),
+  que **solo existe en el formato nuevo de esa hoja** (ver 3.b). Si no está, se busca con el
+  nombre tal cual, no se encuentra nada y el FMA de las filas CPF queda en 0 — es exactamente la
+  diferencia de FMA en CPF que reportó el usuario. La clave del cruce es el nombre de **Subastas**
+  (`BAT_TOCOPILLA`), con el canónico como alternativa.
 - **Lo que todavía falta**: el **Vector de Participación CSF** (`DB!AC`), que multiplica al FMA de
   las filas CSF. Vive en la hoja `CSF_FD` de la planilla 3 y es parte de la trazabilidad de FD,
   todavía sin documentar. Hasta entonces se usa 1
@@ -424,10 +447,13 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 
 ---
 
-### 7b. `Subastas/3_REMUNERACIÓN_SUBASTAS_E_ID_*.xlsx` — **respaldo, ya no es el origen**
+### 7b. `Subastas/3_REMUNERACIÓN_SUBASTAS_E_ID_*.xlsx` — **eliminada del programa**
 
-> Desde esta sesión esta planilla **solo se usa si `DB subastas/` no tiene ningún Access del
-> período**. Lo que sigue describe ese camino de respaldo, que no cambió.
+> El usuario confirmó que esta planilla **ya no se usa**: se sacó de la ventana y del código
+> (`construir_subastas()`, `buscar_archivo_subastas()`, `PATRON_NOMBRE_SUBASTAS`,
+> `HOJA_SUBASTAS_ORIGEN`). Nunca fue el origen —ella misma se arma pegando lo que sale de los
+> Access de la sección 7—. Lo que sigue queda como **documentación histórica** del formato, que
+> sigue siendo útil para entender de dónde vienen los nombres de columna de la hoja `Subastas`.
 
 
 - **Patrón**: cualquier Excel cuyo nombre empiece con `3_REMUNERACIÓN_SUBASTAS_E_ID_`. Si hay más
@@ -490,6 +516,7 @@ resumen) y comparar celda a celda contra la hoja equivalente de nuestra salida.
 | `docs/Libro1_Subastas_real.xlsx` | Hojas `FD`, `subastas`, `E COSTOS` (con los **merges reales** de Excel, `ws.merged_cells`), `Resumen` | Fuente de `NOMBRES_SUBASTAS`, `NOMBRES_FD_CSF/CPF`, y de `GRUPOS_CALCULO_E_COSTOS` (encabezados de grupo combinados) |
 | `docs/Centrales_real.xlsx` | Copia completa del `Centrales.xlsx` real (`Resumen BESS` + `Diccionario`) | Fuente de la corrección de `construir_homologacion()` y del índice VLOOKUP real de `Resumen BESS` |
 | `docs/SOC_real_2607.xlsx` | Copia completa de un `SOC_AAMM.xlsx` real | Fuente de la corrección de `detectar_fila_nombres()` (fila 2, no la 3) |
+| `docs/Centrales_Diccionario_propuesta.xlsx` | La propuesta del usuario para `Centrales.xlsx`: `Resumen BESS` con `Propietario`, y `Diccionario` como una sola tabla `Balance_BESS \| FD \| Subastas \| Ofertas \| FMA_CPF` | El formato nuevo de la hoja `Diccionario` (ver 3.b); es el que permite homologar la nomenclatura de FMA CPF |
 
 **Cuando el usuario manda un Excel de comparación nuevo** (ej. una hoja pegada tipo
 `"<algo> planilla 11"` o `"<HOJA> P11"`): asumir que trae, en alguna hoja, **nuestra salida actual

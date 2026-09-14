@@ -7,6 +7,9 @@ import calendar
 import pandas as pd
 from pathlib import Path
 
+from .lectura import (
+    ROL_BALANCE_BESS, ROL_OFERTAS, ROL_SUBASTAS, filas_diccionario,
+)
 from .parametros import INICIO_VENTANA
 from .utiles import (
     ErrorEntrada, _es_numero, _texto_seguro, _tiene_valor, _valor_clave,
@@ -398,11 +401,38 @@ def cargar_resumen_en_medidores(
 
 def _mapas_homologacion_fge(diccionario):
     """
-    Precalcula, desde Diccionario!F y Diccionario!G (columnas 6 y 7,
-    indices 5 y 6), el mapa hacia Diccionario!E (columna 5, indice 4)
+    Precalcula los dos mapas "nombre de un origen -> nombre canonico"
     que usa la formula de Medidores!V. Ante nombres repetidos se
     conserva el primero, igual que XLOOKUP con la primera coincidencia.
+
+    FORMATO NUEVO de la hoja Diccionario (tabla unica con encabezados,
+    ver lectura.py): mapa_f sale de la columna "Subastas" y mapa_g de
+    la columna "Ofertas", las dos hacia "Balance_BESS". Es exactamente
+    el mismo par de mapas que daba el formato viejo, solo que las
+    columnas ahora se encuentran por su nombre en vez de por su
+    posicion.
+
+    FORMATO VIEJO (bloques lado a lado): Diccionario!F y Diccionario!G
+    (columnas 6 y 7, indices 5 y 6) hacia Diccionario!E (indice 4).
     """
+
+    filas = filas_diccionario(diccionario)
+
+    if filas:
+
+        mapa_f = {}
+        mapa_g = {}
+
+        for fila in filas:
+
+            valor_e = _texto_seguro(fila.get(ROL_BALANCE_BESS))
+
+            for mapa, rol in ((mapa_f, ROL_SUBASTAS), (mapa_g, ROL_OFERTAS)):
+                clave = _normalizar_nombre_clave(fila.get(rol))
+                if clave and clave not in mapa:
+                    mapa[clave] = valor_e
+
+        return mapa_f, mapa_g
 
     mapa_f = {}
     mapa_g = {}
@@ -478,8 +508,9 @@ def calcular_r(df_medidores, df_wxy, diccionario, registrar=print):
             f"{no_encontrados:,} fila(s) de Medidores no encontraron "
             "coincidencia (Dia + central homologada) en la tabla de "
             "Ofertas SSCC al calcular la columna R. Revisar que todas "
-            "las centrales de Medidores!clave esten homologadas en "
-            "Diccionario!E:F:G."
+            "las centrales de Medidores!clave esten en la hoja "
+            "Diccionario de Centrales.xlsx (columnas Subastas y "
+            "Ofertas hacia Balance_BESS; en el formato viejo, E:F:G)."
         )
 
     registrar(f"  Columna R (Oferta_Completa_Dia): {no_encontrados:,} sin match")
@@ -613,3 +644,117 @@ def calcular_t(clave, ventana, resumen_ventana_oferta):
     t = (1 - cruzado["Completa"]).astype("Int64")
 
     return t, int(t.isna().sum())
+
+
+# ============================================================
+# LA HOJA "Ofertas SSCC" DEL CONSOLIDADO
+# ============================================================
+
+# Titulo de cada una de las dos tablas de la hoja. Los usa escritura.py
+# para escribirlas y leer_ofertas_sscc_consolidado() para encontrarlas:
+# si alguien cambia uno, las dos puntas se mueven juntas.
+HOJA_OFERTAS_SSCC = "Ofertas SSCC"
+TITULO_OFERTAS_POR_DIA = (
+    "Ofertas SSCC por dia (equivalente a Medidores!W:Y)"
+)
+TITULO_RESUMEN_VENTANA = (
+    "Resumen ventana oferta (equivalente a Medidores!AB:AE)"
+)
+
+
+def leer_ofertas_sscc_consolidado(ruta_consolidado, registrar=print):
+    """
+    Las dos tablas de la hoja "Ofertas SSCC" de
+    Consolidado_entradas.xlsx: (df_wxy, df_resumen_ventana).
+
+    La hoja las guarda una al lado de la otra, cada una con su titulo
+    arriba y su propia fila de encabezados debajo (ver
+    _escribir_tabla_con_titulo). Se las ubica por ese titulo, no por
+    una posicion fija de columna: si maniana se agrega una tabla mas o
+    cambia el ancho de la primera, esto sigue andando.
+    """
+
+    ruta_consolidado = Path(ruta_consolidado)
+
+    try:
+        crudo = pd.read_excel(
+            ruta_consolidado, sheet_name=HOJA_OFERTAS_SSCC, header=None
+        )
+    except ValueError as error:
+        raise ErrorEntrada(
+            f"{ruta_consolidado.name} no tiene la hoja "
+            f"'{HOJA_OFERTAS_SSCC}' todavia. Genera "
+            f"Consolidado_entradas.xlsx primero (tildando "
+            f"'Ofertas SSCC')."
+        ) from error
+
+    if crudo.empty:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_OFERTAS_SSCC}' de {ruta_consolidado.name} "
+            f"esta vacia. Actualizala con su boton en la ventana."
+        )
+
+    def _tabla(titulo):
+
+        columna = None
+
+        for col in range(crudo.shape[1]):
+            if _texto_seguro(crudo.iloc[0, col]) == titulo:
+                columna = col
+                break
+
+        if columna is None:
+            raise ErrorEntrada(
+                f"La hoja '{HOJA_OFERTAS_SSCC}' de "
+                f"{ruta_consolidado.name} no tiene la tabla "
+                f"'{titulo}'. Actualizala con su boton en la ventana."
+            )
+
+        # El ancho es el bloque de encabezados no vacios que arranca en
+        # esa columna (las tablas quedan separadas por columnas vacias).
+        ancho = 0
+        while (
+            columna + ancho < crudo.shape[1]
+            and _texto_seguro(crudo.iloc[1, columna + ancho])
+        ):
+            ancho += 1
+
+        encabezados = [
+            _texto_seguro(crudo.iloc[1, columna + i]) for i in range(ancho)
+        ]
+
+        datos = crudo.iloc[2:, columna:columna + ancho].reset_index(drop=True)
+        datos = datos.set_axis(encabezados, axis=1)
+
+        # La tabla mas corta viene con filas de relleno vacias abajo
+        # (las que ocupa la otra): se cortan.
+        con_datos = datos.map(lambda v: bool(_texto_seguro(v))).any(axis=1)
+        ultima = con_datos[con_datos].index.max()
+
+        if pd.isna(ultima):
+            return datos.iloc[:0]
+
+        return datos.iloc[: int(ultima) + 1]
+
+    df_wxy = _tabla(TITULO_OFERTAS_POR_DIA)
+    df_resumen_ventana = _tabla(TITULO_RESUMEN_VENTANA)
+
+    # Vuelven de Excel como texto/object: las columnas con las que se
+    # cruza contra Medidores tienen que ser numeros otra vez.
+    for columna in ("Dia", "Oferta completa"):
+        if columna in df_wxy.columns:
+            df_wxy[columna] = pd.to_numeric(df_wxy[columna], errors="coerce")
+
+    for columna in ("Ventana T", "Oferta", "Completa"):
+        if columna in df_resumen_ventana.columns:
+            df_resumen_ventana[columna] = pd.to_numeric(
+                df_resumen_ventana[columna], errors="coerce"
+            )
+
+    registrar(
+        f"  Ofertas SSCC desde el consolidado: {len(df_wxy):,} fila(s) "
+        f"central x dia, {len(df_resumen_ventana):,} grupo(s) "
+        f"central x ventana."
+    )
+
+    return df_wxy, df_resumen_ventana

@@ -7,7 +7,10 @@ import pandas as pd
 
 from .externos import desempeno_fd, fma_subastas
 from .hojas_entrada import NOMBRES_SUBASTAS
-from .lectura import _bloques_columnas_diccionario
+from .lectura import (
+    ROL_BALANCE_BESS, ROL_SUBASTAS, TITULOS_DICCIONARIO,
+    _bloques_columnas_diccionario, _clave_titulo, mapa_diccionario,
+)
 from .parametros import (
     ARCHIVO_CENTRALES, CARPETA_FD_FMA, HOJA_DICCIONARIO,
 )
@@ -71,16 +74,42 @@ CTF_MAS_BUSCA_EN_LAS_DOS_TABLAS = False
 
 def construir_dic_bloque_diccionario(diccionario, titulo):
     """
-    Mapa columna_izquierda -> columna_derecha del bloque de la hoja
-    Diccionario cuyo TITULO (primera fila) contiene el texto dado.
+    Mapa "como se llama esta central en Subastas" -> "como se llama en
+    <titulo>", leyendo la hoja Diccionario de Centrales.xlsx.
 
-    Reusa _bloques_columnas_diccionario(): la hoja son varias tablas
-    independientes puestas lado a lado ("FD" en A:B, "Subastas" en
-    E:F:G, "ofertas" en G...), cada una con su titulo arriba. Devuelve
-    {} si no hay ningun bloque con ese titulo.
+    FORMATO NUEVO (tabla unica con encabezados, ver lectura.py): la
+    clave sale de la columna "Subastas" Y TAMBIEN de la columna
+    "Balance_BESS", porque las dos apuntan a la misma central y quien
+    llama busca con la Configuración de la hoja Subastas -que para casi
+    todas las centrales coincide con el nombre canonico, pero para
+    Tocopilla es BAT_TOCOPILLA-. Cargar las dos es lo que arregla las
+    diferencias de FMA CPF y de FD que reporto el usuario: con el
+    formato viejo la clave era siempre el nombre canonico y
+    BAT_TOCOPILLA no encontraba nada.
+
+    FORMATO VIEJO (bloques lado a lado): se conserva el comportamiento
+    de siempre -el bloque cuyo TITULO contiene el texto dado, columna
+    izquierda -> columna derecha-. Devuelve {} si no hay ningun bloque
+    con ese titulo (es el caso de "FMA CPF", que en el formato viejo
+    nunca existio).
     """
 
-    objetivo = normalizar(titulo)
+    objetivo = _clave_titulo(titulo)
+    rol = TITULOS_DICCIONARIO.get(objetivo)
+
+    if rol is not None:
+
+        dic = mapa_diccionario(diccionario, ROL_SUBASTAS, rol)
+
+        if dic:
+            # El nombre canonico como clave alternativa, sin pisar lo
+            # que ya puso la columna Subastas.
+            for clave, valor in mapa_diccionario(
+                diccionario, ROL_BALANCE_BESS, rol
+            ).items():
+                dic.setdefault(clave, valor)
+
+            return dic
 
     for columnas in _bloques_columnas_diccionario(diccionario):
 
@@ -88,7 +117,7 @@ def construir_dic_bloque_diccionario(diccionario, titulo):
             continue
 
         titulos = [
-            normalizar(diccionario.iloc[0, col]) for col in columnas
+            _clave_titulo(diccionario.iloc[0, col]) for col in columnas
         ]
 
         if not any(objetivo in t for t in titulos if t):
@@ -102,7 +131,7 @@ def construir_dic_bloque_diccionario(diccionario, titulo):
             clave = normalizar(diccionario.iloc[indice, izquierda])
             valor = diccionario.iloc[indice, derecha]
 
-            if not clave or normalizar(clave) == objetivo:
+            if not clave or _clave_titulo(clave) == objetivo:
                 continue
 
             if clave not in dic and _tiene_valor(valor):

@@ -70,9 +70,10 @@ from .parametros import (
     HOJA_PRORRATA_RETIROS, HOJA_RESUMEN,
     HOJA_CMG_ORIGEN, HOJA_CPF_HORARIO, HOJA_CSF_HORARIO,
     HOJA_DICCIONARIO, HOJA_MEDIDAS_SAE, HOJA_RESUMEN_BESS,
-    HOJA_SUBASTAS_ORIGEN, INICIO_VENTANA, LETRA_A_CAMPO, PATRON_AAMM,
+    COLUMNAS_OFERTAS_EN_MEDIDORES, INICIO_VENTANA, LETRA_A_CAMPO,
+    PATRON_AAMM,
     PATRON_NOMBRE_OFERTAS, PATRON_NOMBRE_SSCC_DESEMPENO,
-    PATRON_NOMBRE_SUBASTAS, UMBRAL_SOC,
+    UMBRAL_SOC,
 )
 from .utiles import (
     ErrorEntrada, _columna_clave_vba, _entero_a_texto, _es_numero,
@@ -94,7 +95,7 @@ from .manifiesto import (
 from .rutas import (
     _buscar_archivo_excel_mas_reciente, _es_archivo_de_soc,
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
-    buscar_archivo_subastas, buscar_soc, periodo_desde_aamm,
+    buscar_soc, periodo_desde_aamm,
     resolver_rutas, validar_aamm,
 )
 from .estructura import (
@@ -107,6 +108,9 @@ from .prorrata_retiros import (
     construir_prorrata_retiros, construir_resumen, leer_prorrata_retiros,
 )
 from .lectura import (
+    ROL_BALANCE_BESS, ROL_FD, ROL_FMA_CPF, ROL_OFERTAS, ROL_SUBASTAS,
+    TITULOS_DICCIONARIO, encabezado_diccionario, filas_diccionario,
+    mapa_diccionario,
     _bloques_columnas_diccionario, _leer_hoja_con_encabezado,
     _leer_resumen_bess, construir_homologacion, leer_centrales,
     leer_medidas_sae,
@@ -122,13 +126,15 @@ from .ofertas_sscc import (
     _servicio_termina_en_rs, _valor_oferta_binario, calcular_r,
     calcular_s, calcular_t, cargar_resumen_en_medidores,
     construir_resumen_ofertas_sscc, construir_resumen_ventana_oferta,
+    HOJA_OFERTAS_SSCC, TITULO_OFERTAS_POR_DIA, TITULO_RESUMEN_VENTANA,
+    leer_ofertas_sscc_consolidado,
 )
 from .hojas_entrada import (
     NOMBRES_FD_CPF, NOMBRES_FD_CSF, NOMBRES_SUBASTAS,
     _construir_bloque_fd_cpf, _construir_bloque_fd_csf,
     _contiene_bess_o_sae_sin_bat, _dia_hora_mes_fd,
     _filtrar_bess_sae_posicional, _ordenar_subastas_por_hora_mes,
-    construir_fd, construir_subastas, leer_cmg,
+    construir_fd, leer_cmg, leer_fd_consolidado,
 )
 from .subastas_accdb import (
     COLUMNA_ENERGIA_SSCC_ACCDB, _control_desde_servicio,
@@ -151,6 +157,7 @@ from .diccionarios import (
 from .ecostos import (
     GRUPOS_CALCULO_E_COSTOS, NOMBRES_CALCULO_E_COSTOS,
     completar_calculo_e_costos_grupos, construir_calculo_e_costos,
+    renombrar_calculo_e_costos,
 )
 from .columnas_compartidas import (
     _construir_set_subastas_tipo, calcular_l, calcular_m, calcular_n_o,
@@ -189,10 +196,11 @@ from .re545_componentes import (
 )
 from .medidores import (
     calcular_clave_auxiliar, calcular_indicador_soc, calcular_ventana,
-    construir_medidores,
+    completar_ofertas_en_medidores, construir_medidores,
+    construir_ofertas_sscc,
 )
 from .escritura import (
-    HOJA_OFERTAS_SSCC, _COLUMNA_Q_INDICE, _HOJAS_CONSOLIDADO,
+    _COLUMNA_Q_INDICE, _HOJAS_CONSOLIDADO,
     _HOJAS_PAGOS, _copiar_hoja_existente, _escribir_encabezados_grupo,
     _escribir_tabla_con_titulo, escribir_pagos_bess, escribir_salida,
 )
@@ -227,15 +235,16 @@ __all__ = [
     "HOJA_CALCULO_RE545", "HOJA_PRORRATA_RETIROS", "HOJA_RESUMEN",
     "HOJA_CMG_ORIGEN", "HOJA_CPF_HORARIO",
     "HOJA_CSF_HORARIO", "HOJA_DICCIONARIO", "HOJA_MEDIDAS_SAE",
-    "HOJA_RESUMEN_BESS", "HOJA_SUBASTAS_ORIGEN", "INICIO_VENTANA",
-    "LETRA_A_CAMPO", "PATRON_AAMM", "PATRON_NOMBRE_OFERTAS",
-    "PATRON_NOMBRE_SSCC_DESEMPENO", "PATRON_NOMBRE_SUBASTAS",
+    "HOJA_RESUMEN_BESS", "INICIO_VENTANA",
+    "LETRA_A_CAMPO", "COLUMNAS_OFERTAS_EN_MEDIDORES",
+    "PATRON_AAMM", "PATRON_NOMBRE_OFERTAS",
+    "PATRON_NOMBRE_SSCC_DESEMPENO",
     "UMBRAL_SOC", "ErrorEntrada", "_columna_clave_vba",
     "_entero_a_texto", "_es_numero", "_normaliza_valor_vba",
     "_texto_seguro", "_tiene_valor", "_valor_clave", "normalizar",
     "_avisar_claves_sin_mapeo", "_buscar_archivo_excel_mas_reciente",
     "_es_archivo_de_soc", "buscar_archivo_ofertas",
-    "buscar_archivo_sscc_desempeno", "buscar_archivo_subastas",
+    "buscar_archivo_sscc_desempeno",
     "buscar_soc", "periodo_desde_aamm", "resolver_rutas",
     "validar_aamm", "SECCIONES_CONSOLIDADO", "SECCIONES_PAGOS", "_fila",
     "COLUMNAS_ORIGEN", "HOJA_ORIGEN", "TOLERANCIA_PRORRATA",
@@ -243,7 +252,10 @@ __all__ = [
     "construir_prorrata_retiros", "construir_compensacion_total",
     "construir_resumen",
     "_filas_de_hojas", "hojas_con_datos", "hojas_de",
-    "revisar_estructura", "_bloques_columnas_diccionario",
+    "revisar_estructura", "ROL_BALANCE_BESS", "ROL_FD", "ROL_FMA_CPF",
+    "ROL_OFERTAS", "ROL_SUBASTAS", "TITULOS_DICCIONARIO",
+    "encabezado_diccionario", "filas_diccionario", "mapa_diccionario",
+    "_bloques_columnas_diccionario",
     "_leer_hoja_con_encabezado", "_leer_resumen_bess",
     "construir_homologacion", "leer_centrales", "leer_medidas_sae",
     "_extraer_nombre_desde_ruta_scada", "detectar_bloques",
@@ -258,7 +270,7 @@ __all__ = [
     "_construir_bloque_fd_csf", "_contiene_bess_o_sae_sin_bat",
     "_dia_hora_mes_fd", "_filtrar_bess_sae_posicional",
     "_ordenar_subastas_por_hora_mes", "construir_fd",
-    "construir_subastas", "leer_cmg", "COLUMNA_ENERGIA_SSCC_ACCDB",
+    "leer_cmg", "leer_fd_consolidado", "COLUMNA_ENERGIA_SSCC_ACCDB",
     "_control_desde_servicio", "_sub_baj_desde_servicio",
     "calcular_hora_mes_subastas", "construir_mapa_propietario",
     "construir_subastas_desde_accdb", "CTF_MAS_BUSCA_EN_LAS_DOS_TABLAS",
@@ -272,6 +284,7 @@ __all__ = [
     "construir_dic_resumen_eficiencia", "construir_dic_resumen_factor",
     "construir_mapa_barra", "GRUPOS_CALCULO_E_COSTOS",
     "NOMBRES_CALCULO_E_COSTOS", "completar_calculo_e_costos_grupos",
+    "renombrar_calculo_e_costos",
     "construir_calculo_e_costos", "_construir_set_subastas_tipo",
     "calcular_l", "calcular_m", "calcular_n_o",
     "_calcular_asignacion_energia", "calcular_ae_af",
@@ -294,7 +307,10 @@ __all__ = [
     "calcular_bi_bj_re545", "calcular_bk_bl_bm_bs_re545",
     "calcular_componentes_re545", "calcular_clave_auxiliar",
     "calcular_indicador_soc", "calcular_ventana", "construir_medidores",
-    "HOJA_OFERTAS_SSCC", "_COLUMNA_Q_INDICE", "_HOJAS_CONSOLIDADO",
+    "construir_ofertas_sscc", "completar_ofertas_en_medidores",
+    "HOJA_OFERTAS_SSCC", "TITULO_OFERTAS_POR_DIA",
+    "TITULO_RESUMEN_VENTANA", "leer_ofertas_sscc_consolidado",
+    "_COLUMNA_Q_INDICE", "_HOJAS_CONSOLIDADO",
     "_HOJAS_PAGOS", "_copiar_hoja_existente",
     "_escribir_encabezados_grupo", "_escribir_tabla_con_titulo",
     "escribir_pagos_bess", "escribir_salida", "generar_consolidado",

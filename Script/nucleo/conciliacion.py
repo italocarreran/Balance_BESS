@@ -30,16 +30,37 @@ TOLERANCIA_RELATIVA = 1e-9
 TOLERANCIA_ABSOLUTA = 1e-6
 
 
+# Las dos hojas se concilian SIEMPRE con los nombres internos de
+# columna, no con los reales del Excel ("Descarga kWh"/"Carga kWh"):
+# despues de renombrar, el indice de columnas tiene nombres repetidos a
+# proposito y ya no se puede indexar por nombre sin ambiguedad.
+COLUMNAS_ENERGIA = ("Energia_Positiva", "Energia_Negativa")
+
+
 def _energia_total(df):
     """Energia de una hoja de calculo: positiva + negativa."""
 
     if df is None or df.empty:
         return 0.0
 
-    positiva = pd.to_numeric(df["Energia_Positiva"], errors="coerce").fillna(0.0)
-    negativa = pd.to_numeric(df["Energia_Negativa"], errors="coerce").fillna(0.0)
+    faltantes = [c for c in COLUMNAS_ENERGIA if c not in df.columns]
 
-    return float(positiva.sum() + negativa.sum())
+    if faltantes:
+        raise KeyError(
+            f"La hoja que llego a conciliar no tiene {faltantes}: "
+            f"se esperaban los nombres INTERNOS de columna, no los del "
+            f"Excel ya renombrados. Columnas recibidas: "
+            f"{list(df.columns)[:12]}..."
+        )
+
+    total = 0.0
+
+    for columna in COLUMNAS_ENERGIA:
+        total += float(
+            pd.to_numeric(df[columna], errors="coerce").fillna(0.0).sum()
+        )
+
+    return total
 
 
 def conciliar_energia(

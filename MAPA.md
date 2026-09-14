@@ -28,7 +28,7 @@ Script/
         estructura.py          <- el arbol que dibuja la ventana
         lectura.py             <- Medidas_SAE.xlsx y Centrales.xlsx
         soc.py                 <- el SoC por bloques del SCADA
-        ofertas_sscc.py        <- Ofertas SSCC y Medidores R, S, T, V
+        ofertas_sscc.py        <- la hoja Ofertas SSCC (y R, S, T, V)
         hojas_entrada.py       <- hojas CMg, FD y Subastas
         subastas_accdb.py      <- Subastas desde los Access
         fma.py                 <- Subastas!Q (FMA) y Subastas!P (FD)
@@ -255,9 +255,10 @@ importable como cualquier módulo.
 ## `Script/Subastas/Ofertas_Adjudicadas.py`
 
 - **Qué hace:** todo lo que sabe de los Access de subastas, que son el
-  **origen real** de la hoja `Subastas`. Hasta esta sesión las subastas se
-  leían de la hoja `DB` de la planilla 3
-  (`3_REMUNERACIÓN_SUBASTAS_E_ID_*`), pero esa planilla no es el origen:
+  **origen real** de la hoja `Subastas`. Antes las subastas se leían de la
+  hoja `DB` de la planilla 3 (`3_REMUNERACIÓN_SUBASTAS_E_ID_*`, que desde
+  esta sesión ya no se usa ni aparece en la ventana), pero esa planilla
+  nunca fue el origen:
   ella misma se arma pegando la salida de `entradas_sscc.py` (script suelto,
   autor original Gerardo.Vieyra), que lee los `OfertasSSCCAdj*.accdb`. Este
   módulo replica esa rutina (`calc_subastas`) con tres cambios pedidos por el
@@ -510,17 +511,45 @@ importable como cualquier módulo.
   (hojas `Medidores`, `Ofertas SSCC`, `CMg`, `FD`, `Subastas`, `Log`) y
   `Pagos_BESS.xlsx` (hoja `Calculo E Costos`, nombre y alcance provisorios).
 
-  **Medidores** (A:U): calculadas J (SoC), K (Copia_Ventana = copia de L),
-  L (Ventana), N (Clave_Dia_HoraMes), O (Indicador_SoC), R
-  (Oferta_Completa_Dia), S (Indicador_Ventana_Oferta), T
-  (Ventana_No_Completa). Deliberadamente vacías (diseño confirmado, no
-  pendiente): M, P, Q, U. `V, W, X, Y, AB, AC, AD, AE` del plan **no son
-  columnas de `Medidores`**: son tablas auxiliares de otro largo (central ×
-  día, central × ventana) que se calculan y se escriben juntas en una sola
-  hoja (`HOJA_OFERTAS_SSCC = "Ofertas SSCC"`) — ver plan §20.1 y §22. El
-  resumen intermedio equivalente a la hoja "Resumen Ofertas SSCC" del
-  `.xlsm` original es puramente auxiliar para construir la tabla W:Y: no se
-  persiste.
+  **Medidores** (A:Q + U): calculadas J (SoC), K (Copia_Ventana = copia de
+  L), L (Ventana), N (Clave_Dia_HoraMes), O (Indicador_SoC).
+  Deliberadamente vacías (diseño confirmado, no pendiente): M, P, Q, U.
+
+  **R, S y T ya NO están en `Medidores`** (pedido del usuario:
+  "independizar Medidas de ofertas"). Las tres salen de Ofertas SSCC y
+  viven, derivadas, donde corresponde:
+
+  | Columna original | De dónde sale ahora |
+  |---|---|
+  | R `Oferta_Completa_Dia` | tabla "Ofertas SSCC por dia" (central × día) |
+  | S `Indicador_Ventana_Oferta` | R + la Ventana de Medidores |
+  | T `Ventana_No_Completa` | tabla "Resumen ventana oferta" (central × ventana) |
+
+  Las dos tablas son las que ya se escribían en la hoja `Ofertas SSCC`
+  (`V, W, X, Y, AB, AC, AD, AE` del plan **no son columnas de
+  `Medidores`**: son tablas auxiliares de otro largo que se escriben juntas
+  en esa hoja — ver `_escribir_tabla_con_titulo()`, plan §20.1 y §22).
+  `completar_ofertas_en_medidores()` reconstruye las tres columnas en
+  memoria cuando hacen falta (`generar_pagos_bess()`: T es la que reparte
+  cada fila entre `Calculo E Costos` y `Calculo RE545`), leyendo la hoja
+  `Ofertas SSCC` con `leer_ofertas_sscc_consolidado()`. Consecuencia
+  práctica: el botón **Actualizar** de `Medidores` ya no abre el archivo
+  `*OfertasSSCC*` ni lo exige. El resumen intermedio equivalente a la hoja
+  "Resumen Ofertas SSCC" del `.xlsm` original sigue siendo puramente
+  auxiliar: no se persiste.
+
+  **Hoja `Diccionario` de `Centrales.xlsx`, dos formatos** (ver
+  `Script/nucleo/lectura.py`): el viejo son varias tablas lado a lado
+  separadas por columnas vacías (`FD` en A:B, `Subastas`/`ofertas` en
+  E:F:G) y no tiene dónde poner la nomenclatura de FMA CPF; el nuevo
+  (propuesta del usuario) es UNA tabla con encabezados
+  `Balance_BESS | FD | Subastas | Ofertas | FMA_CPF`, con el nombre
+  canónico en la primera columna. Se aceptan los dos:
+  `encabezado_diccionario()` detecta cuál es y `filas_diccionario()` /
+  `mapa_diccionario()` dan acceso por nombre de columna. Con el formato
+  nuevo, las homologaciones de FD y de FMA CPF se buscan por el nombre de
+  **Subastas** (`BAT_TOCOPILLA`, no `SAE-TOCOPILLA`), que es lo que arregla
+  las diferencias de FMA en CPF y las de CSF que quedaban en cero.
 
   **Subastas desde su origen real** (esta sesión): `Subastas` ya no sale de
   la planilla 3 sino de los Access. `construir_subastas_desde_accdb()` arma
@@ -541,10 +570,17 @@ importable como cualquier módulo.
   `SSCC_Desempeño_*` y el FMA de las tres salidas `fma_*`, con el Vector de
   Participación CSF que también sale del `SSCC_Desempeño_*`. La única que
   queda vacía es `Ciclo`, que se calcula después en `Calculo E Costos`.
+  La hoja **no se ordena**: sale en el orden del origen. (Se ordenó por
+  `Hora_mes` durante dos sesiones, a pedido del usuario, y el usuario pidió
+  deshacerlo. `_ordenar_subastas_por_hora_mes()` quedó como el único lugar
+  donde se decide el orden, hoy un `reset_index` y nada más: ninguna
+  columna de más abajo depende del orden de las filas, todas cruzan por
+  clave.)
 
   **CMg**, **FD**, **Subastas** (plan §23): replican únicamente las macros
-  de *carga* (`Cargar_CMg_Desde_Archivo`, `Cargar_SSCC_Desempeno_En_FD`,
-  `Cargar_Remuneracion_Subastas_Rapido`), no las que las consumen después
+  de *carga* (`Cargar_CMg_Desde_Archivo`, `Cargar_SSCC_Desempeno_En_FD`;
+  `Cargar_Remuneracion_Subastas_Rapido` se eliminó junto con la planilla 3),
+  no las que las consumen después
   (`Asignar_CMg_a_Calculos_Turbo`, `Actualizar_Calculos_Columnas`), que
   pertenecen a una etapa posterior sin implementar. `FD` tiene el mismo
   patrón de "dos tablas de distinto largo compartiendo hoja" que Ofertas
@@ -651,8 +687,10 @@ importable como cualquier módulo.
     opcional: las centrales que se miden por la API de operación real), solo
     para generar `Medidas_SAE.xlsx`
   - `<CARPETA_BASE>/Auxiliares/Centrales.xlsx` (hojas `Resumen BESS` y
-    `Diccionario`; `Diccionario` columnas E/F/G — índices 4/5/6 — se usan
-    específicamente para homologar Ofertas SSCC; `Resumen BESS` columnas
+    `Diccionario`; en el formato viejo de `Diccionario` las columnas E/F/G
+    — índices 4/5/6 — se usan específicamente para homologar Ofertas SSCC,
+    y en el nuevo eso sale de las columnas `Subastas`/`Ofertas` hacia
+    `Balance_BESS`; `Resumen BESS` columnas
     `Nombre activo`/`Barra inyección` se usan para `Calculo E Costos!Barra`)
   - Un archivo `.xlsx`/`.xlsm`/`.xlsb`/`.xls` dentro de
     `<CARPETA_BASE>/Ofertas/` cuyo nombre contenga "OfertasSSCC" (más
@@ -669,10 +707,9 @@ importable como cualquier módulo.
     en `<CARPETA_BASE>/Subastas/DB subastas/` — **el origen real de la hoja
     `Subastas` desde esta sesión** (ver `Script/Subastas/`). La carpeta la
     crea el programa si no existe y se llena con el botón "Traer subastas".
-  - Un archivo Excel dentro de `<CARPETA_BASE>/Subastas/` cuyo nombre
-    empiece con "3_REMUNERACIÓN_SUBASTAS_E_ID_" (más reciente si hay
-    varios), hoja `DB`: **solo como respaldo**, se usa únicamente si
-    `DB subastas/` no tiene ningún Access del período. Ya no es el origen
+  - La planilla `3_REMUNERACIÓN_SUBASTAS_E_ID_*` **ya no se usa** (el
+    usuario lo confirmó): se sacó de la ventana y del código. Nunca fue el
+    origen
 - **Produce:**
   - `<CARPETA_BASE>/Consolidado_entradas.xlsx`, hojas: `Medidores`, `Ofertas
     SSCC` (las tablas W:Y y AB:AE equivalentes, una al lado de la otra — ver
@@ -680,8 +717,11 @@ importable como cualquier módulo.
     a lado, columnas A:M y Q:AE, con sus nombres reales), `Subastas` (con
     sus nombres reales), `Log`.
   - `<CARPETA_BASE>/Pagos_BESS.xlsx` (nombre provisorio), hoja `Calculo E
-    Costos` hasta `AV` (ver más arriba; `generar_pagos_bess()` ahora
-    también requiere el archivo `SSCC_Desempeño_*` para `AM:AR`).
+    Costos` hasta `AV` (ver más arriba). `AM:AR` sale de la hoja `FD` del
+    propio `Consolidado_entradas.xlsx` (`leer_fd_consolidado()`), no de
+    releer el `SSCC_Desempeño_*`: el consolidado es la única foto de las
+    entradas con la que se calcula, igual que ya pasaba con `Medidores` y
+    `Subastas`.
 - **Expone (funciones clave agregadas hasta ahora, además de las básicas
   de E/S y homologación):**
   - Diagnóstico de homologaciones: `_avisar_claves_sin_mapeo()` agrupa por
@@ -765,12 +805,12 @@ importable como cualquier módulo.
   - `SECCIONES_CONSOLIDADO` — tupla de `(id, etiqueta, descripción, hojas)`
     por cada casilla de la ventana "Generar" de `Consolidado_entradas.xlsx`.
     `"medidores"` y `"ofertas_sscc"` son ids SEPARADOS (una casilla cada
-    uno, cada una decide si se reescribe su propia hoja) pero comparten
-    una unica LECTURA/calculo (`construir_medidores()` arma las dos hojas
-    de una sola pasada porque `Medidores!R:S:T` depende de Ofertas SSCC):
-    alcanza con que cualquiera de las dos este tildada para que se lean
-    Medidas_SAE + SoC + Centrales + OfertasSSCC. `"cmg"`, `"fd"`,
-    `"subastas"` si son independientes de punta a punta.
+    uno). La dependencia entre las dos se dio vuelta: ahora `Ofertas SSCC`
+    necesita `Medidores` (de ahí salen las centrales y las ventanas) y no
+    al revés, así que tildar solo `"medidores"` NO abre el archivo
+    `*OfertasSSCC*` ni lo exige; tildar `"ofertas_sscc"` recalcula
+    Medidores en memoria pero no lo reescribe si no se pidió. `"cmg"`,
+    `"fd"`, `"subastas"` siguen siendo independientes de punta a punta.
   - `generar_consolidado(carpeta_base, aamm, secciones_activas, registrar=print, progreso=None)`
     — genera/actualiza `Consolidado_entradas.xlsx` recalculando solo las
     secciones pedidas; valida los archivos de entrada únicamente para esas

@@ -21,7 +21,7 @@ from .parametros import (
 from .prorrata_retiros import buscar_archivo_prorrata
 from .rutas import (
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
-    buscar_archivo_subastas, buscar_soc, resolver_rutas, validar_aamm,
+    buscar_soc, resolver_rutas, validar_aamm,
 )
 from .utiles import ErrorEntrada, normalizar
 
@@ -495,35 +495,6 @@ def revisar_estructura(carpeta_base, aamm=None):
               detalle_db)
     )
 
-    archivo_subastas = buscar_archivo_subastas(rutas["subastas_dir"])
-    rutas["subastas"] = archivo_subastas
-
-    # La planilla 3 dejo de ser el origen: queda solo como respaldo
-    # para los casos que todavia no tienen los Access copiados, asi
-    # que su ausencia ya no es un "falta" que bloquee nada.
-    if archivo_subastas:
-        filas.append(
-            _fila(
-                "subastas", archivo_subastas.name, 1, "ok",
-                f"respaldo en {CARPETA_SUBASTAS}/ (solo se usa si "
-                f"'{CARPETA_DB_SUBASTAS}/' esta vacia)",
-            )
-        )
-    else:
-        filas.append(
-            _fila(
-                "subastas", "Archivo 3_REMUNERACIÓN_SUBASTAS_E_ID_*", 1,
-                "ok" if accdb else "pendiente",
-                (
-                    f"no esta, y ya no hace falta: las subastas salen "
-                    f"de '{CARPETA_DB_SUBASTAS}/'"
-                    if accdb else
-                    f"no esta: seria el respaldo si "
-                    f"'{CARPETA_DB_SUBASTAS}/' queda vacia"
-                ),
-            )
-        )
-
     # ---- Prorrata de retiros --------------------------------------
     agregar(
         "prorrata_dir", f"{CARPETA_PRORRATA_RETIROS}/", 0,
@@ -614,18 +585,18 @@ SECCIONES_CONSOLIDADO = (
     (
         "medidores",
         "Medidores",
-        f"Usa {ARCHIVO_MEDIDAS_SAE}, el SoC del periodo, "
-        f"{ARCHIVO_CENTRALES} y OfertasSSCC (comparte esta lectura "
-        f"con 'Ofertas SSCC' de abajo: actualizar cualquiera de las "
-        f"dos dispara la misma lectura). Esta seccion decide si se "
-        f"reescribe la hoja 'Medidores' en particular.",
+        f"Usa {ARCHIVO_MEDIDAS_SAE}, el SoC del periodo y "
+        f"{ARCHIVO_CENTRALES}. Ya NO usa OfertasSSCC: las columnas "
+        f"que salian de ahi viven en la hoja 'Ofertas SSCC'.",
         ("Medidores",),
     ),
     (
         "ofertas_sscc",
         "Ofertas SSCC",
-        "Misma lectura que 'Medidores' (arriba) -- esta seccion "
-        "decide si se reescribe la hoja 'Ofertas SSCC' en particular.",
+        f"Usa el archivo *OfertasSSCC* de {CARPETA_OFERTAS}/ y la hoja "
+        f"'Medidores' (centrales y ventanas). Guarda las dos tablas de "
+        f"las que salen las columnas R, S y T de la planilla original: "
+        f"'Medidores' ya no las trae ni depende de este archivo.",
         ("Ofertas SSCC",),
     ),
     (
@@ -648,8 +619,7 @@ SECCIONES_CONSOLIDADO = (
         f"(su origen real), y de {CARPETA_FD_FMA}/ las salidas de FMA "
         f"(fma_cpf/fma_csf/fma_cft) y el SSCC_Desempeño_* (columna FD y "
         f"Vector de Participacion CSF), mas {ARCHIVO_CENTRALES} "
-        f"(Propietario + nomenclaturas). Si esa carpeta no tiene Access "
-        f"del periodo, cae al respaldo 3_REMUNERACIÓN_SUBASTAS_E_ID_*.",
+        f"(Propietario + nomenclaturas).",
         ("Subastas",),
     ),
 )
@@ -659,17 +629,18 @@ SECCIONES_PAGOS = (
     (
         "ecostos",
         "Calculo E Costos",
-        f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
-        f"{ARCHIVO_CENTRALES}, {ARCHIVO_CMG} y el archivo "
-        f"{CARPETA_FD_FMA}/ (para el FD homologado de AM:AR).",
+        f"Usa las hojas 'Medidores', 'Ofertas SSCC', 'FD' y 'Subastas' "
+        f"de {ARCHIVO_SALIDA}, mas {ARCHIVO_CENTRALES} y "
+        f"{ARCHIVO_CMG}. El FD homologado de AM:AR sale de la hoja "
+        f"'FD' del consolidado, no de releer el SSCC_Desempeño_*.",
         (HOJA_CALCULO_ECOSTOS,),
     ),
     (
         "re545",
         "Calculo RE545",
-        f"Usa las hojas 'Medidores' y 'Subastas' de {ARCHIVO_SALIDA}, "
-        f"{ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- no necesita el "
-        f"archivo {CARPETA_FD_FMA}/.",
+        f"Usa las hojas 'Medidores', 'Ofertas SSCC' y 'Subastas' de "
+        f"{ARCHIVO_SALIDA}, mas {ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- "
+        f"no necesita el FD.",
         (HOJA_CALCULO_RE545,),
     ),
     (
