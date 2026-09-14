@@ -65,7 +65,9 @@ from .parametros import (
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_FD_FMA_ANTIGUA,
     CARPETA_MEDIDAS, CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS,
     CARPETA_SUBASTAS,
-    CARPETA_TRABAJO_MEDIDAS, COLUMNAS_AI, COLUMNAS_VACIAS,
+    CARPETA_TRABAJO_MEDIDAS, COLUMNAS_AI,
+    COLUMNAS_AUXILIARES_MEDIDORES, COLUMNAS_MEDIDORES_SALIDA,
+    COLUMNAS_VACIAS,
     EXTENSIONES_EXCEL, HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
     HOJA_PRORRATA_RETIROS, HOJA_RESUMEN,
     HOJA_CMG_ORIGEN, HOJA_CPF_HORARIO, HOJA_CSF_HORARIO,
@@ -155,6 +157,7 @@ from .diccionarios import (
     construir_mapa_barra,
 )
 from .ecostos import (
+    COLUMNAS_AUXILIARES_E_COSTOS, COLUMNAS_SALIDA_E_COSTOS,
     GRUPOS_CALCULO_E_COSTOS, NOMBRES_CALCULO_E_COSTOS,
     completar_calculo_e_costos_grupos, construir_calculo_e_costos,
     renombrar_calculo_e_costos,
@@ -178,6 +181,7 @@ from .ecostos_ciclo import (
     calcular_subastas_ciclo, construir_dic_umbrales_subastas,
 )
 from .re545 import (
+    COLUMNAS_AUXILIARES_RE545, COLUMNAS_SALIDA_RE545,
     GRUPOS_CALCULO_RE545, NOMBRES_CALCULO_RE545, calcular_s_re545,
     calcular_u_v_re545, completar_calculo_re545,
     completar_checks_resumen_re545, construir_calculo_re545,
@@ -198,8 +202,9 @@ from .re545_componentes import (
 from .medidores import (
     calcular_clave_auxiliar, calcular_indicador_soc, calcular_ventana,
     completar_ofertas_en_medidores, construir_medidores,
-    construir_ofertas_sscc,
+    construir_ofertas_sscc, reponer_auxiliares_medidores,
 )
+from .formato import formatear_hoja, formatear_libro
 from .escritura import (
     _COLUMNA_Q_INDICE, _HOJAS_CONSOLIDADO,
     _HOJAS_PAGOS, _copiar_hoja_existente, _escribir_encabezados_grupo,
@@ -232,7 +237,12 @@ __all__ = [
     "CARPETA_FD_FMA_ANTIGUA", "CARPETA_MEDIDAS", "CARPETA_OFERTAS",
     "CARPETA_PRORRATA_RETIROS",
     "CARPETA_SUBASTAS", "CARPETA_TRABAJO_MEDIDAS", "COLUMNAS_AI",
-    "COLUMNAS_VACIAS", "EXTENSIONES_EXCEL", "HOJA_CALCULO_ECOSTOS",
+    "COLUMNAS_VACIAS", "COLUMNAS_AUXILIARES_MEDIDORES",
+    "COLUMNAS_MEDIDORES_SALIDA", "COLUMNAS_AUXILIARES_E_COSTOS",
+    "COLUMNAS_SALIDA_E_COSTOS", "COLUMNAS_AUXILIARES_RE545",
+    "COLUMNAS_SALIDA_RE545", "reponer_auxiliares_medidores",
+    "formatear_hoja", "formatear_libro",
+    "EXTENSIONES_EXCEL", "HOJA_CALCULO_ECOSTOS",
     "HOJA_CALCULO_RE545", "HOJA_PRORRATA_RETIROS", "HOJA_RESUMEN",
     "HOJA_CMG_ORIGEN", "HOJA_CPF_HORARIO",
     "HOJA_CSF_HORARIO", "HOJA_DICCIONARIO", "HOJA_MEDIDAS_SAE",

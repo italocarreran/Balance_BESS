@@ -449,3 +449,26 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   siempre juntos, no se pueden actualizar por separado a ese nivel de
   detalle. `Pagos_BESS.xlsx` por ahora no tiene casillas (una sola hoja de
   salida) — "ajustamos detalles después" (palabras del usuario).
+- **Las hojas de salida no reproducen los auxiliares de la planilla
+  original, y el orden de las hojas es el de lectura.** Pedido explícito
+  del usuario ("ordena las planillas, quita los auxiliares innecesarios"),
+  con el criterio que él mismo fijó: *"si es importante para que los
+  coordinados entiendan y vean parte del cálculo no hay que sacarlo, si es
+  trivial sí"*. Fuera quedan las columnas deliberadamente vacías, las
+  claves auxiliares que no lee nadie y las copias exactas de otra columna
+  (`Medidores!K`, `Calculo E Costos!X`, `Calculo RE545!BR`) más la columna
+  sin nombre `Calculo RE545!BL`; se quedan todos los intermedios que dejan
+  seguir el cálculo (curvas monótonas, `ranking cmg`, Componentes 1 y 2) y
+  las CTF en 0. Nada de eso cambia el cálculo: las columnas se siguen
+  calculando, sólo dejan de escribirse, y lo que alguna etapa posterior
+  necesita se repone al leer (`reponer_auxiliares_medidores()`). Qué se
+  escribe vive en una sola lista por hoja (`COLUMNAS_MEDIDORES_SALIDA`,
+  `COLUMNAS_SALIDA_E_COSTOS`, `COLUMNAS_SALIDA_RE545`), que es también
+  contra la que se ubican los encabezados de grupo: agregar una columna a
+  `NOMBRES_CALCULO_*` sin mirar esa lista ya no alcanza.
+- **El formato de las hojas (ancho, negrita, panel fijo, separador de
+  miles) se aplica en un solo lugar, `Script/nucleo/formato.py`, al cerrar
+  cada libro.** No se formatea al escribir cada tabla: así también quedan
+  formateadas las hojas que se preservan de una corrida anterior, y
+  cualquier hoja nueva sale igual sin tocar su escritura. La regla es que
+  ese módulo no puede cambiar un valor: si lo hace, es un bug.

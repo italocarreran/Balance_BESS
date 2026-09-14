@@ -3354,3 +3354,87 @@ pesos negativos y cuartos que no suman 1 adentro para ver que no corta. Falta
 correrla contra el archivo real del período.
 
 ---
+
+## 2026-09-14 — Planillas ordenadas y auxiliares afuera
+
+Pedido del usuario: *"Está funcionando y los resultados dan igual, sin
+modificar el cálculo, necesito que ordenes las planillas, quita los
+auxiliares innecesarios"*. Nada de esto toca un número: se verificó
+corriendo el caso sintético completo antes y después y comparando las dos
+hojas de cálculo celda por celda — **idénticas salvo las columnas que se
+sacaron**.
+
+### Qué salió de las hojas
+
+| Hoja | Fuera | Por qué | Cómo se recupera |
+|---|---|---|---|
+| `Medidores` | M, P, Q, U | las cuatro columnas deliberadamente vacías del original | en Python no hay letra de Excel que alinear |
+| `Medidores` | N `Clave_Dia_HoraMes` | clave auxiliar `Dia & Hora Mes` | no la lee nadie; `calcular_clave_auxiliar()` sigue estando |
+| `Medidores` | K `Copia_Ventana` | copia fila a fila de `Ventana` | `reponer_auxiliares_medidores()` la repone al leer la hoja |
+| `Calculo E Costos` | X `Ciclo` | repetía `Copia_Ventana` ("Ciclo de Carga del mes"), dos columnas con el mismo número una al lado de la otra | se sigue calculando; la hoja ya lo muestra una vez |
+| `Calculo RE545` | BL | columna **sin nombre**: la suma de CMg que sólo existe para que BM saque su k-ésimo mayor | se sigue calculando; BM no cambia |
+| `Calculo RE545` | BR `Ventana de Valorizacion` | repetía `T` ("Ventana de valorizacion") | se sigue calculando |
+
+La hoja `Medidores` pasa de 18 a 12 columnas. Las que quedan mantienen el
+orden de siempre (el de `LETRA_A_CAMPO`).
+
+**Lo que NO se sacó**, aunque sea intermedio: las curvas monótonas (`W`,
+`Y`, `AB`, `AC`, `AD`), el `ranking cmg`, las energías con FD y todo el paso
+a paso de los Componentes 1 y 2 de RE545. El usuario lo puso así: *"si es
+importante para que los coordinados entiendan y vean parte del cálculo no
+hay que sacarlo, si es trivial sí"*. Tampoco las CTF en 0 (`AI`, `AL`, `AO`,
+`AR`): que el CTF sea 0 es un dato, no relleno.
+
+La lista de lo que se escribe vive en un solo lugar por hoja
+(`COLUMNAS_MEDIDORES_SALIDA`, `COLUMNAS_SALIDA_E_COSTOS`,
+`COLUMNAS_SALIDA_RE545`), y los encabezados de grupo se ubican contra esa
+misma lista — antes se ubicaban contra `NOMBRES_CALCULO_*`, que ahora tiene
+columnas que no se escriben. El grupo "Componente 1" de RE545 dejó de
+nombrar a BL; sigue quedando en celdas contiguas (`BK`, `BM`, `BN`, `BO`).
+
+### El orden de las hojas
+
+`Pagos_BESS.xlsx` abría por `Calculo E Costos` (47 columnas de detalle) y
+dejaba el `Resumen` cuarto. Ahora abre por el `Resumen` — quién paga y quién
+recibe — y sigue con `Calculo E Costos`, `Calculo RE545`,
+`PRORRATA_RETIROS` y las dos hojas de control (`Alertas`, `Ejecucion`) al
+final. `Consolidado_entradas.xlsx` ya salía en su orden de lectura.
+
+### El formato (`Script/nucleo/formato.py`, nuevo)
+
+Las hojas salían tal cual las deja pandas: encabezados sin negrita, todo de
+ancho 8 (los montos como `####`), sin panel fijo. Ahora, en los dos libros y
+también en las hojas que se preservan de una corrida anterior:
+
+- filas de título y de nombres de columna en negrita y centradas;
+- panel inmovilizado justo debajo del encabezado (fila 1, 2 o 3 según la
+  hoja: las de cálculo llevan arriba los encabezados de grupo, y
+  `PRORRATA_RETIROS` el título de cada cuadro);
+- ancho de columna según lo que hay adentro, con tope para que un nombre de
+  central largo no empuje el resto fuera de la pantalla;
+- separador de miles, dos decimales cuando la columna los tiene, y fecha
+  legible en las columnas de fecha.
+
+El formato de número se escribe celda por celda (openpyxl no tiene formato
+por columna que Excel respete): medido, ~1 segundo cada millón y medio de
+celdas, sobre una escritura que ya tarda varias veces eso. Hay un tope
+(`MAXIMO_CELDAS_FORMATO`) para un caso disparatado; si se cruza, el libro
+sale igual, sólo que sin separador de miles.
+
+### Verificación
+
+- 72 pruebas (eran 60), todas verdes, sin avisos de `pyflakes`.
+- `tests/test_planillas_ordenadas.py` (nuevo, 12 pruebas): las columnas que
+  salen de `Medidores` y el orden de las que quedan, la reposición de
+  `Copia_Ventana` (incluido un libro viejo que todavía la trae, que se
+  respeta), los auxiliares fuera de las dos hojas de cálculo y los
+  intermedios que se quedan, los grupos cayendo en celdas contiguas, el
+  `Resumen` primero, y que formatear no cambia ni un valor.
+- Corrida sintética de punta a punta (`generar_pagos_bess` con las dos
+  hojas) antes y después: las dos hojas de cálculo dan exactamente los
+  mismos valores, columna por columna, salvo las quitadas; los encabezados
+  de grupo caen sobre los mismos nombres de columna.
+
+Lo que NO se probó: la corrida contra el archivo real del período.
+
+---

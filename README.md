@@ -264,9 +264,12 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 
 `Consolidado_entradas.xlsx` (antes `Hoja_Medidas.xlsx`) tiene seis hojas:
 
-- `Medidores` — columnas A:Q + U (A:J entrada, K copia de L, L, N, O
-  calculadas; M, P, Q, U deliberadamente vacías por diseño). **No depende de
-  Ofertas SSCC**: su botón "Actualizar" no abre el archivo `*OfertasSSCC*`
+- `Medidores` — 12 columnas: A:J de entrada más `Ventana` e `Indicador_SoC`
+  calculadas. **Sin los auxiliares** de la planilla original (las cuatro
+  columnas vacías M/P/Q/U, la clave auxiliar N y la copia K de la Ventana:
+  ver `COLUMNAS_AUXILIARES_MEDIDORES`); la copia K la repone al vuelo
+  `reponer_auxiliares_medidores()` cuando las hojas de cálculo la piden como
+  "Ciclo de Carga del mes". **No depende de Ofertas SSCC**: su botón "Actualizar" no abre el archivo `*OfertasSSCC*`
   ni lo exige.
 - `Ofertas SSCC` — las tablas auxiliares equivalentes a `Medidores!W:Y`
   ("Ofertas SSCC por dia") y `Medidores!AB:AE` ("Resumen ventana oferta"),
@@ -292,7 +295,10 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
   queda vacía: depende de `Calculo E Costos`.
 - `Log` — avisos e incidencias detectadas durante el cálculo.
 
-`Pagos_BESS.xlsx` (nombre provisorio, a pedido del usuario) tiene dos hojas:
+`Pagos_BESS.xlsx` (nombre provisorio, a pedido del usuario) abre por el
+`Resumen` (quién paga y quién recibe) y sigue con el detalle:
+`Calculo E Costos`, `Calculo RE545`, `PRORRATA_RETIROS` y, al final, las dos
+hojas de control (`Alertas` y `Ejecucion`).
 
 - `Calculo E Costos` — traspaso desde `Medidores`, asignación de CMg, y casi
   toda `Actualizar_Calculos_Columnas` (`L, M, N, O, R, S, T, U, W, X, Y, AB,
@@ -300,7 +306,7 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
   contra un archivo real, hoja "E COSTOS"): `Configuracion`, `Barra`,
   `Descarga kWh`/`Carga kWh`, `SoC %`, `CMg`, `Adj SSCC`, `SoC sobre el
   minimo`, `ranking cmg`, `Valorizacion Descarga`/`Carga`, `Bloque ordenado`,
-  `Ciclo`, `Curva monotona CMg Descarga`/`Carga`, `Energía descargada`/
+  `Curva monotona CMg Descarga`/`Carga`, `Energía descargada`/
   `cargada`, las Prorratas y el FD homologado (`CPF(±)`/`CSF(±)`/`CTF(±)`,
   este último siempre en 0 — confirmado que no existe), `Ingreso descarga`,
   `Costo carga`, `Descuento FD`, `Total` y `Monto a compensar`, entre otros.
@@ -321,6 +327,19 @@ columna, los encabezados de grupo con celdas combinadas del archivo real
 `GRUPOS_CALCULO_RE545`); como la salida no reproduce la letra de Excel real
 (solo el orden y el contenido), cada grupo cae en la columna que le toca en
 **nuestro** orden, no en la del archivo original.
+
+Las dos hojas de cálculo tampoco escriben sus auxiliares: `X` ("Ciclo") en
+`Calculo E Costos`, que repetía el "Ciclo de Carga del mes" ya presente, y
+`BL` (la columna sin nombre de la que `BM` saca su k-ésimo mayor) y `BR`
+(repetía `T`, "Ventana de valorizacion") en `Calculo RE545`. Se siguen
+calculando igual: sólo dejaron de ocupar una columna. Los intermedios que sí
+dejan seguir el cálculo (las curvas monótonas, el `ranking cmg`, las
+energías con FD, todo el paso a paso de los Componentes 1 y 2) se quedan.
+
+Todas las hojas de los dos libros salen formateadas para leer (`formato.py`):
+nombres de columna en negrita, panel inmovilizado bajo el encabezado, ancho
+de columna según el contenido y separador de miles en las columnas
+numéricas. Es sólo aspecto: no toca un valor.
 
 Las macros de Ofertas SSCC, CMg, FD y Subastas replicadas son solo las de
 **carga** de esas hojas.

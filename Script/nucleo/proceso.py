@@ -32,7 +32,7 @@ from .lectura import (
 )
 from .medidores import (
     completar_ofertas_en_medidores, construir_medidores,
-    construir_ofertas_sscc,
+    construir_ofertas_sscc, reponer_auxiliares_medidores,
 )
 from .ofertas_sscc import leer_ofertas_sscc_consolidado
 from .parametros import (
@@ -427,6 +427,11 @@ def generar_pagos_bess(
         )
 
     registrar(f"  filas: {len(df_medidores):,}")
+
+    # La hoja ya no trae Copia_Ventana ("Ciclo de Carga del mes"): es
+    # copia de Ventana y se repone aca, sin recalcular nada, para las
+    # dos hojas de calculo. Ver COLUMNAS_AUXILIARES_MEDIDORES.
+    df_medidores = reponer_auxiliares_medidores(df_medidores)
 
     # Las tres columnas que salen de Ofertas SSCC (R, S, T) ya no
     # viven en la hoja Medidores: se reconstruyen aca a partir de las

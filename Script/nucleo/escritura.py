@@ -7,10 +7,12 @@ from pathlib import Path
 
 import openpyxl
 import pandas as pd
+from openpyxl.styles import Font
 
 from .alertas import ALTA, Alerta
 
-from .ecostos import GRUPOS_CALCULO_E_COSTOS, NOMBRES_CALCULO_E_COSTOS
+from .ecostos import COLUMNAS_SALIDA_E_COSTOS, GRUPOS_CALCULO_E_COSTOS
+from .formato import formatear_libro
 from .ofertas_sscc import (
     HOJA_OFERTAS_SSCC, TITULO_OFERTAS_POR_DIA, TITULO_RESUMEN_VENTANA,
 )
@@ -18,13 +20,28 @@ from .parametros import (
     HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_PRORRATA_RETIROS,
     HOJA_RESUMEN,
 )
-from .re545 import GRUPOS_CALCULO_RE545, NOMBRES_CALCULO_RE545
+from .re545 import COLUMNAS_SALIDA_RE545, GRUPOS_CALCULO_RE545
 
 
+# En el orden en que quedan las hojas del libro: primero el Resumen
+# (lo primero que se mira: quien paga y quien recibe), despues las dos
+# hojas de calculo con el detalle, despues el reparto entre empresas y
+# al final las dos hojas de control (Alertas y Ejecucion), que no las
+# escribe este listado sino _escribir_control().
 _HOJAS_PAGOS = (
-    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_PRORRATA_RETIROS,
-    HOJA_RESUMEN,
+    HOJA_RESUMEN, HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
+    HOJA_PRORRATA_RETIROS,
 )
+
+# Fila (1-indexada) donde estan los NOMBRES de columna de cada hoja,
+# para formatear_libro(): las dos hojas de calculo llevan arriba la
+# fila de encabezados de grupo, y PRORRATA_RETIROS el titulo de la
+# hoja y el de cada cuadro.
+_FILAS_ENCABEZADO_PAGOS = {
+    HOJA_CALCULO_ECOSTOS: 2,
+    HOJA_CALCULO_RE545: 2,
+    HOJA_PRORRATA_RETIROS: 3,
+}
 
 
 def _escribir_encabezados_grupo(ws, columnas_internas, grupos, fila=1, columna_inicio=1):
@@ -195,6 +212,13 @@ def escribir_pagos_bess(
 
     with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
 
+        if HOJA_RESUMEN in regenerar:
+            if df_resumen is not None:
+                escritas.append(HOJA_RESUMEN)
+                df_resumen.to_excel(writer, sheet_name=HOJA_RESUMEN, index=False)
+        else:
+            _preservar_o_avisar(writer, HOJA_RESUMEN)
+
         if HOJA_CALCULO_ECOSTOS in regenerar:
             if df_ecostos is not None:
                 escritas.append(HOJA_CALCULO_ECOSTOS)
@@ -211,7 +235,7 @@ def escribir_pagos_bess(
                 )
                 _escribir_encabezados_grupo(
                     writer.sheets[HOJA_CALCULO_ECOSTOS],
-                    list(NOMBRES_CALCULO_E_COSTOS),
+                    COLUMNAS_SALIDA_E_COSTOS,
                     GRUPOS_CALCULO_E_COSTOS,
                 )
         else:
@@ -228,7 +252,7 @@ def escribir_pagos_bess(
                 )
                 _escribir_encabezados_grupo(
                     writer.sheets[HOJA_CALCULO_RE545],
-                    list(NOMBRES_CALCULO_RE545),
+                    COLUMNAS_SALIDA_RE545,
                     GRUPOS_CALCULO_RE545,
                 )
 
@@ -286,16 +310,11 @@ def escribir_pagos_bess(
         else:
             _preservar_o_avisar(writer, HOJA_PRORRATA_RETIROS)
 
-        if HOJA_RESUMEN in regenerar:
-            if df_resumen is not None:
-                escritas.append(HOJA_RESUMEN)
-                df_resumen.to_excel(writer, sheet_name=HOJA_RESUMEN, index=False)
-        else:
-            _preservar_o_avisar(writer, HOJA_RESUMEN)
-
         _escribir_control(
             writer, registro, manifiesto, conciliacion, periodo, escritas,
         )
+
+        formatear_libro(writer.book, _FILAS_ENCABEZADO_PAGOS)
 
     for mensaje in avisos_preservacion:
         registrar(f"  [{ALTA}] PAG-001: {mensaje}")
@@ -340,7 +359,7 @@ def _escribir_tabla_con_titulo(
     celda_titulo = writer.sheets[hoja].cell(
         row=fila_inicio + 1, column=columna_inicio + 1
     )
-    celda_titulo.font = celda_titulo.font.copy(bold=True)
+    celda_titulo.font = Font(bold=True)
 
     # Debajo: +1 titulo, +1 encabezado de df, +len(df) filas, +2 de separacion.
     fila_siguiente = fila_inicio + len(df) + 4
@@ -397,6 +416,10 @@ def _copiar_hoja_existente(wb_origen, nombre_hoja, wb_destino):
 
 
 _HOJAS_CONSOLIDADO = ("Medidores", "Ofertas SSCC", "CMg", "FD", "Subastas")
+
+# Igual que _FILAS_ENCABEZADO_PAGOS: la hoja "Ofertas SSCC" lleva el
+# titulo de cada cuadro arriba de los nombres de columna.
+_FILAS_ENCABEZADO_CONSOLIDADO = {HOJA_OFERTAS_SSCC: 2}
 
 
 def escribir_salida(
@@ -560,5 +583,7 @@ def escribir_salida(
             sheet_name="Log",
             index=False,
         )
+
+        formatear_libro(writer.book, _FILAS_ENCABEZADO_CONSOLIDADO)
 
     return ruta_salida

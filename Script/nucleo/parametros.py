@@ -184,3 +184,30 @@ COLUMNAS_VACIAS = [
     "Q_VACIA",
     "U_VACIA",
 ]
+
+# Auxiliares de la hoja Medidores que NO se escriben en
+# Consolidado_entradas.xlsx (pedido del usuario: "quita los auxiliares
+# innecesarios"). Se siguen calculando igual que antes -- esto es solo
+# que dejen de ocupar una columna de la hoja:
+#
+#   - las cuatro COLUMNAS_VACIAS: existen en la planilla original
+#     porque ahi la letra de Excel manda (M, P, Q y U estan en blanco);
+#     en la salida de Python no hay nada que alinear, y una columna
+#     vacia con nombre "M_VACIA" solo invita a preguntar que falta.
+#   - Clave_Dia_HoraMes (N): clave auxiliar Dia|Hora Mes. No la lee
+#     nadie: ni las hojas de calculo ni los cruces.
+#   - Copia_Ventana (K): copia fila a fila de Ventana (L). Las dos
+#     hojas de calculo si la usan, pero como "Ciclo de Carga del mes",
+#     y la reponen al leer Medidores con reponer_auxiliares_medidores()
+#     -- es una copia, no un dato propio.
+COLUMNAS_AUXILIARES_MEDIDORES = COLUMNAS_VACIAS + [
+    "Clave_Dia_HoraMes",
+    "Copia_Ventana",
+]
+
+# Orden final de columnas de la hoja Medidores: el de LETRA_A_CAMPO
+# (que es el de la planilla original) sin los auxiliares de arriba.
+COLUMNAS_MEDIDORES_SALIDA = [
+    campo for campo in LETRA_A_CAMPO.values()
+    if campo not in COLUMNAS_AUXILIARES_MEDIDORES
+]
