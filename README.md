@@ -7,7 +7,8 @@ información almacenada exclusivamente en ese libro.
 
 Etapas implementadas: **Medidores** (incluye Ofertas SSCC), la carga de
 **CMg**, **FD** y **Subastas**, las hojas **Calculo E Costos** y **Calculo
-RE545**, y el cierre económico mediante **PRORRATA_RETIROS** y **Resumen**.
+RE545**, y el cierre económico mediante **COMPENSACION_CENTRAL**,
+**PRORRATA_RETIROS** y **Resumen**.
 
 ## Instalación
 
@@ -62,6 +63,10 @@ python Balance_BESS.py
      (el de la fila del archivo, **Actualizar todo**, las hace todas). Lo
      que no se actualiza se conserva tal cual estaba; si el archivo todavía
      no existe, se crea.
+   - `COMPENSACION_CENTRAL` tiene **Resumir compensación**: la compensación
+     de `Calculo E Costos` (por central y `Ciclo de Carga del mes`) y la de
+     `Calculo RE545` (por central y `Ventana de valorizacion`), más el total
+     que recibe cada empresa según el `Propietario` de `Resumen BESS`.
    - `PRORRATA_RETIROS` tiene **Traer prorrata**: consume `Prorrata 15min`
      del Excel de `Prorrata retiros/` (A: cuarto de hora, B: suministrador,
      C: prorrata) y reparte, cuarto de hora por cuarto de hora, el monto a
@@ -161,7 +166,8 @@ Ver `MAPA.md` para qué hace cada módulo.
 │       (hoja "Prorrata 15min")
 ├── Consolidado_entradas.xlsx    <- salida (una fila por hoja en la
 │                                   ventana, cada una con "Actualizar")
-└── Pagos_BESS.xlsx              <- incluye PRORRATA_RETIROS y Resumen
+└── Pagos_BESS.xlsx              <- incluye COMPENSACION_CENTRAL,
+                                    PRORRATA_RETIROS y Resumen
 ```
 
 Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:

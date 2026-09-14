@@ -41,8 +41,11 @@ from .parametros import (
     HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
 )
 from .prorrata_retiros import (
-    buscar_archivo_prorrata, construir_compensacion_total,
-    construir_prorrata_retiros, construir_resumen, leer_prorrata_retiros,
+    buscar_archivo_prorrata, construir_prorrata_retiros,
+    leer_prorrata_retiros,
+)
+from .compensacion import (
+    construir_compensacion_central, construir_resumen,
 )
 from .re545 import (
     completar_calculo_re545, completar_checks_resumen_re545,
@@ -391,6 +394,7 @@ def generar_pagos_bess(
 
     quiere_ecostos = "ecostos" in secciones_activas
     quiere_re545 = "re545" in secciones_activas
+    quiere_compensacion = "compensacion_central" in secciones_activas
     quiere_prorrata = "prorrata_retiros" in secciones_activas
     quiere_resumen = "resumen" in secciones_activas
 
@@ -519,6 +523,9 @@ def generar_pagos_bess(
     df_prorrata_retiros = None
     df_compensacion_cuarto = None
     df_pagos_suministrador = None
+    df_compensacion_ecostos = None
+    df_compensacion_re545 = None
+    df_compensacion_empresa = None
     df_resumen = None
 
     # Las dos hojas, con los nombres INTERNOS de columna. Las que se
@@ -607,7 +614,7 @@ def generar_pagos_bess(
     avanzar(90)
 
     archivo_prorrata = None
-    if quiere_prorrata or quiere_resumen:
+    if quiere_prorrata or quiere_resumen or quiere_compensacion:
         # Estas hojas tienen botones independientes. Si las hojas de calculo
         # no se recalcularon en esta misma accion, se consumen las versiones
         # ya guardadas en Pagos_BESS.xlsx.
@@ -629,37 +636,57 @@ def generar_pagos_bess(
             df_re545 if df_re545 is not None
             else calculo_existente(HOJA_CALCULO_RE545)
         )
-        archivo_prorrata = buscar_archivo_prorrata(
-            rutas["prorrata_retiros_dir"], aamm
-        )
-        if archivo_prorrata is None:
-            raise ErrorEntrada(
-                f"No se encontro Prorrata_Retiros_AAMM_pre/def.xlsx en "
-                f"{rutas['prorrata_retiros_dir']}."
+        # Quien RECIBE. El Resumen tambien lo necesita (es su columna
+        # RECIBE), asi que se calcula una sola vez para las dos hojas.
+        if quiere_compensacion or quiere_resumen:
+            registrar("Compensacion por central y ciclo/ventana...")
+            (
+                df_compensacion_ecostos,
+                df_compensacion_re545,
+                df_compensacion_empresa,
+            ) = construir_compensacion_central(
+                df_ecostos_asignacion, df_re545_asignacion, resumen,
+                registrar=registrar,
             )
-        registrar(f"Leyendo {archivo_prorrata.name}/Prorrata 15min...")
-        fuente_prorrata = leer_prorrata_retiros(
-            archivo_prorrata, registrar=registrar
-        )
-        (
-            df_compensacion_cuarto,
-            df_prorrata_retiros,
-            df_pagos_suministrador,
-        ) = construir_prorrata_retiros(
-            fuente_prorrata, df_ecostos_asignacion, df_re545_asignacion,
-            registrar=registrar,
-        )
-        registrar(
-            f"  {len(df_compensacion_cuarto):,} cuartos de hora con monto; "
-            f"{len(df_prorrata_retiros):,} asignaciones; "
-            f"{len(df_pagos_suministrador):,} suministradores."
-        )
+            registrar(
+                f"  E Costos: {len(df_compensacion_ecostos):,} grupos; "
+                f"RE545: {len(df_compensacion_re545):,} grupos; "
+                f"{len(df_compensacion_empresa):,} empresas reciben."
+            )
+
+        # Quien PAGA. Solo aca hace falta el Excel de la prorrata.
+        if quiere_prorrata or quiere_resumen:
+            archivo_prorrata = buscar_archivo_prorrata(
+                rutas["prorrata_retiros_dir"], aamm
+            )
+            if archivo_prorrata is None:
+                raise ErrorEntrada(
+                    f"No se encontro Prorrata_Retiros_AAMM_pre/def.xlsx en "
+                    f"{rutas['prorrata_retiros_dir']}."
+                )
+            registrar(f"Leyendo {archivo_prorrata.name}/Prorrata 15min...")
+            fuente_prorrata = leer_prorrata_retiros(
+                archivo_prorrata, registrar=registrar
+            )
+            (
+                df_compensacion_cuarto,
+                df_prorrata_retiros,
+                df_pagos_suministrador,
+            ) = construir_prorrata_retiros(
+                fuente_prorrata, df_ecostos_asignacion, df_re545_asignacion,
+                registrar=registrar,
+            )
+            registrar(
+                f"  {len(df_compensacion_cuarto):,} cuartos de hora con monto; "
+                f"{len(df_prorrata_retiros):,} asignaciones; "
+                f"{len(df_pagos_suministrador):,} suministradores."
+            )
+
         if quiere_resumen:
-            compensacion_total = construir_compensacion_total(
-                df_ecostos_asignacion, df_re545_asignacion, resumen
-            )
+            registrar("Resumen: RECIBE, PAGA y NETO por empresa...")
             df_resumen = construir_resumen(
-                compensacion_total, df_pagos_suministrador
+                df_compensacion_empresa, df_pagos_suministrador,
+                registrar=registrar,
             )
 
     registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
@@ -697,15 +724,20 @@ def generar_pagos_bess(
         ("Prorrata retiros", archivo_prorrata),
     ])
 
+    # Todo por nombre: son once tablas y el orden posicional ya se
+    # presto una vez a confusion.
     escribir_pagos_bess(
         rutas["salida_pagos"],
-        df_ecostos,
-        df_re545,
-        df_resumen_re545,
-        df_prorrata_retiros,
-        df_compensacion_cuarto,
-        df_pagos_suministrador,
-        df_resumen,
+        df_ecostos=df_ecostos,
+        df_re545=df_re545,
+        df_resumen_re545=df_resumen_re545,
+        df_compensacion_ecostos=df_compensacion_ecostos,
+        df_compensacion_re545=df_compensacion_re545,
+        df_compensacion_empresa=df_compensacion_empresa,
+        df_prorrata_retiros=df_prorrata_retiros,
+        df_compensacion_cuarto=df_compensacion_cuarto,
+        df_pagos_suministrador=df_pagos_suministrador,
+        df_resumen=df_resumen,
         ruta_existente=rutas["salida_pagos"],
         hojas_regenerar=hojas_regenerar,
         registrar=registrar,

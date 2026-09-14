@@ -42,7 +42,8 @@ Script/
         re545_reservas.py      <- RE545 AC:AT y AU
         re545_resumen.py       <- RE545 AW:BG y BV
         re545_componentes.py   <- RE545 BI:CE
-        prorrata_retiros.py    <- prorrata 15-min, pagos y resumen por empresa
+        prorrata_retiros.py    <- prorrata 15-min: quien paga, cuarto a cuarto
+        compensacion.py        <- quien recibe: por central/ciclo y por empresa
         medidores.py           <- la hoja Medidores
         escritura.py           <- los dos libros de salida
         proceso.py             <- los dos procesos completos
@@ -119,6 +120,7 @@ importable como cualquier módulo.
   | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
   | `Pagos_BESS.xlsx` | **Calcular todo** | `generar_pagos_bess` con todas |
   | cada `hoja '...'` de esa salida | **Calcular** | `generar_pagos_bess` con esa sola |
+  | `Pagos_BESS.xlsx/COMPENSACION_CENTRAL` | **Resumir compensación** | compensación por central y ciclo/ventana, y total por empresa |
   | `Pagos_BESS.xlsx/PRORRATA_RETIROS` | **Traer prorrata** | reparte el monto de cada cuarto de hora segun `Prorrata 15min` |
   | `Pagos_BESS.xlsx/Resumen` | **Asignar pagos** | consolida `RECIBE`, `PAGA` y `NETO` por empresa |
 

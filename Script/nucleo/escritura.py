@@ -15,15 +15,15 @@ from .ofertas_sscc import (
     HOJA_OFERTAS_SSCC, TITULO_OFERTAS_POR_DIA, TITULO_RESUMEN_VENTANA,
 )
 from .parametros import (
-    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_PRORRATA_RETIROS,
-    HOJA_RESUMEN,
+    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_COMPENSACION_CENTRAL,
+    HOJA_PRORRATA_RETIROS, HOJA_RESUMEN,
 )
 from .re545 import GRUPOS_CALCULO_RE545, NOMBRES_CALCULO_RE545
 
 
 _HOJAS_PAGOS = (
-    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_PRORRATA_RETIROS,
-    HOJA_RESUMEN,
+    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_COMPENSACION_CENTRAL,
+    HOJA_PRORRATA_RETIROS, HOJA_RESUMEN,
 )
 
 
@@ -108,6 +108,9 @@ def escribir_pagos_bess(
     df_ecostos=None,
     df_re545=None,
     df_resumen_re545=None,
+    df_compensacion_ecostos=None,
+    df_compensacion_re545=None,
+    df_compensacion_empresa=None,
     df_prorrata_retiros=None,
     df_compensacion_cuarto=None,
     df_pagos_suministrador=None,
@@ -250,6 +253,38 @@ def escribir_pagos_bess(
                     )
         else:
             _preservar_o_avisar(writer, HOJA_CALCULO_RE545)
+
+        if HOJA_COMPENSACION_CENTRAL in regenerar:
+            cuadros_compensacion = [
+                (df_compensacion_ecostos, 1,
+                 "Cuadro N° 1 — Calculo E Costos: compensación por central "
+                 "y ciclo"),
+                (df_compensacion_re545, 7,
+                 "Cuadro N° 2 — Calculo RE545: compensación por central "
+                 "y ventana"),
+                (df_compensacion_empresa, 13,
+                 "Cuadro N° 3 — total recibido por cada empresa"),
+            ]
+            if any(df is not None for df, _, _ in cuadros_compensacion):
+                escritas.append(HOJA_COMPENSACION_CENTRAL)
+                primero = True
+                for df_cuadro, col, titulo in cuadros_compensacion:
+                    if df_cuadro is None:
+                        continue
+                    df_cuadro.to_excel(
+                        writer, sheet_name=HOJA_COMPENSACION_CENTRAL,
+                        index=False, startrow=2, startcol=col,
+                    )
+                    ws = writer.sheets[HOJA_COMPENSACION_CENTRAL]
+                    if primero:
+                        ws.cell(
+                            1, 2,
+                            "Compensación por central, ciclo/ventana y empresa",
+                        )
+                        primero = False
+                    ws.cell(2, col + 1, titulo)
+        else:
+            _preservar_o_avisar(writer, HOJA_COMPENSACION_CENTRAL)
 
         if HOJA_PRORRATA_RETIROS in regenerar:
             if df_prorrata_retiros is not None or df_compensacion_cuarto is not None:

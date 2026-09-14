@@ -3354,3 +3354,51 @@ pesos negativos y cuartos que no suman 1 adentro para ver que no corta. Falta
 correrla contra el archivo real del período.
 
 ---
+
+---
+
+## 2026-09-14 — COMPENSACION_CENTRAL: el otro lado de la plata
+
+La prorrata dice quién paga. Faltaba la hoja que dice quién recibe y por qué,
+y verificar que el `Resumen` cruce bien los dos lados.
+
+**Hoja nueva `COMPENSACION_CENTRAL`**, con tres cuadros: `B:E` la compensación
+de `Calculo E Costos` por central y `Ciclo de Carga del mes`; `H:K` la de
+`Calculo RE545` por central y `Ventana de valorizacion`; `N:O` el total que
+recibe cada empresa.
+
+**Por qué cada hoja va con una agrupación distinta.** No es una decisión de
+presentación: es cómo se calcula el monto. `AZ` de E Costos es
+`(suma AX - suma U) / filas` por grupo **(central, `Copia_Ventana`)**, repetido
+en todas las filas del grupo; `CE` de RE545 reparte
+`max(suma BO - suma CC, 0)` por grupo **(central, `T` = ventana de
+valorización)** en proporción a `AU`. En los dos casos sumar las filas del
+grupo devuelve el total del grupo, así que agrupar y sumar es correcto para
+las dos — pero cada una por SU columna.
+
+**La empresa sale del `Propietario` de `Resumen BESS`** (`Centrales.xlsx`).
+Una central sin propietario mapeado queda a su propio nombre y se avisa por el
+log, en vez de perder la plata en una fila con la empresa vacía.
+
+**Bug del `Resumen`, que es lo que se pidió verificar.** Los dos lados vienen
+de fuentes distintas: `RECIBE` del `Propietario` de `Resumen BESS`, `PAGA` del
+`Suministrador` de la prorrata del CEN. El merge era por el texto crudo, así
+que `"COLBUN S.A."` y `"colbun  s.a."` no cruzaban: la misma empresa aparecía
+en dos filas, cada una con la mitad de la historia y un `NETO` que no era su
+neto. Ahora el cruce es por nombre normalizado (minúscula, sin tildes, sin
+espacios de más) y el nombre visible es el del `Propietario` cuando la empresa
+recibe. Además el log dice cuántas empresas reciben y pagan a la vez, y avisa
+si el total recibido no es igual al total pagado (son la misma plata; la
+diferencia es lo que no se repartió).
+
+**Reorganización menor.** `construir_compensacion_total` y `construir_resumen`
+se fueron de `prorrata_retiros.py` a un `compensacion.py` nuevo: un módulo por
+lado de la transacción (`prorrata_retiros.py` = quien paga, `compensacion.py` =
+quien recibe). La llamada a `escribir_pagos_bess()` pasó a ser toda por nombre:
+son once tablas y el orden posicional ya se prestaba a confusión.
+
+**Verificación:** `python -m unittest discover` en 66 pruebas (eran 60; seis
+nuevas en `tests/test_compensacion_central.py`), más una corrida sintética que
+escribió la hoja y se revisó celda por celda con `openpyxl`, y un caso con el
+nombre de la empresa escrito distinto en cada lado para ver que el `Resumen`
+la deja en una sola fila. Falta correrla contra el archivo real del período.

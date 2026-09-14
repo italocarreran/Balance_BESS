@@ -449,6 +449,10 @@ def main():
         if id_fila == "db_subastas":
             return ("Traer subastas", traer_subastas)
 
+        if id_fila == "pagos:compensacion_central":
+            return ("Resumir compensación",
+                    lambda: actualizar_pagos({"compensacion_central"}))
+
         if id_fila == "pagos:prorrata_retiros":
             return ("Traer prorrata", lambda: actualizar_pagos({"prorrata_retiros"}))
 
