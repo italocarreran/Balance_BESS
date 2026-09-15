@@ -321,9 +321,10 @@ programa, en dos pasos, con sendos botones en esa carpeta del diagrama.
 - **Cómo llega**: con el botón **"Traer FD"** de la fila del archivo, que lo copia del árbol de
   indicadores del DCO
   (`F:\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\03 Desempeño para publicar`,
-  constantes `RAIZ_DCO_INDICADORES` + `SUBCARPETAS_FD` de `Script/Fd/Indicadores_DCO.py`; los meses
-  viejos, que lo tienen en `04 Desempeño para transferencias`, se siguen encontrando por
-  `SUBCARPETAS_FD_ANTIGUA`) y, si lo que publicaron es el `.zip`
+  constantes `RAIZ_DCO_INDICADORES` + `SUBCARPETAS_FD` de `Script/Fd/Indicadores_DCO.py`) — **sólo
+  esa carpeta**, sin entrar en sus subcarpetas ni mirar otras ramas del árbol de la versión, y sin
+  la carpeta anterior (`04 Desempeño para transferencias`): un mes que todavía lo tenga ahí no trae
+  nada, y el error lo dice y, si lo que publicaron es el `.zip`
   `SSCC_Disponibilidad_CSF_<Mes>_<AAAA>_<V>.zip`, lo descomprime ahí mismo. Por omisión toma la
   versión **más alta que de verdad tenga el archivo** (V2 = Definitivo, V1 = Preliminar): puede
   existir la carpeta de una versión y no tener adentro lo que se busca, y en ese caso se baja a la

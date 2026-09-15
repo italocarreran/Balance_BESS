@@ -22,19 +22,22 @@ o sea, la carpeta del periodo es
 
     <RAIZ>\\<AAAA>\\<MM>. <Mes>\\Indicadores Publicar\\<version>
 
-y adentro de esa, el FD (los "factores de desempeño") cuelga de
-'03 Desempeño para publicar' -ruta confirmada por el usuario; antes se
-usaba '04 Desempeño para transferencias', que queda como alternativa
-para los meses viejos-. El boton "Traer FD" busca ahi los archivos del periodo y los copia a
-<CARPETA_BASE>/FD y FMA/; si lo que encuentra es el .zip, lo
-descomprime ahi mismo, porque lo que la etapa FD lee despues es el Excel
-SSCC_Desempeño_* que viene adentro.
+y adentro de esa, el FD (los "factores de desempeño") sale de
+'03 Desempeño para publicar' -ruta confirmada por el usuario- y de
+NINGUNA OTRA: ni de la carpeta donde vivia antes
+('04 Desempeño para transferencias') ni de otras ramas del arbol de la
+version. El boton "Traer FD" copia a <CARPETA_BASE>/FD y FMA/ los
+archivos del periodo que haya SUELTOS ahi; si lo que encuentra es el
+.zip, lo descomprime ahi mismo, porque lo que la etapa FD lee despues
+es el Excel SSCC_Desempeño_* que viene adentro.
 
 Nada de esto se adivina en cuanto a NOMBRES, pero si hay una decision
 tomada por nosotros: **cual version usar**. La ventana no tiene un
 selector Pre/Def, asi que por omision se toma la version MAS ALTA que
-exista publicada (V2 antes que V1) y se deja dicho en el log. Se puede
-forzar pasando `version`.
+TENGA el archivo en esa carpeta (V2 y, si ahi no esta, V1) y se deja
+dicho en el log. Se puede forzar pasando `version`. La ventana muestra
+como "Origen: DCO" esa misma carpeta -la que se uso de verdad-, ver
+ruta_origen_fd().
 
 No importa nada de nucleo (solo la biblioteca estandar), igual que
 los demas modulos de Script/. Los errores previsibles salen como
@@ -64,23 +67,23 @@ RAIZ_DCO_INDICADORES = (
 CARPETA_PUBLICACION = "Indicadores Publicar"
 
 # Dentro de la carpeta de version, el FD (los "factores de desempeño")
-# cuelga de esta subcarpeta -ruta confirmada por el usuario-:
+# sale de ESTA subcarpeta y de ninguna otra -ruta confirmada por el
+# usuario-:
 #
 #   <version>/03 Desempeño para publicar/
 #
-# La carpeta anterior ('04 Desempeño para transferencias') queda como
-# alternativa: los meses ya cerrados siguen teniendo el FD ahi, y el
-# boton tiene que servir igual para volver a un periodo viejo.
-#
-# Se busca en esas dos, en orden, y si en ninguna aparece se cae a una
-# busqueda recursiva desde la carpeta de version: el DCO cambia de
-# anidamiento cada tanto y no vale la pena que eso rompa el boton.
+# Se mira SOLO ahi y SIN entrar en sus subcarpetas. Antes, si no
+# encontraba, se caia a una busqueda recursiva desde la carpeta de
+# version: eso es lo que hacia que "Traer FD" copiara un monton de
+# archivos de otras ramas del arbol del DCO. La regla ahora es la que
+# pidio el usuario: esa carpeta en V2 y, si ahi no esta, la misma
+# carpeta en V1. Nada mas.
 SUBCARPETAS_FD = ("03 Desempeño para publicar",)
-SUBCARPETAS_FD_ANTIGUA = ("04 Desempeño para transferencias",)
 
-# Las dos, en el orden en que se prueban. Cada elemento es una CADENA de
-# subcarpetas (se baja una tras otra), no una lista de alternativas.
-CADENAS_FD = (SUBCARPETAS_FD, SUBCARPETAS_FD_ANTIGUA)
+# Donde vivia el FD antes. YA NO SE BUSCA AHI: solo se nombra en el
+# mensaje de error, para que se entienda que pasa si se abre un mes
+# viejo que todavia lo tiene en la carpeta anterior.
+SUBCARPETAS_FD_ANTIGUA = ("04 Desempeño para transferencias",)
 
 # La version que se muestra en la ventana cuando todavia no se puede
 # leer el servidor (no hay como saber cual esta publicada): la ruta que
@@ -386,15 +389,34 @@ def carpeta_publicacion_o_literal(aamm, raiz=None):
     )
 
 
-def carpeta_version_o_literal(aamm, version=None, raiz=None):
+def carpeta_version_usada(aamm, buscar=None, version=None, raiz=None):
     """
-    La carpeta de version (V1, V2, ...) del periodo. Si no se pide una
-    en particular es la MAS ALTA publicada -V2 le gana a V1, igual que
-    en elegir_version-, y si no se puede leer el servidor, la que se
-    haya pedido o VERSION_POR_OMISION.
+    La carpeta de version (V1, V2, ...) que de verdad se va a usar.
+
+    buscar: la misma funcion que usa el boton para decidir
+    (carpeta_version -> lo que encontro, falsy si nada). Con eso, la
+    version que devuelve es la que TIENE el archivo, no la mas alta
+    que exista: si V2 esta publicada pero vacia, el boton baja a V1 y
+    el link de la ventana tiene que apuntar a V1 tambien.
+
+    Sin `buscar`, o si ninguna version tiene nada, la mas alta
+    publicada. Si no se puede leer el servidor, la pedida o
+    VERSION_POR_OMISION, para poder mostrar igual una ruta.
     """
 
     publicacion = carpeta_publicacion_o_literal(aamm, raiz=raiz)
+
+    if buscar is not None:
+        try:
+            carpeta, _, _ = buscar_en_versiones(
+                publicacion, buscar, version=version,
+                registrar=lambda *_: None,
+            )
+        except ErrorFd:
+            carpeta = None
+
+        if carpeta is not None:
+            return carpeta
 
     try:
         return elegir_version(publicacion, version)
@@ -402,14 +424,16 @@ def carpeta_version_o_literal(aamm, version=None, raiz=None):
         return publicacion / (version or VERSION_POR_OMISION)
 
 
-def ruta_origen(aamm, cadenas=None, version=None, raiz=None):
+def ruta_origen(aamm, subcarpetas=None, version=None, raiz=None,
+                buscar=None):
     """
     La carpeta exacta del arbol del DCO de la que sale algo del
-    periodo: la primera de `cadenas` que exista bajo la carpeta de
-    version y, si ninguna existe, la primera armada a mano.
+    periodo, para mostrarla y abrirla desde la ventana.
 
-    cadenas: cadenas de subcarpetas a probar, en orden (cada una se
-    baja nombre por nombre). Por omision, las del FD.
+    Es la MISMA que usa el boton: la version la elige `buscar` (ver
+    carpeta_version_usada) y, dentro de ella, la cadena `subcarpetas`.
+    Si esa carpeta no existe todavia, se devuelve armada a mano: la
+    ventana tiene que poder abrir el arbol igual.
     """
 
     try:
@@ -419,17 +443,17 @@ def ruta_origen(aamm, cadenas=None, version=None, raiz=None):
         # que armar: lo unico cierto es la raiz.
         return Path(raiz or RAIZ_DCO_INDICADORES)
 
-    base = carpeta_version_o_literal(aamm, version=version, raiz=raiz)
-    cadenas = list(cadenas or CADENAS_FD)
+    base = carpeta_version_usada(
+        aamm, buscar=buscar, version=version, raiz=raiz
+    )
+    subcarpetas = tuple(subcarpetas or SUBCARPETAS_FD)
 
-    for cadena in cadenas:
+    carpeta = bajar_por_subcarpetas(base, subcarpetas)
 
-        carpeta = bajar_por_subcarpetas(base, cadena)
+    if carpeta is not None:
+        return carpeta
 
-        if carpeta is not None:
-            return carpeta
-
-    for nombre in cadenas[0]:
+    for nombre in subcarpetas:
         base = base / nombre
 
     return base
@@ -442,11 +466,20 @@ def ruta_origen_fd(aamm, version=None, raiz=None):
         <RAIZ>/<AAAA>/<MM>. <Mes>/Indicadores Publicar/<Vn>
             /03 Desempeño para publicar
 
-    Es la ruta que la ventana muestra como "Origen: DCO" en la fila del
-    SSCC_Desempeño_* y la que abre al hacerle click.
+    con el <Vn> que de verdad tiene el archivo (V2 y, si ahi no esta,
+    V1). Es la ruta que la ventana muestra como "Origen: DCO" en la
+    fila del SSCC_Desempeño_* y la que abre al hacerle click.
     """
 
-    return ruta_origen(aamm, CADENAS_FD, version=version, raiz=raiz)
+    try:
+        anio, _ = periodo_desde_aamm(aamm)
+    except ErrorFd:
+        return Path(raiz or RAIZ_DCO_INDICADORES)
+
+    return ruta_origen(
+        aamm, SUBCARPETAS_FD, version=version, raiz=raiz,
+        buscar=lambda carpeta: buscar_archivos_fd(carpeta, anio),
+    )
 
 
 def _es_archivo_fd(ruta, anio):
@@ -467,31 +500,30 @@ def _es_archivo_fd(ruta, anio):
     return str(anio) in ruta.stem
 
 
+def carpeta_fd_de_la_version(carpeta_version):
+    """
+    <version>/03 Desempeño para publicar, o None si esa version no la
+    tiene. Es la UNICA carpeta de la que sale el FD.
+    """
+
+    return bajar_por_subcarpetas(Path(carpeta_version), SUBCARPETAS_FD)
+
+
 def buscar_archivos_fd(carpeta_version, anio):
     """
-    Los archivos de FD del periodo dentro de una carpeta de version:
-    primero en '03 Desempeño para publicar' (la ruta que dio el
-    usuario), despues en la carpeta anterior de los meses viejos
-    ('04 Desempeño para transferencias') y, si en ninguna hay, buscando
-    recursivamente desde la carpeta de version. Devuelve la lista
-    ordenada por nombre.
+    Los archivos de FD del periodo que hay en
+    '<version>/03 Desempeño para publicar'. Solo ahi y solo los de esa
+    carpeta (no se entra en sus subcarpetas): lo que no esta ahi, no es
+    el FD de este periodo. Devuelve la lista ordenada por nombre, vacia
+    si la carpeta no existe o no tiene ninguno.
     """
 
-    carpeta_version = Path(carpeta_version)
+    carpeta_fd = carpeta_fd_de_la_version(carpeta_version)
 
-    for cadena in CADENAS_FD:
+    if carpeta_fd is None:
+        return []
 
-        carpeta_fd = bajar_por_subcarpetas(carpeta_version, cadena)
-
-        if carpeta_fd is None:
-            continue
-
-        encontrados = _archivos_fd_en(carpeta_fd, anio, recursivo=True)
-
-        if encontrados:
-            return encontrados
-
-    return _archivos_fd_en(carpeta_version, anio, recursivo=True)
+    return _archivos_fd_en(carpeta_fd, anio)
 
 
 def _archivos_fd_en(carpeta, anio, recursivo=False):
@@ -513,33 +545,36 @@ def _archivos_fd_en(carpeta, anio, recursivo=False):
 
 def _contenido_de_la_carpeta_fd(carpeta_publicacion):
     """
-    Que hay en la carpeta de desempeño ('03 Desempeño para publicar' o,
-    en los meses viejos, '04 Desempeño para transferencias') de cada
-    version. Se usa SOLO para el mensaje de error: si el archivo no se
-    encontro por su nombre, lo mas util es mostrar que si hay ahi, para
-    poder corregir el patron de una.
+    Que hay en '03 Desempeño para publicar' de cada version. Se usa
+    SOLO para el mensaje de error: si no se encontro el archivo, lo
+    util es ver que SI hay en la carpeta de la que se saca.
+
+    Si una version no tiene esa carpeta pero si la de antes
+    ('04 Desempeño para transferencias', donde vivia el FD hasta hace
+    poco), se dice: ahi no se busca mas, y es la explicacion de por que
+    un mes viejo no trae nada.
     """
 
     lineas = []
 
     for carpeta_version in reversed(versiones_publicadas(carpeta_publicacion)):
 
-        carpeta_fd = next(
-            (
-                carpeta
-                for carpeta in (
-                    bajar_por_subcarpetas(carpeta_version, cadena)
-                    for cadena in CADENAS_FD
-                )
-                if carpeta is not None
-            ),
-            None,
-        )
+        carpeta_fd = carpeta_fd_de_la_version(carpeta_version)
 
         if carpeta_fd is None:
+
+            antigua = bajar_por_subcarpetas(
+                carpeta_version, SUBCARPETAS_FD_ANTIGUA
+            )
+
             lineas.append(
                 f"  {carpeta_version.name}: no tiene "
-                f"'{SUBCARPETAS_FD[0]}' ni '{SUBCARPETAS_FD_ANTIGUA[0]}'"
+                f"'{SUBCARPETAS_FD[0]}'"
+                + (
+                    f" (si tiene '{SUBCARPETAS_FD_ANTIGUA[0]}', la de "
+                    f"antes, donde ya no se busca)"
+                    if antigua is not None else ""
+                )
             )
             continue
 

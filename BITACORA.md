@@ -3845,3 +3845,65 @@ volcó la ventana entera: quedó con **25 botones** — el que faltaba era
 la ventana del plan ahora lista las 18 tareas, con la compensación adentro.
 
 ---
+
+## 2026-09-15 (4) — "Traer FD" traía media publicación: se pega a una sola carpeta
+
+**El reporte:** *"SSCC_Desempeño se están descargando de otra parte. La ruta es
+`…\Indicadores Publicar\V2\03 Desempeño para publicar`. Si no está en V2 se
+reemplaza por V1, esa es la lógica, no descargar nada más. Cuando corro Traer
+FD me trae muchos que vienen de otras rutas. Y los links de la ventana tienen
+que apuntar a la ruta final a la que se ocupó, V1 o V2 como sea."*
+
+**Por qué traía de más.** `buscar_archivos_fd()` tenía dos escalones de
+tolerancia que en el árbol real se comen media publicación:
+
+1. dentro de la carpeta del FD buscaba con `rglob` (o sea, también en sus
+   subcarpetas);
+2. si ahí no encontraba, se caía a un `rglob` **desde la carpeta de la
+   versión entera** — cualquier `SSCC_Desempeño_*` o
+   `SSCC_Disponibilidad_CSF*` con el año en el nombre, colgara de donde
+   colgara (`01 Respuesta`, `02 …`, lo que sea), entraba a la lista y se
+   copiaba al caso.
+
+Esa tolerancia la habíamos puesto nosotros "por si el DCO cambia el
+anidamiento". La regla real es más simple y es la que pidió el usuario: esa
+carpeta, sin recursión, en V2 y si no en V1. Nada más.
+
+**Lo que quedó.** `buscar_archivos_fd()` mira sólo los archivos **sueltos** de
+`<version>/03 Desempeño para publicar` (`carpeta_fd_de_la_version()`, nueva) y
+devuelve lista vacía si esa versión no tiene la carpeta. La elección de
+versión no cambió: `buscar_en_versiones()` ya recorría de mayor a menor y se
+queda con la primera que TENGA el archivo.
+
+También se sacó la carpeta anterior (`04 Desempeño para transferencias`) de la
+búsqueda: ya no se busca ahí. `SUBCARPETAS_FD_ANTIGUA` queda sólo para el
+mensaje de error — si una versión no tiene la carpeta nueva pero sí la vieja,
+el error lo dice con todas las letras, así un mes viejo falla explicando por
+qué en vez de traer cualquier cosa.
+
+**Los links, a la ruta que se ocupó.** `ruta_origen_fd()` resolvía la versión
+más alta que EXISTIERA (`elegir_version`), así que con una V2 publicada pero
+vacía el botón copiaba de V1 y el link apuntaba a V2. Ahora
+`carpeta_version_usada()` recibe la **misma función de búsqueda que usa el
+botón**, así que link y carpeta de origen son siempre la misma. Lo mismo para
+los "Origen inputs" de CPF y CTF (`ruta_origen_cpf/ctf` pasan
+`buscar_reportes_cpf`/`buscar_ctf`): cada entrada elige su versión por
+separado, y cada link sigue a la suya.
+
+**Verificación:** 140 pruebas (antes 136; 4 nuevas en
+`tests/test_origenes_fd.py`: que no busca en la carpeta vieja, que no trae
+nada de otras ramas del árbol, que ignora las subcarpetas de la carpeta del
+FD, y que el link apunta a V1 cuando V2 está vacía). Además dos corridas de
+`traer_fd()` de punta a punta contra un árbol armado como el real —V2 con el
+zip bueno y cuatro ramas con archivos de nombre parecido— : copió **un solo
+archivo**, descomprimió el Excel de adentro y el link quedó en
+`…/V2/03 Desempeño para publicar`; con la V2 vacía, copió de V1 y el link
+quedó en V1.
+
+**Ojo, no se tocó:** `buscar_reportes_cpf()` y `buscar_ctf()` (los insumos del
+FMA) siguen teniendo su caída a búsqueda recursiva desde la carpeta de la
+versión. No traen archivos al caso —se leen en el lugar—, pero si aparece el
+mismo síntoma (un CPF/CTF que sale de donde no corresponde), es el mismo
+patrón y se arregla igual.
+
+---

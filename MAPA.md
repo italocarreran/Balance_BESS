@@ -152,7 +152,7 @@ importable como cualquier módulo.
 
   | Fila | Detalle | Abre |
   |---|---|---|
-  | `SSCC_Desempeño_*` | **Origen: DCO** | `…\Indicadores Publicar\<Vn>\03 Desempeño para publicar` |
+  | `SSCC_Desempeño_*` | **Origen: DCO** | `…\Indicadores Publicar\<Vn>\03 Desempeño para publicar` — el `<Vn>` que **de verdad se usó** (V2 y, si ahí no está, V1) |
   | `cmg<AAMM>_def_15minutal.csv` | **Origen: CMg Reales** | `T:\CMgReales 15MIN\<AAAA>\<AAMM>\Mensual\CMg\Cmg para balance` |
   | `DB subastas/` | **Origen: progdiar_adjudicaSEN** | `RAIZ_SUBASTAS_ORIGEN` |
   | `cmg.xlsx` | **Origen inputs:** el CSV 15-minutal | la misma carpeta de `T:` |
@@ -361,10 +361,12 @@ importable como cualquier módulo.
   mismo script.
 - **Consume:**
   `F:\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\03 Desempeño para publicar`
-  (`RAIZ_DCO_INDICADORES` + `SUBCARPETAS_FD` — ruta confirmada por el usuario;
-  antes se usaba el UNC `\\nas-cen1\DCO\11 SSCC\…` y la subcarpeta
-  `04 Desempeño para transferencias`, que queda como alternativa —
-  `SUBCARPETAS_FD_ANTIGUA` — para los meses ya cerrados).
+  (`RAIZ_DCO_INDICADORES` + `SUBCARPETAS_FD` — ruta confirmada por el usuario).
+  **Esa carpeta y ninguna otra**: no se busca en la que se usaba antes
+  (`04 Desempeño para transferencias`, hoy sólo `SUBCARPETAS_FD_ANTIGUA`, para
+  nombrarla en el error) ni en otras ramas del árbol de la versión, y tampoco
+  dentro de sus subcarpetas. La búsqueda recursiva que había como último
+  recurso es lo que hacía que "Traer FD" copiara archivos de media publicación.
 - **Produce:** la copia del FD dentro de `<CARPETA_BASE>/FD y FMA/`, y los Excel
   que venían dentro del `.zip`, sueltos en esa misma carpeta (que es donde
   `buscar_archivo_sscc_desempeno()` los busca después).
@@ -373,15 +375,18 @@ importable como cualquier módulo.
   `buscar_en_versiones(carpeta_publicacion, buscar, version=None, registrar)` →
   `(carpeta_version, resultado, revisadas)` — recorre las versiones de mayor a
   menor hasta que `buscar` encuentre algo,
-  `buscar_archivos_fd(carpeta_version, anio)`,
+  `carpeta_fd_de_la_version(carpeta_version)`,
+  `buscar_archivos_fd(carpeta_version, anio)` (sólo los sueltos de esa carpeta),
   `traer_fd(carpeta_destino, aamm, version=None, raiz=None, registrar=print)` →
   `(copiados, extraidos, carpeta_version)`; y, para el link "Origen: DCO" de
   la ventana, `carpeta_publicacion_o_literal(aamm, raiz=None)`,
-  `carpeta_version_o_literal(aamm, version=None, raiz=None)`,
-  `ruta_origen(aamm, cadenas=None, version=None, raiz=None)` y
+  `carpeta_version_usada(aamm, buscar=None, version=None, raiz=None)`,
+  `ruta_origen(aamm, subcarpetas=None, version=None, raiz=None, buscar=None)` y
   `ruta_origen_fd(aamm, version=None, raiz=None)` — estas cuatro **no
   levantan**: con la unidad desconectada devuelven igual la ruta que le
-  correspondería al período.
+  correspondería al período. Con `buscar` (la misma función que usa el botón)
+  apuntan a la versión que **de verdad tiene el archivo**, no a la más alta que
+  exista: el link de la ventana y la carpeta de la que se copió son la misma.
 - **Depende de:** solo la biblioteca estándar. **No importa `nucleo`.**
 - **Decisiones que se tomaron acá** (no venían dadas):
   - **qué versión usar**: la ventana no tiene selector Pre/Def, así que por

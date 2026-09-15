@@ -174,18 +174,27 @@ def nombre_salida(tipo, aamm):
 # ============================================================
 
 def ruta_origen_cpf(aamm, version=None, raiz=None):
-    """<version>/01 Respuesta/01 Indices CPF -- los reportes diarios."""
+    """
+    <version>/01 Respuesta/01 Indices CPF -- los reportes diarios, con
+    el <version> que de verdad los tiene (el mismo que va a usar el
+    boton: cada entrada elige su version por separado).
+    """
 
     return dco.ruta_origen(
-        aamm, [SUBCARPETAS_CPF], version=version, raiz=raiz
+        aamm, SUBCARPETAS_CPF, version=version, raiz=raiz,
+        buscar=lambda carpeta: buscar_reportes_cpf(carpeta, aamm),
     )
 
 
 def ruta_origen_ctf(aamm, version=None, raiz=None):
-    """<version>/01 Respuesta/06 Indices CTF -- el CTF_<AAAA><MM>.csv."""
+    """
+    <version>/01 Respuesta/06 Indices CTF -- el CTF_<AAAA><MM>.csv, con
+    el <version> que de verdad lo tiene.
+    """
 
     return dco.ruta_origen(
-        aamm, [SUBCARPETAS_CTF], version=version, raiz=raiz
+        aamm, SUBCARPETAS_CTF, version=version, raiz=raiz,
+        buscar=lambda carpeta: buscar_ctf(carpeta, aamm),
     )
 
 

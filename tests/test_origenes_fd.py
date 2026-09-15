@@ -2,9 +2,12 @@
 De donde sale el FD y como se muestra el origen en la ventana:
 
   - la raiz del arbol de indicadores del DCO es la unidad F: y el FD
-    cuelga de '03 Desempeño para publicar' (antes, de
-    '04 Desempeño para transferencias', que queda de alternativa);
+    sale de '03 Desempeño para publicar' y de ninguna otra carpeta: ni
+    de la de antes ('04 Desempeño para transferencias') ni de otras
+    ramas del arbol de la version;
   - entre V1 y V2 se usa SIEMPRE la mas alta que tenga el archivo;
+  - el link de la ventana apunta a la carpeta que DE VERDAD se uso
+    (V1 o V2), no a la version mas alta que exista;
   - cada fila del diagrama viaja con su ruta (para que el nombre sea
     un link) y, si lo que hay en ella viene de afuera del caso, con el
     id de su origen.
@@ -64,15 +67,52 @@ class RutaDelFdTest(unittest.TestCase):
                 encontrados[0].parent.name, "03 Desempeño para publicar"
             )
 
-    def test_sigue_encontrandolo_en_la_carpeta_vieja(self):
-        """Un mes ya cerrado tiene el FD en la carpeta anterior."""
+    def test_no_busca_en_la_carpeta_vieja(self):
+        """
+        Hasta hace poco el FD vivia en '04 Desempeño para
+        transferencias'. Ya no se busca ahi: la regla es esa carpeta y
+        ninguna otra.
+        """
 
         with tempfile.TemporaryDirectory() as tmp:
             publicacion = arbol_dco(
                 tmp, {"V1": True},
                 subcarpeta="04 Desempeño para transferencias",
             )
-            encontrados = dco.buscar_archivos_fd(publicacion / "V1", 2026)
+            self.assertEqual(dco.buscar_archivos_fd(publicacion / "V1", 2026), [])
+
+    def test_no_se_trae_nada_de_otras_ramas_del_arbol(self):
+        """
+        El problema que reporto el usuario: "cuando corro Traer FD me
+        trae muchos que vienen de otras rutas". Pasaba porque, si no
+        encontraba, barria recursivamente TODO el arbol de la version.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            publicacion = arbol_dco(tmp, {"V1": False})
+            version = publicacion / "V1"
+
+            # Archivos con el mismo nombre colgando de otras ramas y de
+            # una subcarpeta de la propia carpeta del FD.
+            for rama in (
+                version / "01 Respuesta" / "01 Indices CPF",
+                version / "02 Otra cosa",
+                version / "03 Desempeño para publicar" / "adjuntos",
+            ):
+                rama.mkdir(parents=True, exist_ok=True)
+                (rama / NOMBRE_FD).write_bytes(b"")
+
+            self.assertEqual(dco.buscar_archivos_fd(version, 2026), [])
+
+    def test_solo_los_archivos_sueltos_de_esa_carpeta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            publicacion = arbol_dco(tmp, {"V2": True})
+            carpeta = publicacion / "V2" / "03 Desempeño para publicar"
+            (carpeta / "adjuntos").mkdir()
+            (carpeta / "adjuntos" / "SSCC_Desempeño_otro_2026.xlsx").write_bytes(b"")
+
+            encontrados = dco.buscar_archivos_fd(publicacion / "V2", 2026)
+
             self.assertEqual([r.name for r in encontrados], [NOMBRE_FD])
 
     def test_si_esta_v2_no_se_usa_v1(self):
@@ -114,6 +154,33 @@ class RutaDeOrigenTest(unittest.TestCase):
             ruta = dco.ruta_origen_fd("2608", raiz=tmp)
             self.assertEqual(ruta.name, "03 Desempeño para publicar")
             self.assertEqual(ruta.parent.name, "V2")
+
+    def test_si_v2_no_tiene_el_archivo_el_link_apunta_a_v1(self):
+        """
+        Lo que pidio el usuario: el link de la ventana tiene que
+        apuntar a la ruta FINAL, la que se ocupo, sea V1 o V2.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            arbol_dco(tmp, {"V1": True, "V2": False})
+            ruta = dco.ruta_origen_fd("2608", raiz=tmp)
+            self.assertEqual(ruta.parent.name, "V1")
+            self.assertEqual(ruta.name, "03 Desempeño para publicar")
+
+    def test_el_link_es_la_misma_carpeta_de_la_que_se_copia(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            publicacion = arbol_dco(tmp, {"V1": True, "V2": True})
+
+            carpeta_version, archivos, _ = dco.buscar_en_versiones(
+                publicacion,
+                lambda carpeta: dco.buscar_archivos_fd(carpeta, 2026),
+                registrar=lambda *_: None,
+            )
+
+            self.assertEqual(
+                dco.ruta_origen_fd("2608", raiz=tmp), archivos[0].parent
+            )
+            self.assertEqual(archivos[0].parent.parent, carpeta_version)
 
     def test_sin_servidor_arma_la_ruta_igual(self):
         """
