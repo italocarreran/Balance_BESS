@@ -504,3 +504,4 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   hojas del mismo libro se abre UNA vez (`pd.ExcelFile`), porque cada
   `pd.read_excel(ruta, sheet_name=...)` vuelve a parsear el archivo
   entero.
+- **El programa crea las CARPETAS de un caso, nunca sus archivos.** `crear_estructura_caso()` arma la carpeta del período y sus subcarpetas vacías, es idempotente y no borra ni mueve nada; los archivos de entrada los pone la persona (o los traen los botones "Traer"). Y no se impone una convención de nombre de caso: se propone el nombre del período anterior con el AAMM cambiado y el usuario lo edita antes de crear. Preguntar sólo cuando se puede saber (la carpeta no existe, o su nombre trae otro AAMM); si el nombre no dice nada del período, no se pregunta.

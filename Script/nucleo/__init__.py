@@ -97,7 +97,8 @@ from .manifiesto import (
 from .rutas import (
     _buscar_archivo_excel_mas_reciente, _es_archivo_de_soc,
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
-    buscar_soc, periodo_desde_aamm,
+    SUBCARPETAS_CASO, buscar_soc, crear_estructura_caso,
+    nombre_caso_sugerido, periodo_desde_aamm,
     resolver_rutas, validar_aamm,
 )
 from .estructura import (
@@ -263,6 +264,7 @@ __all__ = [
     "_es_archivo_de_soc", "buscar_archivo_ofertas",
     "buscar_archivo_sscc_desempeno",
     "buscar_soc", "periodo_desde_aamm", "resolver_rutas",
+    "SUBCARPETAS_CASO", "crear_estructura_caso", "nombre_caso_sugerido",
     "validar_aamm", "SECCIONES_CONSOLIDADO", "SECCIONES_PAGOS", "_fila",
     "COLUMNAS_ORIGEN", "HOJA_ORIGEN",
     "buscar_archivo_prorrata", "leer_prorrata_retiros",

@@ -50,6 +50,20 @@ python Balance_BESS.py
    SoC del período dentro de `Medidas/` y el CSV de CMg dentro de `Cmg/`.
 3. La ventana detecta automáticamente las entradas y las dibuja como un
    diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
+   - **Si el período que escribís todavía no tiene carpeta**, la ventana lo
+     nota (la carpeta abierta no existe, o su nombre trae el AAMM de otro
+     mes) y ofrece crearla: propone el nombre de la carpeta que tenías
+     abierta con el AAMM cambiado (`Balance BESS 2607` → `Balance BESS
+     2608`) y dónde crearla, y las dos cosas se pueden editar antes de
+     confirmar. Se crean la carpeta y sus subcarpetas vacías
+     (`Medidas/`, `Auxiliares/`, `Ofertas/`, `Cmg/`, `FD y FMA/`,
+     `Subastas/DB subastas/`, `Prorrata retiros/`) y el caso queda abierto
+     en ese período. También está el botón **Crear carpeta del caso**,
+     abajo de todo.
+   - A un caso al que le falte alguna subcarpeta se la completa desde ahí
+     mismo (al elegir la carpeta con **Examinar**, o al cambiar el
+     período): se crean sólo las que faltan y no se toca nada de lo que ya
+     hay.
 4. **Cada acción es un botón en la fila que le corresponde** (y además está
    el botón **Ejecutar todo**, abajo de todo — ver más abajo):
    - `Medidas/Medidas_SAE.xlsx` → **Actualizar** (baja el mes completo de las

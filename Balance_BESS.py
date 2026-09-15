@@ -6,6 +6,11 @@ Ventana unica: se elige la carpeta base del caso, se ingresa el
 periodo (AAMM) y debajo se dibuja el diagrama de la estructura del
 caso con el estado de cada entrada (OK/FALTA/PENDIENTE).
 
+Si el periodo que se escribe arriba todavia no tiene carpeta, la
+ventana ofrece crearla con todas sus subcarpetas adentro (tambien esta
+el boton "Crear carpeta del caso", abajo de todo); y a un caso al que
+le falte una subcarpeta se la completa desde ahi mismo.
+
 Todo lo que el programa puede hacer sale de un boton en la fila que
 corresponde. Ademas, abajo de todo hay un boton "Ejecutar todo": abre
 una ventana con el PLAN de la corrida (que falta, que esta al dia, que
@@ -63,6 +68,7 @@ en donde se guarda config.json.
 """
 
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -602,6 +608,16 @@ def main():
 
         btn_abrir_salida.config(state="normal")
 
+    def faltan_subcarpetas(base):
+        """Las subcarpetas del caso que todavia no estan en 'base'."""
+
+        base = Path(base)
+
+        return [
+            sub for sub in nucleo.SUBCARPETAS_CASO
+            if not (base / sub).is_dir()
+        ]
+
     def seleccionar():
         inicial = var_base.get()
         if not inicial or not Path(inicial).is_dir():
@@ -610,17 +626,100 @@ def main():
             title="Selecciona la carpeta base del caso",
             initialdir=inicial,
         )
-        if ruta:
-            var_base.set(ruta)
-            guardar_config({"carpeta_base": ruta})
-            log(f"Carpeta base: {ruta}")
-            revisar()
+        if not ruta:
+            return
+
+        var_base.set(ruta)
+        guardar_config({"carpeta_base": ruta})
+        log(f"Carpeta base: {ruta}")
+        revisar()
+
+        # Una carpeta recien creada (o un caso al que le falta una
+        # subcarpeta) se completa aca mismo, sin obligar a armarlas a
+        # mano en el explorador.
+        faltan = faltan_subcarpetas(ruta)
+
+        if faltan and messagebox.askyesno(
+            "Faltan carpetas del caso",
+            f"A {Path(ruta).name} le faltan {len(faltan)} carpeta(s) del "
+            f"caso:\n\n"
+            + "\n".join(f"  {sub}/" for sub in faltan)
+            + "\n\n¿Las creo ahora? (vacias; no se toca nada de lo que "
+              "ya hay)",
+        ):
+            crear_carpetas_en(ruta)
 
     tk.Button(frame_carpeta, text="Examinar", command=seleccionar).pack(pady=(6, 0))
 
+    # El ultimo AAMM que se proceso, para no volver a preguntar lo
+    # mismo cada vez que el campo pierde el foco sin haber cambiado.
+    ultimo_aamm = {"valor": var_aamm.get().strip()}
+
+    def _es_de_otro_periodo(base, aamm):
+        """
+        Si la carpeta base que hay abierta NO es la de este periodo.
+
+        Dos casos claros: la carpeta no existe, o su nombre trae un
+        AAMM (el del periodo anterior) distinto del que se acaba de
+        escribir. Si el nombre no tiene ningun AAMM no se puede saber,
+        y entonces no se pregunta nada: mejor callarse que molestar.
+        """
+
+        if not base:
+            return False
+
+        base = Path(base)
+
+        if not base.is_dir():
+            return True
+
+        aamms_en_el_nombre = re.findall(r"(?<!\d)\d{4}(?!\d)", base.name)
+
+        return bool(aamms_en_el_nombre) and aamm not in aamms_en_el_nombre
+
     def aamm_cambiado(*_):
-        guardar_config({"aamm": var_aamm.get().strip()})
+
+        aamm = var_aamm.get().strip()
+
+        guardar_config({"aamm": aamm})
         revisar()
+
+        if aamm == ultimo_aamm["valor"]:
+            return
+
+        ultimo_aamm["valor"] = aamm
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada:
+            return
+
+        if corriendo["activo"]:
+            return
+
+        # Mes nuevo: si la carpeta abierta es la del mes anterior (o no
+        # existe), se ofrece crear la del periodo con sus subcarpetas
+        # adentro. Pedido del usuario.
+        if _es_de_otro_periodo(var_base.get(), aamm):
+            if messagebox.askyesno(
+                f"Periodo {aamm}",
+                f"La carpeta abierta no es la del periodo {aamm}.\n\n"
+                f"¿Crear la carpeta de este periodo, con todas sus "
+                f"subcarpetas adentro?",
+            ):
+                ventana_nuevo_caso(aamm)
+            return
+
+        # Misma carpeta, pero incompleta.
+        faltan = faltan_subcarpetas(var_base.get()) if var_base.get() else []
+
+        if faltan and messagebox.askyesno(
+            "Faltan carpetas del caso",
+            f"A la carpeta del caso le faltan {len(faltan)} carpeta(s):\n\n"
+            + "\n".join(f"  {sub}/" for sub in faltan)
+            + "\n\n¿Las creo ahora?",
+        ):
+            crear_carpetas_en(var_base.get())
 
     entry_aamm.bind("<FocusOut>", aamm_cambiado)
     entry_aamm.bind("<Return>", aamm_cambiado)
@@ -914,6 +1013,178 @@ def main():
         )
 
     # --------------------------------------------------------
+    # CASO NUEVO: CREAR LA CARPETA DEL PERIODO CON SUS SUBCARPETAS
+    # --------------------------------------------------------
+
+    def crear_carpetas_en(base, usar=True):
+        """
+        Crea (o completa) la estructura del caso en 'base'. Si
+        usar=True, esa carpeta pasa a ser la carpeta base de la
+        ventana.
+        """
+
+        try:
+            creadas = nucleo.crear_estructura_caso(base, registrar=log)
+        except nucleo.ErrorEntrada as error:
+            messagebox.showerror("No se pudo crear", str(error))
+            return False
+
+        if creadas:
+            log(f"Caso preparado en {base} ({len(creadas)} carpeta(s) nuevas).")
+        else:
+            log(f"{base} ya tenia todas sus carpetas.")
+
+        if usar:
+            var_base.set(str(base))
+            guardar_config({"carpeta_base": str(base)})
+
+        revisar()
+
+        return True
+
+    def ventana_nuevo_caso(aamm_objetivo=None):
+        """
+        Crea la carpeta de un periodo que todavia no existe, con todas
+        sus subcarpetas adentro (pedido del usuario: "cuando yo elija
+        un mes que no exista, me permita elegir y crear la carpeta con
+        las carpetas dentro").
+
+        No impone ninguna convencion de nombre: propone el nombre de
+        la carpeta que se estaba usando con el AAMM cambiado ("Balance
+        BESS 2607" -> "Balance BESS 2608") y deja cambiar tanto el
+        nombre como donde crearla.
+        """
+
+        if corriendo["activo"]:
+            return
+
+        aamm = (aamm_objetivo or var_aamm.get()).strip()
+
+        base_actual = Path(var_base.get()) if var_base.get() else None
+
+        # Por defecto, al lado de la carpeta del periodo anterior.
+        if base_actual and base_actual.parent.is_dir():
+            padre_inicial = str(base_actual.parent)
+        else:
+            padre_inicial = str(Path.home())
+
+        try:
+            nombre_inicial = nucleo.nombre_caso_sugerido(aamm, base_actual)
+        except nucleo.ErrorEntrada:
+            nombre_inicial = base_actual.name if base_actual else "Caso nuevo"
+
+        top = tk.Toplevel(root)
+        top.title("Crear la carpeta del caso")
+        top.geometry("760x460")
+        top.transient(root)
+
+        var_padre = tk.StringVar(value=padre_inicial)
+        var_nombre = tk.StringVar(value=nombre_inicial)
+
+        tk.Label(
+            top,
+            text=(
+                f"Se va a crear la carpeta del periodo {aamm or '(sin AAMM)'} "
+                f"con todas sus subcarpetas vacias adentro.\n"
+                f"No se copia ni se mueve ningun archivo."
+            ),
+            font=("Segoe UI", 9), anchor="w", justify="left",
+        ).pack(fill="x", padx=14, pady=(12, 8))
+
+        frame_padre = tk.LabelFrame(
+            top, text="Donde crearla", padx=10, pady=8
+        )
+        frame_padre.pack(fill="x", padx=14, pady=4)
+
+        tk.Entry(
+            frame_padre, textvariable=var_padre, font=("Segoe UI", 9),
+        ).pack(side="left", fill="x", expand=True)
+
+        def elegir_padre():
+            elegida = filedialog.askdirectory(
+                title="Carpeta donde crear el caso",
+                initialdir=var_padre.get() or str(Path.home()),
+                parent=top,
+            )
+            if elegida:
+                var_padre.set(elegida)
+
+        tk.Button(frame_padre, text="Examinar", command=elegir_padre).pack(
+            side="left", padx=(8, 0)
+        )
+
+        frame_nombre = tk.LabelFrame(
+            top, text="Nombre de la carpeta", padx=10, pady=8
+        )
+        frame_nombre.pack(fill="x", padx=14, pady=4)
+
+        tk.Entry(
+            frame_nombre, textvariable=var_nombre, font=("Segoe UI", 9),
+        ).pack(fill="x")
+
+        frame_lista = tk.LabelFrame(
+            top, text="Subcarpetas que se crean", padx=10, pady=8
+        )
+        frame_lista.pack(fill="both", expand=True, padx=14, pady=4)
+
+        tk.Label(
+            frame_lista,
+            text="\n".join(f"{sub}/" for sub in nucleo.SUBCARPETAS_CASO),
+            font=("Consolas", 9), anchor="w", justify="left", fg=COLOR_NEUTRO,
+        ).pack(fill="both", expand=True)
+
+        frame_pie = tk.Frame(top)
+        frame_pie.pack(fill="x", padx=14, pady=(4, 12))
+
+        def crear():
+
+            padre = var_padre.get().strip()
+            nombre = var_nombre.get().strip()
+
+            if not padre or not Path(padre).is_dir():
+                messagebox.showwarning(
+                    "Falta donde crearla",
+                    "Elegi una carpeta que exista para crear el caso adentro.",
+                    parent=top,
+                )
+                return
+
+            if not nombre:
+                messagebox.showwarning(
+                    "Falta el nombre",
+                    "Escribi como se va a llamar la carpeta del caso.",
+                    parent=top,
+                )
+                return
+
+            destino = Path(padre) / nombre
+
+            if destino.is_dir() and not messagebox.askyesno(
+                "Ya existe",
+                f"{destino} ya existe.\n\nSe le van a crear las "
+                f"subcarpetas que le falten (no se toca nada de lo que "
+                f"ya tiene). ¿Seguir?",
+                parent=top,
+            ):
+                return
+
+            if crear_carpetas_en(destino):
+                if aamm:
+                    var_aamm.set(aamm)
+                    guardar_config({"aamm": aamm})
+                    revisar()
+                top.destroy()
+
+        tk.Button(
+            frame_pie, text="Crear y usar", font=("Segoe UI", 9, "bold"),
+            bg="#fdf0d5", command=crear,
+        ).pack(side="right", padx=8)
+
+        tk.Button(frame_pie, text="Cancelar", command=top.destroy).pack(
+            side="right", padx=8
+        )
+
+    # --------------------------------------------------------
     # EJECUTAR TODO (una ventana con el plan de la corrida)
     # --------------------------------------------------------
 
@@ -1127,6 +1398,12 @@ def main():
 
     def abrir_salida():
         abrir_en_explorador(var_base.get())
+
+    tk.Button(
+        frame_botones,
+        text="Crear carpeta del caso",
+        command=lambda: ventana_nuevo_caso(var_aamm.get().strip()),
+    ).pack(side="left", padx=10, expand=True)
 
     tk.Button(
         frame_botones,

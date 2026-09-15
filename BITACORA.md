@@ -3533,3 +3533,58 @@ hay acceso desde acá), así que el paralelismo de las cuatro bajadas está
 probado con funciones falsas, no contra el Coordinador.
 
 ---
+
+## 2026-09-15 — Un mes que todavia no existe: crear la carpeta con todo adentro
+
+Pedido del usuario: *"cuando yo elija un mes que no exista, me permita elegir
+y crear la carpeta con las carpetas dentro"*.
+
+**Cuando se ofrece.** Al escribir un período nuevo arriba, la ventana mira la
+carpeta que está abierta y pregunta solo cuando está segura: o no existe, o su
+nombre trae un AAMM (el del mes anterior) distinto del que se acaba de
+escribir. Si el nombre no tiene ningún AAMM no se puede saber y no se
+pregunta nada — mejor callarse que molestar en cada `FocusOut`. También está
+el botón fijo **Crear carpeta del caso**, para cuando se quiere hacer a mano.
+
+**Qué propone.** No se impone ninguna convención de nombre: se toma el nombre
+de la carpeta que se estaba usando y se le cambia SOLO el AAMM
+(`Balance BESS 2607` → `Balance BESS 2608`, `nombre_caso_sugerido()`); si no
+trae ninguno, se propone el AAMM pelado. La ventana muestra ese nombre y la
+carpeta donde crearla (por defecto, al lado de la del mes anterior) en dos
+campos editables, más la lista de lo que va a crear. Recién ahí se crea, y el
+caso queda abierto en ese período.
+
+**Qué crea** (`crear_estructura_caso()`, `SUBCARPETAS_CASO`): la carpeta base
+y `Medidas/`, `Auxiliares/`, `Ofertas/`, `Cmg/`, `FD y FMA/`, `Subastas/`,
+`Subastas/DB subastas/` y `Prorrata retiros/`. NO crea `Medidas/_trabajo`
+(son los andamios de la descarga, los arma `generar_medidas_sae`).
+
+Tres cuidados:
+
+- **Es idempotente y no toca nada**: crea solo las carpetas que faltan, nunca
+  borra ni mueve. Por eso sirve igual para completar un caso al que le falta
+  una subcarpeta — lo que ahora también se ofrece al elegir carpeta con
+  "Examinar" y al cambiar de período sin cambiar de carpeta.
+- **Un caso viejo con `SSCC_Desempeño/`** (el nombre anterior de `FD y FMA/`)
+  no recibe una `FD y FMA/` vacía al lado: se respeta la que ya está usando,
+  que es la misma regla de `resolver_rutas()`.
+- Si el nombre elegido ya existe como ARCHIVO, se dice y no se hace nada.
+
+### Verificación
+
+- 103 pruebas (eran 93), todas verdes, sin avisos de `pyflakes`.
+- `tests/test_caso_nuevo.py` (nuevo, 10 pruebas): la carpeta que nace con
+  todo adentro, la segunda corrida que no hace nada, completar solo lo que
+  falta sin tocar un archivo que ya estaba, el caso viejo que conserva su
+  carpeta de FD, el nombre ocupado por un archivo, y que
+  `revisar_estructura()` sobre el caso recién creado no marca NINGUNA carpeta
+  en falta (las que se crean son exactamente las que el programa busca).
+  Más el nombre sugerido: cambia el AAMM y conserva el resto, no se come un
+  número de 6 dígitos, y avisa si el período no es válido.
+- La ventana se probó de verdad (Xvfb): se escribe `2608` con un caso
+  `Balance BESS 2607` abierto, aparece la pregunta, la ventana propone
+  `Balance BESS 2608` en la carpeta de al lado, se crea con sus 7
+  subcarpetas + `DB subastas`, y la ventana queda abierta en ese caso con el
+  período guardado.
+
+---
