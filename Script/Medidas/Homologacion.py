@@ -81,8 +81,36 @@ UNIDADES_GEN_REAL = {
 ETIQUETA_UNIDAD_GEN_REAL = {"mwh": "MWh", "kwh": "kWh"}
 
 # Lo que se usa cuando la columna "Canal" viene vacia o con un texto
-# que no es ninguna de las dos unidades: la API devuelve MWh.
+# que no empieza con ninguna de las dos unidades: la API devuelve MWh.
 UNIDAD_GEN_REAL_POR_DEFECTO = "mwh"
+
+
+def unidad_desde_canal(valor):
+    """
+    La unidad que dice la columna "Canal" de la hoja "Gen real".
+
+    Se mira SOLO EL PRINCIPIO del texto: en el archivo real el canal
+    viene escrito "MWhD" / "MWhR" (y podria venir "kWhD" / "kWhR"), o
+    sea la unidad con el tipo de medida pegado atras. Lo unico que
+    decide aca es la unidad -si hay que multiplicar por mil o no-; la
+    D y la R del final no significan nada para esta cuenta.
+
+    Antes se comparaba el texto ENTERO contra "mwh"/"kwh", asi que
+    cualquier canal con sufijo caia en el valor por defecto: cambiar la
+    columna de MWhD a kWhD no cambiaba nada y la central entraba igual
+    multiplicada por mil.
+
+    Vacio, o un texto que no empieza con ninguna de las dos, vale MWh,
+    que es lo que devuelve la API de operacion real.
+    """
+
+    texto = normalizar(valor)
+
+    for unidad in UNIDADES_GEN_REAL:
+        if texto.startswith(unidad):
+            return unidad
+
+    return UNIDAD_GEN_REAL_POR_DEFECTO
 
 
 def buscar_archivo_homologacion(carpeta_auxiliares):
@@ -184,8 +212,10 @@ def leer_gen_real(ruta):
     'topologyName', 'clave', 'factor' y 'unidad' -- la forma que
     espera Generacion_Real.
 
-    'unidad' sale de la columna "Canal" ("MWh"/"kWh"); vacia o con
-    cualquier otro texto vale MWh, que es lo que devuelve la API de
+    'unidad' sale del PRINCIPIO de la columna "Canal" ("MWhD",
+    "MWhR", "kWh", ...): lo que decide es la unidad, no el sufijo (ver
+    unidad_desde_canal). Vacia o con un texto que no empieza con
+    ninguna de las dos vale MWh, que es lo que devuelve la API de
     operacion real (ver UNIDADES_GEN_REAL).
 
     Si la hoja no existe, devuelve lista vacia y el proceso sigue: un
@@ -237,12 +267,11 @@ def leer_gen_real(ruta):
                     f"({fila[columna_flujo]!r}). Usa 1 o -1."
                 )
 
-        unidad = UNIDAD_GEN_REAL_POR_DEFECTO
-
-        if columna_canal is not None:
-            texto = normalizar(fila[columna_canal])
-            if texto in UNIDADES_GEN_REAL:
-                unidad = texto
+        unidad = (
+            unidad_desde_canal(fila[columna_canal])
+            if columna_canal is not None
+            else UNIDAD_GEN_REAL_POR_DEFECTO
+        )
 
         centrales.append(
             {

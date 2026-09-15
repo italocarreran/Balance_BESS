@@ -48,6 +48,20 @@ hoja se actualiza sola, y lo que no se toca se conserva tal cual
 estaba en el archivo. Si el archivo todavia no existe, se crea al
 actualizar la primera hoja.
 
+Cada archivo y cada carpeta del diagrama es un LINK a su ruta: el
+click abre la carpeta en el explorador (la que contiene al archivo, si
+la fila es un archivo -- nunca se abre el archivo). Y las filas que
+traen algo de afuera del caso dicen de donde en su detalle:
+
+    SSCC_Desempeño_*      Origen: DCO
+    cmg<AAMM>_..._.csv    Origen: CMg Reales
+    DB subastas/          Origen: progdiar_adjudicaSEN
+    fma_cpf/csf/cft       Origen inputs: ... (el FMA no se trae hecho,
+                          se arma, pero sus insumos si vienen de afuera)
+
+y ese nombre tambien es un link, a la carpeta exacta de origen del
+periodo (ver Script/nucleo/origenes.py).
+
 Medidas/_trabajo/ (los lotes que baja la API, la marca de
 reanudacion) NO aparece en el diagrama a pedido del usuario: no es una
 entrada ni una salida del caso, son andamios del proceso.
@@ -79,6 +93,7 @@ COLOR_FALTA = "#b00020"
 COLOR_PENDIENTE = "#a06000"
 COLOR_NEUTRO = "#555555"
 COLOR_BASE_OK = "#1a4fb0"
+COLOR_LINK = "#1a4fb0"
 
 SIMBOLO = {
     "ok": "OK",
@@ -130,17 +145,62 @@ def guardar_config(data):
     config.actualizar_seccion(get_usuario(), data)
 
 
+def carpeta_a_abrir(ruta, es_archivo=False):
+    """
+    Que carpeta se abre al hacer click en una fila del diagrama: la
+    propia si la fila es una carpeta, la que CONTIENE al archivo si es
+    un archivo -- nunca se abre el archivo, para no arrancar Excel sin
+    que se lo pidan.
+
+    Si todavia no existe (una carpeta que falta, un archivo que aun no
+    se genero, el mes que el DCO no publico), se sube hasta el primer
+    ancestro que si exista: asi el click siempre lleva a algun lado.
+    Devuelve None si no existe ni la raiz (unidad desconectada).
+    """
+
+    carpeta = Path(ruta)
+
+    if es_archivo:
+        carpeta = carpeta.parent
+
+    while True:
+
+        try:
+            if carpeta.is_dir():
+                return carpeta
+        except OSError:
+            return None
+
+        padre = carpeta.parent
+
+        if padre == carpeta:
+            return None
+
+        carpeta = padre
+
+
 def abrir_en_explorador(ruta, es_archivo=False):
-    p = Path(ruta)
-    if not p.exists():
-        return
-    carpeta = p.parent if es_archivo else p
+    """
+    Abre en el explorador la carpeta de esa ruta. Devuelve la carpeta
+    que abrio, o None si no habia ninguna que abrir.
+    """
+
+    if not ruta:
+        return None
+
+    carpeta = carpeta_a_abrir(ruta, es_archivo)
+
+    if carpeta is None:
+        return None
+
     if sys.platform == "win32":
         subprocess.Popen(["explorer", str(carpeta)])
     elif sys.platform == "darwin":
         subprocess.Popen(["open", str(carpeta)])
     else:
         subprocess.Popen(["xdg-open", str(carpeta)])
+
+    return carpeta
 
 
 def formato_tiempo(segundos):
@@ -364,26 +424,100 @@ def main():
     filas_arbol = tk.Frame(frame_arbol)
     filas_arbol.pack(fill="x")
 
+    def abrir_ruta_de_fila(ruta, es_carpeta):
+        """
+        Click en el nombre de una fila: abre SU carpeta (la propia si
+        es una carpeta, la que la contiene si es un archivo). Nunca
+        abre el archivo.
+        """
+
+        abierta = abrir_en_explorador(ruta, es_archivo=not es_carpeta)
+
+        if abierta is None:
+            log(f"No se pudo abrir {ruta}")
+
+    def abrir_origen(id_origen):
+        """
+        Click en el link de "Origen: ..." / "Origen inputs: ...": abre
+        la carpeta de afuera del caso de la que sale esa entrada.
+
+        Se resuelve en un hilo aparte porque mirar el arbol del DCO (o
+        cualquiera de las otras unidades de red) puede tardar segundos
+        cuando la unidad no esta conectada, y no vale la pena congelar
+        la ventana por un click.
+        """
+
+        aamm = var_aamm.get().strip()
+
+        def trabajo():
+
+            try:
+                ruta = nucleo.ruta_origen(id_origen, aamm)
+            except Exception as error:
+                root.after(0, log, f"No se pudo resolver el origen: {error}")
+                return
+
+            root.after(0, log, f"Origen: {ruta}")
+
+            if abrir_en_explorador(ruta, es_archivo=False) is None:
+                root.after(
+                    0, log,
+                    f"No se pudo abrir {ruta} (revisa que la unidad de "
+                    f"red este conectada).",
+                )
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
     def _fila_arbol(parent, prefijo, texto, estado=None, detalle="",
-                    negrita=False, boton=None, id_fila=None):
+                    negrita=False, boton=None, id_fila=None, ruta="",
+                    es_carpeta=False, origen=None):
         """
         Una fila del diagrama. Columnas, en orden: estructura, estado,
         accion (el boton, si la fila tiene uno) y detalle -- el boton
         va a la IZQUIERDA del detalle, y por eso su celda tiene ancho
         fijo: asi el detalle arranca siempre en la misma columna,
         tenga o no boton esa fila.
+
+        El nombre de la fila (no el prefijo del arbol) es un link a su
+        ruta cuando la fila tiene una, y el detalle termina en
+        "Origen: <algo>" -tambien link- cuando lo que hay en esa fila
+        viene de afuera del caso.
         """
 
         fila = tk.Frame(parent)
         fila.pack(fill="x", pady=1)
 
-        tk.Label(
+        estilo = "bold" if negrita else "normal"
+
+        # El prefijo del arbol (├── / └── / │) va en su propia etiqueta
+        # para que el subrayado del link tape solo el nombre. Las dos
+        # son Consolas 9, asi que juntas siguen midiendo lo mismo que
+        # la columna de antes.
+        if prefijo:
+            tk.Label(
+                fila,
+                text=prefijo,
+                font=("Consolas", 9, estilo),
+                width=len(prefijo),
+                anchor="w",
+            ).pack(side="left")
+
+        etiqueta = tk.Label(
             fila,
-            text=prefijo + texto,
-            font=("Consolas", 9, "bold" if negrita else "normal"),
-            width=ANCHO_ESTRUCTURA,
+            text=texto,
+            font=("Consolas", 9, f"{estilo} underline" if ruta else estilo),
+            width=ANCHO_ESTRUCTURA - len(prefijo),
             anchor="w",
-        ).pack(side="left")
+            fg=COLOR_LINK if ruta else "black",
+            cursor="hand2" if ruta else "",
+        )
+        etiqueta.pack(side="left")
+
+        if ruta:
+            etiqueta.bind(
+                "<Button-1>",
+                lambda e, r=ruta, c=es_carpeta: abrir_ruta_de_fila(r, c),
+            )
 
         tk.Label(
             fila,
@@ -408,15 +542,45 @@ def main():
             if id_fila is not None:
                 botones_arbol[id_fila] = widget
 
+        celda_detalle = tk.Frame(fila)
+        celda_detalle.pack(side="left", fill="x", expand=True)
+
         tk.Label(
-            fila,
+            celda_detalle,
             text=detalle,
             anchor="w",
             fg=COLOR_NEUTRO,
             font=("Segoe UI", 8),
             wraplength=380,
             justify="left",
-        ).pack(side="left", fill="x", expand=True)
+        ).pack(anchor="w")
+
+        if origen:
+
+            linea_origen = tk.Frame(celda_detalle)
+            linea_origen.pack(anchor="w")
+
+            tk.Label(
+                linea_origen,
+                text=f"{origen['titulo']}: ",
+                anchor="w",
+                fg=COLOR_NEUTRO,
+                font=("Segoe UI", 8),
+            ).pack(side="left")
+
+            link = tk.Label(
+                linea_origen,
+                text=origen["etiqueta"],
+                anchor="w",
+                fg=COLOR_LINK,
+                cursor="hand2",
+                font=("Segoe UI", 8, "underline"),
+            )
+            link.pack(side="left")
+            link.bind(
+                "<Button-1>",
+                lambda e, i=origen["id"]: abrir_origen(i),
+            )
 
         return fila
 
@@ -499,6 +663,9 @@ def main():
                 negrita=(fila["nivel"] == 0),
                 boton=_boton_de_fila(fila["id"]),
                 id_fila=fila["id"],
+                ruta=fila.get("ruta", ""),
+                es_carpeta=fila.get("es_carpeta", False),
+                origen=fila.get("origen"),
             )
 
         if corriendo["activo"]:
@@ -941,7 +1108,9 @@ def main():
         "'Generar' por cada FMA en 'FD y FMA/', 'Traer subastas' en "
         "Subastas/DB subastas/, 'Actualizar' en cada hoja de "
         "Consolidado_entradas.xlsx y 'Calcular' en cada hoja de "
-        "Pagos_BESS.xlsx."
+        "Pagos_BESS.xlsx. Cada archivo y cada carpeta del diagrama "
+        "es un link a su ruta, y las filas que traen algo de afuera "
+        "dicen 'Origen: ...' con un link a la carpeta de origen."
     )
 
     if var_aamm.get():

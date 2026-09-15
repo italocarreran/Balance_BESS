@@ -65,6 +65,11 @@ estado, no un historial.
   MWh) y es lo que decide el factor de conversión.
 - Confirmar si la columna `Flujo` de la hoja `Gen real` hace falta o si todas
   las centrales van con 1 (el script original no aplicaba signo).
+- Abrir la ventana en Windows con la unidad `F:` conectada y confirmar que
+  el botón "Traer FD" encuentra el FD en
+  `…\Indicadores Publicar\<Vn>\03 Desempeño para publicar` y que los links
+  de "Origen: ..." abren el explorador en esa carpeta (lo unico de esta
+  sesion que no se puede probar sin la unidad).
 - Abrir la ventana en Windows y confirmar el ancho de la columna "Acción"
   (`ANCHO_ACCION`, hoy 150 px) contra los botones más largos ("Traer
   cmg_15min", "Actualizar todo") y el alto de fila (`ALTO_ACCION`, 26 px).
@@ -3352,5 +3357,114 @@ de prorrata se reescribieron y son seis) y una corrida sintética de punta a
 punta que escribió la hoja y se revisó celda por celda con `openpyxl`, con
 pesos negativos y cuartos que no suman 1 adentro para ver que no corta. Falta
 correrla contra el archivo real del período.
+
+---
+
+## 2026-09-15 — El FD sale de `03 Desempeño para publicar` (unidad `F:`), y la ventana es toda links
+
+**Lo que pidió el usuario**, textual: que los FD se saquen de
+`F:\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\2026\08. Agosto\Indicadores Publicar\V1\03 Desempeño para publicar`
+("genérico, si po, te mando agosto v1 de ejemplo"), que si encuentra V2 se
+quede con V2 y no vaya a buscar V1; que en el detalle de cada archivo con
+botón **"Traer"** diga `Origen: DCO` con `DCO` como link a la ruta exacta, y
+que los FMA —que no son "traer" pero tienen inputs que sí se traen— digan
+`Origen inputs: ...`, también con link; y que cada archivo y cada carpeta de
+la estructura sea link a su ruta (rutas, no abrir archivos).
+
+**La ruta del FD cambió en dos tramos.** `RAIZ_DCO_INDICADORES` pasó del UNC
+`\\nas-cen1\DCO\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores` a
+`F:\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores` (es el mismo árbol
+montado de otra forma), y `SUBCARPETAS_FD` de
+`04 Desempeño para transferencias` a `03 Desempeño para publicar`. La carpeta
+anterior NO se borró: quedó como `SUBCARPETAS_FD_ANTIGUA` y se prueba después
+de la nueva (`CADENAS_FD`), porque los meses ya cerrados siguen teniendo el FD
+ahí y el botón tiene que servir igual para volver a un período viejo. Recién
+si en ninguna de las dos hay nada se cae a la búsqueda recursiva de siempre.
+
+**Lo de V2 sobre V1 ya estaba** y no se tocó: `buscar_en_versiones()` recorre
+las versiones de mayor a menor y se queda con la primera que TENGA el archivo.
+Con V1 y V2 publicadas usa V2 sin mirar V1; sólo baja a V1 si la carpeta V2
+existe pero está vacía (recién publicada, a medio subir). Eso es exactamente
+"la mayor que tenga disponible el archivo" y hay dos pruebas nuevas que lo
+fijan.
+
+**`Script/nucleo/origenes.py` (módulo nuevo).** Un `id -> (título, etiqueta,
+resolver)` para las siete filas que vienen de afuera del caso: `fd` (Origen:
+DCO), `cmg_csv` (Origen: CMg Reales), `subastas` (Origen:
+progdiar_adjudicaSEN) y, como **"Origen inputs"**, `cmg_xlsx`, `fma_cpf`,
+`fma_csf` y `fma_ctf`. La distinción es a propósito: el FMA no se copia hecho,
+se construye — lo que viene de afuera son sus insumos.
+
+**La ruta se resuelve al hacer click, no al pintar.** Resolver el origen
+implica mirar el servidor (qué versión está publicada, si existe la carpeta
+del mes) y el diagrama se repinta en CADA revisada: con la unidad de red
+desconectada eso congelaría la ventana varios segundos por repintado. Así que
+en la fila viaja sólo la etiqueta, y `abrir_origen()` resuelve y abre en un
+hilo aparte. Las funciones que resuelven (`ruta_origen_fd`,
+`ruta_origen_cpf/csf/ctf`, `carpeta_origen_csv`) **no levantan**: si no se
+puede leer el servidor arman igual la ruta que le correspondería al período
+(con `VERSION_POR_OMISION = V1`), para poder abrir el árbol y mirar; sin AAMM
+válido devuelven la raíz.
+
+**Cada fila del diagrama trae ahora su ruta.** `revisar_estructura()` agrega
+tres campos a cada fila: `ruta`, `es_carpeta` y `origen`. La ventana convierte
+el nombre en link (subrayado, azul, `hand2`) y el click abre **la carpeta**:
+la propia si la fila es una carpeta, la que contiene al archivo si es un
+archivo — nunca se abre el archivo, para no arrancar Excel sin que se lo
+pidan, que es lo que pidió el usuario ("no abrir archivos sino rutas"). Si la
+ruta todavía no existe (una carpeta que falta, una salida sin generar, el mes
+que el DCO no publicó), `carpeta_a_abrir()` sube hasta el primer ancestro que
+sí exista: el click siempre lleva a algún lado. Las filas de hoja (`hoja
+'Medidores'`, etc.) no llevan link: no son archivos.
+
+Detalle de dibujo: el prefijo del árbol (`├── `) se separó en su propia
+etiqueta para que el subrayado del link tape sólo el nombre. Las dos son
+Consolas 9 y juntas miden lo mismo que la columna de antes
+(`ANCHO_ESTRUCTURA`), así que las columnas no se movieron.
+
+**Verificación:** `python -m py_compile` de todo y `python -m unittest
+discover` en 77 pruebas (antes 60; las 17 nuevas están en
+`tests/test_origenes_fd.py`: la raíz `F:`, la carpeta nueva, que el FD viejo
+se siga encontrando en la carpeta anterior, V2 sobre V1, la caída a V1 cuando
+V2 no tiene el archivo, las rutas de origen con y sin servidor, y que cada
+fila del diagrama traiga su ruta/origen). Además se pintó la ventana entera
+una vez bajo Xvfb y se volcó fila por fila lo que queda dibujado, para
+confirmar que cada archivo y carpeta salió como link y que los "Origen:" /
+"Origen inputs:" quedaron donde tenían que quedar. **Falta** abrirla en
+Windows con la unidad `F:` conectada: que la ruta del ejemplo (agosto 2026)
+resuelva de verdad y que el click abra el explorador es lo único que no se
+puede probar desde acá.
+
+---
+
+## 2026-09-15 (2) — La unidad de "Gen real" se lee del PRINCIPIO del canal (`MWhD`/`MWhR`)
+
+**El reporte del usuario:** "cambié lo de los MWhD MWhR de la homologación y no
+cambia; esa unidad debe ser la que indica si multiplicar por mil o no, y tiene
+R y D al final, pero lee lo primero".
+
+**Qué pasaba.** `leer_gen_real()` comparaba el texto ENTERO de la columna
+`Canal` contra el diccionario (`texto in UNIDADES_GEN_REAL`, o sea exactamente
+`"mwh"` o `"kwh"`). En el archivo real el canal no viene pelado: viene `MWhD` /
+`MWhR` — la unidad con el tipo de medida pegado atrás. Ninguno de los dos
+coincidía, así que todas las filas caían en `UNIDAD_GEN_REAL_POR_DEFECTO`
+(`mwh`) y la columna quedaba de adorno: cambiarla no cambiaba nada. Con `MWhD`
+el resultado igual era el correcto por casualidad (el default ES MWh), pero un
+`kWhD` / `kWhR` se multiplicaba por mil igual — el error silencioso que la
+columna existe para evitar.
+
+**Lo que se hizo.** `unidad_desde_canal(valor)` (nuevo, en `Homologacion.py`):
+normaliza el texto y se queda con la unidad con la que **empieza**. La `D` y la
+`R` del final no entran en la cuenta: lo único que decide esta columna es si se
+multiplica por mil o no. Vacío, o un texto que no empieza con ninguna de las
+dos, sigue valiendo MWh, que es lo que devuelve la API de operación real.
+
+`MWhD`/`MWhR` → `mwh` (x1000) · `kWhD`/`kWhR` → `kwh` (x1) · `MWh`/`kwh`
+sueltos siguen funcionando igual · `""`/`None`/`Potencia` → `mwh`.
+
+**Verificación:** `python -m unittest discover` en 79 pruebas (antes 77). Las
+dos nuevas están en `tests/test_unidades_y_fd.py`: la tabla de canales con
+sufijo, y que la MISMA respuesta de la API entra x1000 con `MWhR` y tal cual
+con `kWhR` — que es la prueba de que ahora el cambio en el archivo se nota.
 
 ---

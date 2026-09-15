@@ -36,6 +36,7 @@ ahora en el modulo de su etapa:
     medidores.py             La hoja Medidores: columnas calculadas y armado.
     escritura.py             Escritura de los dos libros de salida.
     proceso.py               Los dos procesos completos, de punta a punta.
+    origenes.py              De donde viene lo que se trae: el "Origen:" del diagrama.
     traer.py                 Botones 'Traer'/'Generar': lo que el programa baja o arma.
     medidas_sae.py           Medidas_SAE.xlsx: los cuatro pasos de un viaje.
 
@@ -98,6 +99,7 @@ from .rutas import (
     buscar_soc, periodo_desde_aamm,
     resolver_rutas, validar_aamm,
 )
+from .origenes import ORIGENES, origen, ruta_origen
 from .estructura import (
     SECCIONES_CONSOLIDADO, SECCIONES_PAGOS, _fila, _filas_de_hojas,
     hojas_con_datos, hojas_de, revisar_estructura,

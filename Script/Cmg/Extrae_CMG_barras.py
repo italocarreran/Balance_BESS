@@ -93,6 +93,20 @@ def ruta_csv_en_red(aamm, raiz=None):
     return carpeta / nombre_csv_15min(aamm)
 
 
+def carpeta_origen_csv(aamm, raiz=None):
+    """
+    La carpeta de la unidad de red de la que se trae el CSV del
+    periodo. Es lo que la ventana muestra (y abre) como origen de la
+    fila del CSV; por eso no revienta con un AAMM a medio escribir:
+    ahi devuelve la raiz.
+    """
+
+    try:
+        return ruta_csv_en_red(aamm, raiz).parent
+    except ErrorCmg:
+        return Path(raiz or RAIZ_CMG_REALES)
+
+
 def ruta_csv_local(carpeta_cmg, aamm):
     """
     Donde se espera el CSV una vez traido: al lado de cmg.xlsx, en la
