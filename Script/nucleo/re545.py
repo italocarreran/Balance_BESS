@@ -140,6 +140,32 @@ NOMBRES_CALCULO_RE545 = {
 # (BO y CC quedan dentro del grupo); la unica columna que queda
 # siempre afuera de cualquier grupo es la ultima de toda la hoja
 # ("Monto a compensar").
+# Auxiliares de calculo que NO se escriben (pedido del usuario:
+# "quita los auxiliares innecesarios"). Se siguen calculando igual
+# que antes -- salen de la hoja, no del calculo:
+#
+#   BL: en el archivo real es una columna SIN NOMBRE (la suma de CMg
+#     del bloque) que solo existe para que BM saque de ahi su
+#     k-esimo mayor. En la salida quedaba como una columna de numeros
+#     con el encabezado en blanco.
+#   BR "Ventana de Valorizacion": es T ("Ventana de valorizacion")
+#     copiada tal cual, con el mismo nombre escrito distinto.
+#
+# El resto de los intermedios (BK, BM, BN, BS:CA, U/V, S) se quedan:
+# son el paso a paso del Componente 1 y 2 que un coordinado necesita
+# para seguir el calculo.
+COLUMNAS_AUXILIARES_RE545 = ("BL", "BR")
+
+# Orden final de columnas internas de la hoja (el de
+# NOMBRES_CALCULO_RE545 sin los auxiliares). Lo usan
+# renombrar_calculo_re545() y, para ubicar los encabezados de grupo,
+# escribir_pagos_bess().
+COLUMNAS_SALIDA_RE545 = [
+    clave for clave in NOMBRES_CALCULO_RE545
+    if clave not in COLUMNAS_AUXILIARES_RE545
+]
+
+
 GRUPOS_CALCULO_RE545 = (
     ("Dia", ["Mes", "Dia", "Hora"]),
     ("Nombre", ["clave", "Barra"]),
@@ -147,7 +173,7 @@ GRUPOS_CALCULO_RE545 = (
     ("Subastas", ["AC", "AD", "AE", "AF", "AG", "AH"]),
     ("FD", ["AI", "AJ", "AK", "AL", "AM", "AN"]),
     ("FMA", ["AO", "AP", "AQ", "AR", "AS", "AT"]),
-    ("Componente 1", ["BK", "BL", "BM", "BN", "BO"]),
+    ("Componente 1", ["BK", "BM", "BN", "BO"]),
     (
         "Componente 2",
         ["BS", "BT", "BU", "BV", "BW", "BX", "BY", "BZ", "CA", "CC"],
@@ -491,6 +517,6 @@ def renombrar_calculo_re545(df_re545):
     """
 
     return (
-        df_re545[list(NOMBRES_CALCULO_RE545)]
+        df_re545[COLUMNAS_SALIDA_RE545]
         .rename(columns=NOMBRES_CALCULO_RE545)
     )

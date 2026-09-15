@@ -449,3 +449,59 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   siempre juntos, no se pueden actualizar por separado a ese nivel de
   detalle. `Pagos_BESS.xlsx` por ahora no tiene casillas (una sola hoja de
   salida) — "ajustamos detalles después" (palabras del usuario).
+- **Las hojas de salida no reproducen los auxiliares de la planilla
+  original, y el orden de las hojas es el de lectura.** Pedido explícito
+  del usuario ("ordena las planillas, quita los auxiliares innecesarios"),
+  con el criterio que él mismo fijó: *"si es importante para que los
+  coordinados entiendan y vean parte del cálculo no hay que sacarlo, si es
+  trivial sí"*. Fuera quedan las columnas deliberadamente vacías, las
+  claves auxiliares que no lee nadie y las copias exactas de otra columna
+  (`Medidores!K`, `Calculo E Costos!X`, `Calculo RE545!BR`) más la columna
+  sin nombre `Calculo RE545!BL`; se quedan todos los intermedios que dejan
+  seguir el cálculo (curvas monótonas, `ranking cmg`, Componentes 1 y 2) y
+  las CTF en 0. Nada de eso cambia el cálculo: las columnas se siguen
+  calculando, sólo dejan de escribirse, y lo que alguna etapa posterior
+  necesita se repone al leer (`reponer_auxiliares_medidores()`). Qué se
+  escribe vive en una sola lista por hoja (`COLUMNAS_MEDIDORES_SALIDA`,
+  `COLUMNAS_SALIDA_E_COSTOS`, `COLUMNAS_SALIDA_RE545`), que es también
+  contra la que se ubican los encabezados de grupo: agregar una columna a
+  `NOMBRES_CALCULO_*` sin mirar esa lista ya no alcanza.
+- **El formato de las hojas (ancho, negrita, panel fijo, separador de
+  miles) se aplica en un solo lugar, `Script/nucleo/formato.py`, al cerrar
+  cada libro.** No se formatea al escribir cada tabla: así también quedan
+  formateadas las hojas que se preservan de una corrida anterior, y
+  cualquier hoja nueva sale igual sin tocar su escritura. La regla es que
+  ese módulo no puede cambiar un valor: si lo hace, es un bug.
+- **"Ejecutar todo" es un grafo, no un script que llama a todo en fila.**
+  El orden, las dependencias y el paralelismo viven en
+  `Script/nucleo/orquestador.py` (`TAREAS`/`GRUPOS`), separado de la
+  ventana y de las funciones que hacen el trabajo: la ventana solo
+  dibuja el plan que devuelve `planificar()`, y el orquestador no
+  calcula nada propio, llama a las mismas funciones que los botones
+  sueltos. Tres invariantes que no se pueden romper al tocarlo: dos
+  tareas que escriben el mismo archivo comparten `recurso` (y por eso
+  las hojas de cada salida se mandan JUNTAS en una sola llamada, que
+  además escribe el libro una sola vez); una tarea corre solo si sus
+  dependencias están al día o se rehacen en la misma corrida; y si una
+  tarea falla no corre nada que dependa de ella. Agregar un paso nuevo
+  es agregar una `Tarea` (con su fila de estado de
+  `revisar_estructura`, sus requisitos y sus dependencias), no un
+  `if` en la ventana.
+- **Las entradas que pone la persona se dividen en dos.**
+  `ENTRADAS_INICIALES` (Centrales con sus dos hojas, homologación,
+  OfertasSSCC, SoC del período) bloquean el botón "Ejecutar todo": sin
+  ellas no hay corrida posible y decirlo es mejor que ofrecer media.
+  `ENTRADAS_TARDIAS` (el Excel de prorrata de retiros) no bloquean:
+  las hojas que dependen de ellas quedan fuera del plan, a la vista y
+  con el motivo. Mover una entrada de un grupo al otro es una decisión
+  de producto, no un detalle: se decide con el usuario.
+- **Lo que ya está en `Consolidado_entradas.xlsx` se lee de ahí, no de
+  su origen.** Vale para `Medidores`, `Ofertas SSCC`, `Subastas`, `FD`
+  y ahora también `CMg` (antes la etapa de pagos reabría `cmg.xlsx`).
+  El consolidado es la ÚNICA foto de las entradas con la que se paga:
+  si una entrada cambia después de generarlo, se regenera su hoja con
+  su botón, no se lee el archivo nuevo por un costado. Y al leer varias
+  hojas del mismo libro se abre UNA vez (`pd.ExcelFile`), porque cada
+  `pd.read_excel(ruta, sheet_name=...)` vuelve a parsear el archivo
+  entero.
+- **El programa crea las CARPETAS de un caso, nunca sus archivos.** `crear_estructura_caso()` arma la carpeta del período y sus subcarpetas vacías, es idempotente y no borra ni mueve nada; los archivos de entrada los pone la persona (o los traen los botones "Traer"). Y no se impone una convención de nombre de caso: se propone el nombre del período anterior con el AAMM cambiado y el usuario lo edita antes de crear. Preguntar sólo cuando se puede saber (la carpeta no existe, o su nombre trae otro AAMM); si el nombre no dice nada del período, no se pregunta.

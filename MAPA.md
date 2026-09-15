@@ -46,7 +46,9 @@ Script/
         prorrata_retiros.py    <- prorrata 15-min, pagos y resumen por empresa
         medidores.py           <- la hoja Medidores
         escritura.py           <- los dos libros de salida
+        formato.py             <- ancho/negrita/panel fijo de las hojas
         proceso.py             <- los dos procesos completos
+        orquestador.py         <- el grafo de "Ejecutar todo" (plan y corrida)
         traer.py               <- los botones Traer/Generar
         medidas_sae.py         <- Medidas_SAE.xlsx
     Cmg/
@@ -99,8 +101,12 @@ importable como cualquier módulo.
   dependen de él (el SoC dentro de `Medidas/`, el CSV dentro de `Cmg/`) lo
   dicen en su propio detalle cuando falta.
 
-  **No hay ventanas intermedias ni un botón "Ejecutar" único**: cada acción
-  es un botón en la fila que le corresponde. Las columnas del diagrama son
+  **Cada acción es un botón en la fila que le corresponde**, sin ventanas
+  intermedias. Abajo de todo hay además tres botones que no son de una fila
+  sola: **Crear carpeta del caso** (arma el caso del período con todas sus
+  subcarpetas — ver `rutas.py`), **Ejecutar todo** (abre el plan de la
+  corrida y la ejecuta respetando el grafo de dependencias — ver
+  `orquestador.py`) y **Abrir carpeta del caso**. Las columnas del diagrama son
   `Estructura | Estado | Acción | Detalle` — el botón va a la **izquierda**
   del detalle, en una celda de ancho fijo (`ANCHO_ACCION`, en píxeles) para
   que el detalle arranque siempre en la misma columna tenga o no botón esa
@@ -571,9 +577,19 @@ importable como cualquier módulo.
   (hojas `Medidores`, `Ofertas SSCC`, `CMg`, `FD`, `Subastas`, `Log`) y
   `Pagos_BESS.xlsx` (hoja `Calculo E Costos`, nombre y alcance provisorios).
 
-  **Medidores** (A:Q + U): calculadas J (SoC), K (Copia_Ventana = copia de
-  L), L (Ventana), N (Clave_Dia_HoraMes), O (Indicador_SoC).
-  Deliberadamente vacías (diseño confirmado, no pendiente): M, P, Q, U.
+  **Medidores**: calculadas J (SoC), L (Ventana), O (Indicador_SoC).
+
+  **Los auxiliares ya no se escriben** (pedido del usuario: "quita los
+  auxiliares innecesarios", ver `COLUMNAS_AUXILIARES_MEDIDORES`). La hoja
+  sale con 12 columnas — `Mes, Dia, Hora, Minutos, Hora Mes, Cuarto de
+  Hora, clave, intervalo, Gen_Unidad, SoC, Ventana, Indicador_SoC`— en el
+  orden de siempre (el de `LETRA_A_CAMPO`) sin:
+
+  | Fuera de la hoja | Qué era | Cómo se recupera |
+  |---|---|---|
+  | M, P, Q, U | las cuatro columnas deliberadamente vacías del original | no hacen falta: en Python no hay letra de Excel que alinear |
+  | N (`Clave_Dia_HoraMes`) | clave auxiliar `Dia & Hora Mes` | no la lee nadie; `calcular_clave_auxiliar()` sigue estando |
+  | K (`Copia_Ventana`) | copia fila a fila de L (`Ventana`) | `reponer_auxiliares_medidores()` la repone al leer la hoja, que es lo que consumen las dos hojas de cálculo como "Ciclo de Carga del mes" |
 
   **R, S y T ya NO están en `Medidores`** (pedido del usuario:
   "independizar Medidas de ofertas"). Las tres salen de Ofertas SSCC y

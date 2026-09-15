@@ -662,10 +662,15 @@ TITULO_RESUMEN_VENTANA = (
 )
 
 
-def leer_ofertas_sscc_consolidado(ruta_consolidado, registrar=print):
+def leer_ofertas_sscc_consolidado(ruta_consolidado, registrar=print, libro=None):
     """
     Las dos tablas de la hoja "Ofertas SSCC" de
     Consolidado_entradas.xlsx: (df_wxy, df_resumen_ventana).
+
+    libro: un pd.ExcelFile ya abierto del consolidado. Se pasa cuando
+    hay que leer VARIAS hojas del mismo archivo (generar_pagos_bess
+    lee cuatro): sin esto, cada pd.read_excel vuelve a parsear el
+    libro entero, que es el archivo mas grande del caso.
 
     La hoja las guarda una al lado de la otra, cada una con su titulo
     arriba y su propia fila de encabezados debajo (ver
@@ -675,10 +680,11 @@ def leer_ofertas_sscc_consolidado(ruta_consolidado, registrar=print):
     """
 
     ruta_consolidado = Path(ruta_consolidado)
+    fuente = ruta_consolidado if libro is None else libro
 
     try:
         crudo = pd.read_excel(
-            ruta_consolidado, sheet_name=HOJA_OFERTAS_SSCC, header=None
+            fuente, sheet_name=HOJA_OFERTAS_SSCC, header=None
         )
     except ValueError as error:
         raise ErrorEntrada(

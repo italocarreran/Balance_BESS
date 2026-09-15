@@ -11,7 +11,7 @@ from .ofertas_sscc import (
     construir_resumen_ofertas_sscc, construir_resumen_ventana_oferta,
 )
 from .parametros import (
-    ARCHIVO_MEDIDAS_SAE, COLUMNAS_VACIAS, INICIO_VENTANA, LETRA_A_CAMPO,
+    ARCHIVO_MEDIDAS_SAE, COLUMNAS_MEDIDORES_SALIDA, INICIO_VENTANA,
     UMBRAL_SOC,
 )
 from .utiles import normalizar
@@ -81,6 +81,11 @@ def calcular_indicador_soc(soc, umbral=UMBRAL_SOC):
 def calcular_clave_auxiliar(dia, hora_mes):
     """
     Replica Medidores!N:  =B3&"&"&E3
+
+    Ya no se escribe en la hoja (ver COLUMNAS_AUXILIARES_MEDIDORES:
+    no la lee nadie). Queda como la replica de esa columna de la
+    planilla original, para poder reconstruirla si algun dia hace
+    falta cruzar por dia+hora del mes.
 
     Excel concatena como texto. Se reproduce el formato entero
     para que no aparezcan '.0' que el Excel no tiene.
@@ -247,29 +252,20 @@ def construir_medidores(
         df["Hora"],
     )
 
-    # K es copia de L fila a fila (plan, seccion 16.3).
-    df["Copia_Ventana"] = df["Ventana"]
-
-    df["Clave_Dia_HoraMes"] = calcular_clave_auxiliar(
-        df["Dia"],
-        df["Hora Mes"],
-    )
-
     df["Indicador_SoC"] = calcular_indicador_soc(df["SoC"])
 
     # --------------------------------------------------------
-    # COLUMNAS DELIBERADAMENTE VACIAS (diseño confirmado, no pendiente)
+    # ORDEN FINAL DE COLUMNAS
     # --------------------------------------------------------
+    #
+    # El orden de la planilla original (LETRA_A_CAMPO) sin los
+    # auxiliares: las cuatro columnas vacias (M, P, Q, U), la clave
+    # auxiliar N y la copia K de la Ventana. Ver
+    # COLUMNAS_AUXILIARES_MEDIDORES: ninguna se pierde de vista, K se
+    # repone al leer la hoja (reponer_auxiliares_medidores) y N se
+    # calcula con calcular_clave_auxiliar() cuando haga falta.
 
-    for columna in COLUMNAS_VACIAS:
-        df[columna] = pd.NA
-
-    # --------------------------------------------------------
-    # ORDEN FINAL DE COLUMNAS (A:Q + U, en el orden de insercion de
-    # LETRA_A_CAMPO)
-    # --------------------------------------------------------
-
-    df = df[list(LETRA_A_CAMPO.values())]
+    df = df[COLUMNAS_MEDIDORES_SALIDA]
 
     registrar(
         f"Medidores construido: {len(df):,} filas x "
@@ -278,6 +274,32 @@ def construir_medidores(
     )
 
     return df, avisos
+
+
+def reponer_auxiliares_medidores(df_medidores):
+    """
+    Repone, sobre la hoja Medidores recien leida del consolidado, los
+    auxiliares que ya no se escriben (ver
+    COLUMNAS_AUXILIARES_MEDIDORES) y que las dos hojas de calculo si
+    consumen:
+
+      Copia_Ventana  copia de Ventana, que en Calculo E Costos y en
+                     Calculo RE545 se llama "Ciclo de Carga del mes".
+
+    No recalcula nada: Copia_Ventana ES Ventana fila a fila (plan,
+    seccion 16.3), asi que el resultado del calculo es identico al de
+    cuando la columna venia escrita en la hoja. Si el libro que se
+    esta leyendo es de una corrida vieja y todavia la trae, se
+    respeta la que trae.
+
+    Devuelve el mismo DataFrame (modificado en el lugar), para poder
+    encadenarlo en la lectura.
+    """
+
+    if "Copia_Ventana" not in df_medidores.columns:
+        df_medidores["Copia_Ventana"] = df_medidores["Ventana"]
+
+    return df_medidores
 
 
 # ============================================================
