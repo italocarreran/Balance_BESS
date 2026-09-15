@@ -174,20 +174,25 @@ def detectar_bloques(df_crudo, fila_nombres, fila_encabezados):
 
 
 def _extraer_nombre_desde_ruta_scada(texto):
-    """
+    r"""
     Si el nombre de un bloque de SoC viene como una ruta SCADA (visto
     con datos reales: exportaciones tipo PI traen el nombre de la
     central como
         \\SERVIDOR\SEN\Generación\SEN\<region>\<central>|<sufijo>
     en vez de solo "<central>"), devuelve unicamente "<central>": el
-    ultimo tramo de la ruta (separado por "\\"), sin el sufijo
-    despues de "|".
+    ultimo tramo de la ruta (separado por barras invertidas), sin el
+    sufijo despues de "|".
+
+    Este docstring es CRUDO (lleva una r adelante) justamente por esas
+    barras invertidas: si no, la ruta del ejemplo no seria texto sino
+    escapes, y Python avisa "SyntaxWarning: invalid escape sequence"
+    al importar el modulo.
 
     No es una reinterpretacion de datos: es separar una ESTRUCTURA
     conocida (ruta + sufijo) que ya viene asi en el archivo, no una
     suposicion sobre a que central corresponde. Si el texto no tiene
-    ese formato (no contiene "\\"), se devuelve tal cual -- no se
-    inventa nada quitando texto de un nombre que no es una ruta.
+    ese formato (ninguna barra invertida), se devuelve tal cual -- no
+    se inventa nada quitando texto de un nombre que no es una ruta.
     """
 
     texto = str(texto).strip()

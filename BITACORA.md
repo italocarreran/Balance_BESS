@@ -3907,3 +3907,25 @@ mismo síntoma (un CPF/CTF que sale de donde no corresponde), es el mismo
 patrón y se arregla igual.
 
 ---
+
+## 2026-09-15 (5) — El `SyntaxWarning: invalid escape sequence '\S'` del arranque
+
+Aviso que salía en la terminal al correr el programa (con Python 3.12; en 3.11
+no se ve porque ahí todavía es `DeprecationWarning`). No rompía nada —el
+programa corría igual—, pero conviene no acostumbrarse a ver avisos.
+
+**Qué era.** El docstring de `_extraer_nombre_desde_ruta_scada()`
+(`Script/nucleo/soc.py`) muestra como ejemplo la ruta SCADA real
+`\\SERVIDOR\SEN\Generación\SEN\<region>\<central>|<sufijo>`. En una cadena
+normal de Python, `\S` no es un escape válido: hoy Python lo interpreta como
+las dos letras y avisa, y en alguna versión futura va a ser error. El aviso
+apuntaba a la línea del docstring, no a código que se ejecute.
+
+**Arreglo:** el docstring pasó a ser crudo (`r"""`), que es lo que corresponde
+cuando el texto tiene barras invertidas de verdad. Nada de lógica cambió.
+
+**Verificación:** importar `Balance_BESS` entero con Python 3.12 ya no imprime
+ningún aviso, y se revisó que no quedara otro `SyntaxWarning` en ningún `.py`
+del repo. 140 pruebas, igual que antes.
+
+---
