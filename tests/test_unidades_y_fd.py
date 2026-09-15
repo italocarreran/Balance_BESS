@@ -104,6 +104,50 @@ class UnidadDeGeneracionRealTest(unittest.TestCase):
         )
         self.assertEqual([c["factor"] for c in centrales], [1.0, 1.0, -1.0])
 
+    def test_el_canal_trae_la_unidad_con_sufijo(self):
+        """
+        En el archivo real el canal viene "MWhD"/"MWhR" (la unidad con
+        el tipo de medida pegado atras). Se lee el PRINCIPIO: lo que
+        decide es la unidad, no la D ni la R del final.
+        """
+
+        for canal, esperada in (
+            ("MWhD", "mwh"), ("MWhR", "mwh"),
+            ("kWhD", "kwh"), ("kWhR", "kwh"),
+            ("MWh", "mwh"), ("kwh", "kwh"),
+            (" kWh D ", "kwh"),
+            # Vacio o cualquier otra cosa: MWh, que es lo que devuelve
+            # la API de operacion real.
+            ("", "mwh"), (None, "mwh"), ("R", "mwh"), ("Potencia", "mwh"),
+        ):
+            with self.subTest(canal=canal):
+                self.assertEqual(
+                    Homologacion.unidad_desde_canal(canal), esperada
+                )
+
+    def test_un_canal_en_kwh_con_sufijo_no_se_multiplica_por_mil(self):
+        """
+        La prueba de que el cambio se nota: la misma medida de la API
+        (MWh) entra x1000 con "MWhR" y tal cual con "kWhR".
+        """
+
+        respuesta = respuesta_de_una_hora(2.0)
+
+        en_mwh = Generacion_Real.expandir_a_cuartos(
+            respuesta,
+            self.central(Homologacion.unidad_desde_canal("MWhR")),
+            registrar=lambda _: None,
+        )
+        en_kwh = Generacion_Real.expandir_a_cuartos(
+            respuesta,
+            self.central(Homologacion.unidad_desde_canal("kWhR")),
+            registrar=lambda _: None,
+        )
+
+        self.assertEqual(
+            en_mwh["Gen_Unidad"].sum(), en_kwh["Gen_Unidad"].sum() * 1000
+        )
+
 
 def bloque_fd(unidades, horas, columna_mas, columna_menos):
     """Un bloque de la hoja FD con esas unidades y esas horas."""

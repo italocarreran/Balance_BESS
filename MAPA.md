@@ -234,7 +234,7 @@ importable como cualquier módulo.
 
   | Módulo | Script original | Qué hace |
   |---|---|---|
-  | `Homologacion.py` | `0_diccionario_prmte_a_claves_balance.py` | lee las dos hojas del Excel de homologación: `homol` (`Punto de Medida` + `Canal` → `clave` + `Flujo`) y `Gen real` (ahí `Canal` es la unidad, `MWh`/`kWh`) |
+  | `Homologacion.py` | `0_diccionario_prmte_a_claves_balance.py` | lee las dos hojas del Excel de homologación: `homol` (`Punto de Medida` + `Canal` → `clave` + `Flujo`) y `Gen real` (ahí `Canal` es la unidad — se lee su principio: `MWhD`/`MWhR`/`kWhD`/`kWhR`) |
   | `Descarga_PRMTE.py` | `1_generacion_prmte.py` | baja las medidas de cada punto, por lotes, reanudable |
   | `Claves_Balance.py` | `2_generacion_claves_Balance.py` | calendario de cuartos de hora + agrupación por clave |
   | `Generacion_Real.py` | `3_Generacion_Real.py` | agrega las centrales de la hoja `Gen real` desde la API de operación real |
@@ -257,7 +257,11 @@ importable como cualquier módulo.
     (`MWh`/`kWh`). Esa columna estaba sin uso —la API no expone canales— y
     ahora decide el factor de conversión: **la API devuelve MWh y todo el
     balance trabaja en kWh** (`UNIDADES_GEN_REAL` en `Homologacion.py`, se
-    aplica en `expandir_a_cuartos()`). Vacía o con otro texto = MWh. Sin
+    aplica en `expandir_a_cuartos()`). Se mira **sólo el principio** del
+    texto (`unidad_desde_canal()`): en el archivo real el canal viene
+    `MWhD`/`MWhR` —la unidad con el tipo de medida pegado atrás— y lo único
+    que decide es la unidad. Vacía, o con un texto que no empieza con
+    ninguna de las dos, = MWh. Sin
     esa conversión estas centrales entraban mil veces más chicas que las
     que vienen por punto de medida: se detectó comparando, en un caso
     real, Andes Solar III (Pmax 170,78 MW, máximo 44 por cuarto de hora)
@@ -740,7 +744,8 @@ importable como cualquier módulo.
     archivo fijo; debe existir exactamente uno)
   - `<CARPETA_BASE>/Auxiliares/<algo>Homologacion<algo>.xlsx` (hoja `homol`:
     `Punto de Medida` + `Canal` → `clave` + `Flujo`; hoja `Gen real`
-    (ahí `Canal` es la unidad de la medida, `MWh`/`kWh`),
+    (ahí `Canal` es la unidad de la medida: `MWh…`/`kWh…`, se lee el
+    principio),
     opcional: las centrales que se miden por la API de operación real), solo
     para generar `Medidas_SAE.xlsx`
   - `<CARPETA_BASE>/Auxiliares/Centrales.xlsx` (hojas `Resumen BESS` y

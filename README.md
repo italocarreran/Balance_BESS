@@ -214,8 +214,13 @@ Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
   - `Punto de Medida`: acá va el **`topologyName` exacto** de la API de
     operación real — es lo que identifica a la central en esa API, que no
     tiene el concepto de punto de medida.
-  - `Canal`: **no se usa** (esa API no expone canales). Se acepta para que
-    la hoja tenga la misma forma que `homol`.
+  - `Canal`: acá es la **unidad** de la medida, y es lo único que decide
+    si el valor se multiplica por mil o no. La API de operación real
+    devuelve **MWh** y todo el balance trabaja en **kWh**. Se lee el
+    **principio** del texto, así que sirve tal cual viene en el archivo
+    real (`MWhD`, `MWhR`, `kWhD`, `kWhR`): la `D` y la `R` del final no
+    entran en la cuenta. Vacía, o con un texto que no empieza con `MWh`
+    ni con `kWh`, vale MWh.
   - `Flujo`: `1` / `-1`, igual que en `homol`. Si se deja vacío vale `1`.
 
   La hoja entera es opcional: si no existe, no se agrega ninguna central por

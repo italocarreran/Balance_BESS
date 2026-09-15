@@ -3436,3 +3436,35 @@ resuelva de verdad y que el click abra el explorador es lo único que no se
 puede probar desde acá.
 
 ---
+
+## 2026-09-15 (2) — La unidad de "Gen real" se lee del PRINCIPIO del canal (`MWhD`/`MWhR`)
+
+**El reporte del usuario:** "cambié lo de los MWhD MWhR de la homologación y no
+cambia; esa unidad debe ser la que indica si multiplicar por mil o no, y tiene
+R y D al final, pero lee lo primero".
+
+**Qué pasaba.** `leer_gen_real()` comparaba el texto ENTERO de la columna
+`Canal` contra el diccionario (`texto in UNIDADES_GEN_REAL`, o sea exactamente
+`"mwh"` o `"kwh"`). En el archivo real el canal no viene pelado: viene `MWhD` /
+`MWhR` — la unidad con el tipo de medida pegado atrás. Ninguno de los dos
+coincidía, así que todas las filas caían en `UNIDAD_GEN_REAL_POR_DEFECTO`
+(`mwh`) y la columna quedaba de adorno: cambiarla no cambiaba nada. Con `MWhD`
+el resultado igual era el correcto por casualidad (el default ES MWh), pero un
+`kWhD` / `kWhR` se multiplicaba por mil igual — el error silencioso que la
+columna existe para evitar.
+
+**Lo que se hizo.** `unidad_desde_canal(valor)` (nuevo, en `Homologacion.py`):
+normaliza el texto y se queda con la unidad con la que **empieza**. La `D` y la
+`R` del final no entran en la cuenta: lo único que decide esta columna es si se
+multiplica por mil o no. Vacío, o un texto que no empieza con ninguna de las
+dos, sigue valiendo MWh, que es lo que devuelve la API de operación real.
+
+`MWhD`/`MWhR` → `mwh` (x1000) · `kWhD`/`kWhR` → `kwh` (x1) · `MWh`/`kwh`
+sueltos siguen funcionando igual · `""`/`None`/`Potencia` → `mwh`.
+
+**Verificación:** `python -m unittest discover` en 79 pruebas (antes 77). Las
+dos nuevas están en `tests/test_unidades_y_fd.py`: la tabla de canales con
+sufijo, y que la MISMA respuesta de la API entra x1000 con `MWhR` y tal cual
+con `kWhR` — que es la prueba de que ahora el cambio en el archivo se nota.
+
+---
