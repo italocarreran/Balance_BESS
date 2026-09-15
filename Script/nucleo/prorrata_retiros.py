@@ -23,7 +23,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .subastas_accdb import construir_mapa_propietario
 from .utiles import ErrorEntrada, normalizar
 
 
@@ -246,41 +245,3 @@ def construir_prorrata_retiros(df_prorrata, df_ecostos, df_re545, registrar=None
         .sort_values(COL_SUMINISTRADOR, kind="stable").reset_index(drop=True)
     )
     return por_cuarto, detalle, pagos
-
-
-def construir_compensacion_total(df_ecostos, df_re545, resumen_bess):
-    """Consolida lo que recibe cada propietario desde ambos metodos."""
-
-    propietarios = construir_mapa_propietario(resumen_bess)
-    partes = []
-    for df in (df_ecostos, df_re545):
-        parte = pd.DataFrame({
-            "Configuracion": df["Configuracion"].fillna("").astype(str).str.strip(),
-            "Compensación Total [$]": pd.to_numeric(
-                df["Monto a compensar"], errors="coerce"
-            ).fillna(0.0),
-        })
-        parte["Empresa"] = parte["Configuracion"].map(
-            lambda c: propietarios.get(normalizar(c), c)
-        )
-        partes.append(parte)
-    return (
-        pd.concat(partes, ignore_index=True)
-        .groupby("Empresa", as_index=False)["Compensación Total [$]"].sum()
-        .sort_values("Empresa", kind="stable").reset_index(drop=True)
-    )
-
-
-def construir_resumen(compensacion_total, pagos):
-    """Une acreedores y deudores: RECIBE, PAGA y NETO por empresa."""
-
-    recibe = compensacion_total.rename(
-        columns={"Empresa": "NOMBRE", "Compensación Total [$]": "RECIBE"}
-    )
-    columna_pago = COL_TOTAL_PAGO if COL_TOTAL_PAGO in pagos.columns else COL_PAGO
-    paga = pagos.rename(
-        columns={COL_SUMINISTRADOR: "NOMBRE", columna_pago: "PAGA"}
-    )
-    df = recibe.merge(paga, on="NOMBRE", how="outer").fillna({"RECIBE": 0.0, "PAGA": 0.0})
-    df["NETO"] = df["RECIBE"] - df["PAGA"]
-    return df.sort_values("NOMBRE", kind="stable").reset_index(drop=True)

@@ -33,6 +33,8 @@ ahora en el modulo de su etapa:
     re545_reservas.py        RE545: los tres bloques de reservas (AC:AT) y AU.
     re545_resumen.py         RE545: la tabla por central+ventana (AW:BG) y BV.
     re545_componentes.py     RE545: Componente 1 y Componente 2 (BI:CE).
+    prorrata_retiros.py      PRORRATA_RETIROS: quien paga, cuarto a cuarto.
+    compensacion.py          COMPENSACION_CENTRAL y Resumen: quien recibe.
     medidores.py             La hoja Medidores: columnas calculadas y armado.
     escritura.py             Escritura de los dos libros de salida.
     proceso.py               Los dos procesos completos, de punta a punta.
@@ -109,8 +111,12 @@ from .estructura import (
 )
 from .prorrata_retiros import (
     COLUMNAS_ORIGEN, HOJA_ORIGEN,
-    buscar_archivo_prorrata, construir_compensacion_total,
-    construir_prorrata_retiros, construir_resumen, leer_prorrata_retiros,
+    buscar_archivo_prorrata, construir_prorrata_retiros,
+    leer_prorrata_retiros,
+)
+from .compensacion import (
+    construir_compensacion_central, construir_compensacion_total,
+    construir_resumen,
 )
 from .lectura import (
     ROL_BALANCE_BESS, ROL_FD, ROL_FMA_CPF, ROL_OFERTAS, ROL_SUBASTAS,
@@ -271,7 +277,7 @@ __all__ = [
     "COLUMNAS_ORIGEN", "HOJA_ORIGEN",
     "buscar_archivo_prorrata", "leer_prorrata_retiros",
     "construir_prorrata_retiros", "construir_compensacion_total",
-    "construir_resumen",
+    "construir_compensacion_central", "construir_resumen",
     "_filas_de_hojas", "hojas_con_datos", "hojas_de",
     "revisar_estructura", "ROL_BALANCE_BESS", "ROL_FD", "ROL_FMA_CPF",
     "ROL_OFERTAS", "ROL_SUBASTAS", "TITULOS_DICCIONARIO",

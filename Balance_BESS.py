@@ -125,6 +125,16 @@ ANCHO_ESTADO = 11          # caracteres
 ANCHO_ACCION = 150         # pixeles
 ALTO_ACCION = 26           # pixeles
 
+# Rueda del mouse. La ventana entera se desplaza de a PIXELES, no de a
+# "unidades" del Canvas: una unidad de Canvas sin yscrollincrement es
+# un decimo del alto visible, y ese salto es lo que se sentia pegado.
+# El registro, en cambio, se desplaza de a lineas, que es lo natural en
+# un widget de texto.
+PIXELES_POR_MUESCA = 45    # cuanto baja la ventana por cada muesca
+LINEAS_POR_MUESCA = 3      # cuantas lineas baja el registro por muesca
+# Windows/macOS mandan <MouseWheel>; X11 manda los botones 4 y 5.
+EVENTOS_RUEDA = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+
 
 # ============================================================
 # CONFIG POR PC/USUARIO
@@ -310,7 +320,12 @@ def main():
     # CANVAS CON SCROLL
     # --------------------------------------------------------
 
-    canvas = tk.Canvas(root, borderwidth=0, highlightthickness=0)
+    # yscrollincrement=1: una 'unidad' de desplazamiento del Canvas pasa
+    # a ser UN PIXEL. Sin esto, una unidad es un decimo del alto
+    # visible y la rueda mueve la ventana a los saltos.
+    canvas = tk.Canvas(
+        root, borderwidth=0, highlightthickness=0, yscrollincrement=1,
+    )
     scroll = tk.Scrollbar(root, orient="vertical", command=canvas.yview)
     canvas.configure(yscrollcommand=scroll.set)
     scroll.pack(side="right", fill="y")
@@ -325,10 +340,109 @@ def main():
 
     contenedor.bind("<Configure>", ajustar)
     canvas.bind("<Configure>", ajustar)
-    canvas.bind_all(
-        "<MouseWheel>",
-        lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"),
-    )
+
+    # --------------------------------------------------------
+    # RUEDA DEL MOUSE
+    #
+    # Dos problemas que tenia el binding de antes
+    # (bind_all("<MouseWheel>") -> canvas.yview_scroll(int(-delta/120))):
+    #
+    # 1. Era global: la rueda movia la ventana entera aunque el puntero
+    #    estuviera sobre el registro. El registro no se podia recorrer
+    #    sin recorrer toda la ventana.
+    # 2. int(-delta/120) trunca hacia cero. Un touchpad manda deltas
+    #    chicos (30, 40...) y todos daban 0: la ventana no se movia
+    #    hasta que el gesto era grande, y ahi saltaba de golpe. Eso es
+    #    lo que se sentia "pegado". Ahora el resto de cada evento se
+    #    acumula y nada se pierde.
+    #
+    # El widget que se desplaza es el que esta DEBAJO DEL PUNTERO: si
+    # es el registro (o algo adentro de el), se desplaza el registro y
+    # nada mas; si no, la ventana.
+    desplazables = {}   # widget que recibe la rueda -> como desplazarlo
+    resto_rueda = {"ventana": 0.0, "registro": 0.0}
+
+    def registrar_desplazable(widget, desplazar):
+        """Un widget que se queda con la rueda cuando el puntero esta encima."""
+
+        desplazables[str(widget)] = desplazar
+        # Ademas del registro en el diccionario, la rueda se ata al
+        # widget mismo: las ataduras de widget corren ANTES que las de
+        # clase, asi que el "break" de rueda() evita que la atadura de
+        # clase de Text (que tambien desplaza) lo mueva una segunda vez.
+        for nombre in EVENTOS_RUEDA:
+            widget.bind(nombre, rueda)
+
+    def _acumular(clave, cantidad):
+        """Parte entera a desplazar, guardando el resto para el proximo evento.
+
+        Un touchpad manda deltas chicos: sin acumular el resto, cada
+        evento se redondea a 0 y no se mueve nada.
+        """
+
+        resto = resto_rueda[clave]
+        # Al cambiar de sentido el resto pendiente ya no sirve: seguirlo
+        # sumando frenaria medio pixel el primer evento del otro lado.
+        if resto and (resto > 0) != (cantidad > 0):
+            resto = 0.0
+        total = cantidad + resto
+        entero = int(total)
+        resto_rueda[clave] = total - entero
+        return entero
+
+    def _desplazar_ventana(muescas):
+        # scrollregion mas chica que lo visible = no hay nada que
+        # desplazar; sin esto la ventana "tiembla" con la rueda.
+        region = canvas.bbox("all")
+        if not region or region[3] - region[1] <= canvas.winfo_height():
+            return
+        pixeles = _acumular("ventana", muescas * PIXELES_POR_MUESCA)
+        if pixeles:
+            canvas.yview_scroll(pixeles, "units")
+
+    def _muescas(event):
+        """Muescas de rueda de este evento (negativo = hacia arriba)."""
+
+        # X11 no manda delta: usa los botones 4 (arriba) y 5 (abajo).
+        if getattr(event, "num", None) in (4, 5):
+            return -1.0 if event.num == 4 else 1.0
+        delta = getattr(event, "delta", 0)
+        if not delta:
+            return 0.0
+        # En macOS el delta ya viene en muescas. En Windows viene en
+        # 120avos de muesca, y un touchpad de precision manda valores
+        # MENORES a 120 (40, 60...) que son fracciones de muesca: hay
+        # que dividir igual y acumular el resto, no tratarlos como
+        # muescas enteras (serian 40 muescas de un saque).
+        if sys.platform == "darwin":
+            return -float(delta)
+        return -delta / 120.0
+
+    def rueda(event):
+        muescas = _muescas(event)
+        if not muescas:
+            return "break"
+        widget = event.widget
+        try:
+            debajo = root.winfo_containing(event.x_root, event.y_root)
+        except tk.TclError:
+            debajo = None
+        widget = debajo if debajo is not None else widget
+        # El puntero puede estar sobre un hijo (la barra del registro,
+        # por ejemplo): se sube por los padres hasta encontrar a alguien
+        # que se haya anotado para recibir la rueda.
+        while widget is not None:
+            desplazar = desplazables.get(str(widget))
+            if desplazar is not None:
+                desplazar(muescas)
+                return "break"
+            widget = getattr(widget, "master", None)
+        _desplazar_ventana(muescas)
+        return "break"
+
+    for nombre in EVENTOS_RUEDA:
+        root.bind_all(nombre, rueda)
+        canvas.bind(nombre, rueda)
 
     # --------------------------------------------------------
     # SELECTOR DE CARPETA BASE
@@ -622,6 +736,10 @@ def main():
         if id_fila == "db_subastas":
             return ("Traer subastas", traer_subastas)
 
+        if id_fila == "pagos:compensacion_central":
+            return ("Resumir compensación",
+                    lambda: actualizar_pagos({"compensacion_central"}))
+
         if id_fila == "pagos:prorrata_retiros":
             return ("Traer prorrata", lambda: actualizar_pagos({"prorrata_retiros"}))
 
@@ -714,6 +832,18 @@ def main():
     txt_log.configure(yscrollcommand=scroll_log.set)
     scroll_log.pack(side="right", fill="y")
     txt_log.pack(side="left", fill="both", expand=True)
+
+    # Con el puntero sobre el registro, la rueda mueve el registro y
+    # NADA MAS: no arrastra la ventana. Tampoco cuando el registro ya
+    # esta en un extremo -- encadenar ahi es justo lo que hacia que
+    # recorrer el registro terminara moviendo toda la ventana.
+    def _desplazar_registro(muescas):
+        lineas = _acumular("registro", muescas * LINEAS_POR_MUESCA)
+        if lineas:
+            txt_log.yview_scroll(lineas, "units")
+
+    for widget in (frame_log, txt_log, scroll_log):
+        registrar_desplazable(widget, _desplazar_registro)
 
     def log(mensaje):
         txt_log.insert("end", str(mensaje) + "\n")

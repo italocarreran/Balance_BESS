@@ -15,7 +15,8 @@ from .parametros import (
     ARCHIVO_SALIDA_PAGOS, CARPETA_AUXILIARES, CARPETA_CMG,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_MEDIDAS,
     CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS, CARPETA_SUBASTAS,
-    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_DICCIONARIO,
+    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
+    HOJA_COMPENSACION_CENTRAL, HOJA_DICCIONARIO,
     HOJA_PRORRATA_RETIROS, HOJA_RESUMEN, HOJA_RESUMEN_BESS,
 )
 from .origenes import origen as origen_de
@@ -780,6 +781,14 @@ SECCIONES_PAGOS = (
         f"{ARCHIVO_SALIDA}, mas {ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- "
         f"no necesita el FD.",
         (HOJA_CALCULO_RE545,),
+    ),
+    (
+        "compensacion_central",
+        HOJA_COMPENSACION_CENTRAL,
+        "Resume la compensacion de las dos hojas de calculo por central y "
+        "ciclo/ventana, y el total que recibe cada empresa (el Propietario "
+        f"de '{HOJA_RESUMEN_BESS}' de {ARCHIVO_CENTRALES}).",
+        (HOJA_COMPENSACION_CENTRAL,),
     ),
     (
         "prorrata_retiros",

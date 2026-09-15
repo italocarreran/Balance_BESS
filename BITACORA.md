@@ -3539,6 +3539,105 @@ probado con funciones falsas, no contra el Coordinador.
 
 ---
 
+## 2026-09-14 — COMPENSACION_CENTRAL: el otro lado de la plata
+
+La prorrata dice quién paga. Faltaba la hoja que dice quién recibe y por qué,
+y verificar que el `Resumen` cruce bien los dos lados.
+
+**Hoja nueva `COMPENSACION_CENTRAL`**, con tres cuadros: `B:E` la compensación
+de `Calculo E Costos` por central y `Ciclo de Carga del mes`; `H:K` la de
+`Calculo RE545` por central y `Ventana de valorizacion`; `N:O` el total que
+recibe cada empresa.
+
+**Por qué cada hoja va con una agrupación distinta.** No es una decisión de
+presentación: es cómo se calcula el monto. `AZ` de E Costos es
+`(suma AX - suma U) / filas` por grupo **(central, `Copia_Ventana`)**, repetido
+en todas las filas del grupo; `CE` de RE545 reparte
+`max(suma BO - suma CC, 0)` por grupo **(central, `T` = ventana de
+valorización)** en proporción a `AU`. En los dos casos sumar las filas del
+grupo devuelve el total del grupo, así que agrupar y sumar es correcto para
+las dos — pero cada una por SU columna.
+
+**La empresa sale del `Propietario` de `Resumen BESS`** (`Centrales.xlsx`).
+Una central sin propietario mapeado queda a su propio nombre y se avisa por el
+log, en vez de perder la plata en una fila con la empresa vacía.
+
+**Bug del `Resumen`, que es lo que se pidió verificar.** Los dos lados vienen
+de fuentes distintas: `RECIBE` del `Propietario` de `Resumen BESS`, `PAGA` del
+`Suministrador` de la prorrata del CEN. El merge era por el texto crudo, así
+que `"COLBUN S.A."` y `"colbun  s.a."` no cruzaban: la misma empresa aparecía
+en dos filas, cada una con la mitad de la historia y un `NETO` que no era su
+neto. Ahora el cruce es por nombre normalizado (minúscula, sin tildes, sin
+espacios de más) y el nombre visible es el del `Propietario` cuando la empresa
+recibe. Además el log dice cuántas empresas reciben y pagan a la vez, y avisa
+si el total recibido no es igual al total pagado (son la misma plata; la
+diferencia es lo que no se repartió).
+
+**Reorganización menor.** `construir_compensacion_total` y `construir_resumen`
+se fueron de `prorrata_retiros.py` a un `compensacion.py` nuevo: un módulo por
+lado de la transacción (`prorrata_retiros.py` = quien paga, `compensacion.py` =
+quien recibe). La llamada a `escribir_pagos_bess()` pasó a ser toda por nombre:
+son once tablas y el orden posicional ya se prestaba a confusión.
+
+**Verificación:** `python -m unittest discover` en 66 pruebas (eran 60; seis
+nuevas en `tests/test_compensacion_central.py`), más una corrida sintética que
+escribió la hoja y se revisó celda por celda con `openpyxl`, y un caso con el
+nombre de la empresa escrito distinto en cada lado para ver que el `Resumen`
+la deja en una sola fila. Falta correrla contra el archivo real del período.
+
+---
+
+## 2026-09-14 — La rueda del mouse: el registro se desplaza solo
+
+Dos cosas que el usuario reportó de la ventana: que desplazarse "se ve como
+pegado", y que el registro no tiene su propio desplazamiento (poniendo el
+mouse encima se movía toda la ventana).
+
+**Las dos salían de la misma línea**, el binding que había:
+
+```python
+canvas.bind_all("<MouseWheel>",
+                lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+```
+
+1. `bind_all` es global: la rueda movía la ventana estuviera donde estuviera
+   el puntero, incluido encima del registro.
+2. `int(-delta / 120)` trunca hacia cero. Un touchpad de precisión de Windows
+   manda deltas **menores a 120** (40, 60...), que son fracciones de muesca, y
+   todos daban 0: no se movía nada hasta que el gesto era grande y ahí saltaba
+   de golpe. Eso es lo "pegado".
+3. Y como yapa, una "unidad" de `Canvas` sin `yscrollincrement` es un décimo
+   del alto visible: cada muesca era un salto enorme.
+
+**Cómo quedó.** La rueda la atiende un `rueda()` que mira qué widget está
+**debajo del puntero** (`winfo_containing`) y sube por los padres hasta
+encontrar uno anotado en `desplazables`. El registro está anotado: con el
+puntero encima se desplaza el registro y nada más, ni siquiera cuando ya está
+en un extremo (encadenar ahí es justo lo que hacía que recorrer el registro
+terminara moviendo la ventana). Fuera del registro, se desplaza la ventana.
+
+El resto fraccionario de cada evento se acumula (`_acumular`), así que los
+deltas chicos del touchpad suman en vez de perderse, y el resto se descarta al
+cambiar de sentido. El `Canvas` va con `yscrollincrement=1`: desplaza de a
+píxeles (45 por muesca), no de a décimos de pantalla. El registro va de a
+líneas (3 por muesca), que es lo natural en un widget de texto.
+
+**Un detalle que no es obvio:** la rueda además se ata al widget mismo
+(`registrar_desplazable`), no solo al diccionario. Las ataduras de widget
+corren ANTES que las de clase, así que el `"break"` evita que la atadura de
+clase de `Text` —que también desplaza— lo mueva una segunda vez. Sin eso, una
+muesca sobre el registro movía el doble.
+
+**Verificación:** `tests/test_ventana_rueda.py` (nuevo) abre la ventana de
+verdad y le manda eventos `<MouseWheel>` reales: que sobre el registro se mueva
+solo el registro, que fuera se mueva solo la ventana, que el registro al final
+no arrastre la ventana, que tres deltas de 40 sumen exactamente una muesca, y
+que una muesca sobre el registro no mueva el doble. La suite quedó en 71
+pruebas. Las cinco de la ventana se saltean si no hay tkinter o no hay display
+(acá corrieron con `xvfb-run`); en Windows corren solas.
+
+---
+
 ## 2026-09-15 — Un mes que todavia no existe: crear la carpeta con todo adentro
 
 Pedido del usuario: *"cuando yo elija un mes que no exista, me permita elegir
@@ -3700,4 +3799,49 @@ sueltos siguen funcionando igual · `""`/`None`/`Potencia` → `mwh`.
 dos nuevas están en `tests/test_unidades_y_fd.py`: la tabla de canales con
 sufijo, y que la MISMA respuesta de la API entra x1000 con `MWhR` y tal cual
 con `kWhR` — que es la prueba de que ahora el cambio en el archivo se nota.
+---
+## 2026-09-15 (3) — Traer a main la rama que habia quedado afuera (COMPENSACION_CENTRAL + la rueda)
+
+Al revisar qué ramas se podían borrar aparecieron **tres commits del 14 que
+nunca volvieron a `main`**: la rama `claude/gallant-einstein-jmunn6` siguió
+recibiendo trabajo *después* de que su PR (#22) se mergeara. Lo que traía:
+la hoja `COMPENSACION_CENTRAL` (módulo `Script/nucleo/compensacion.py`) con el
+cruce por nombre normalizado en `Resumen`, el arreglo de la rueda del mouse
+(el registro se desplaza solo y sin saltos, con `tests/test_ventana_rueda.py`)
+y la nota de `REGLAS.md` sobre cómo correr las pruebas de la ventana sin
+pantalla.
+
+**Los dos conflictos:**
+
+- `escritura.py`, `_HOJAS_PAGOS`: las dos ramas tocaron el orden de las hojas
+  del libro de pagos. Una puso el `Resumen` **primero** ("lo primero que se
+  mira") y la otra agregó `COMPENSACION_CENTRAL` manteniendo el `Resumen` al
+  final. Quedó el orden nuevo con la hoja nueva adentro: `Resumen`,
+  `Calculo E Costos`, `Calculo RE545`, `COMPENSACION_CENTRAL`,
+  `PRORRATA_RETIROS` (y atrás las dos de control).
+- `BITACORA.md`: entradas agregadas al final por las dos. Quedaron todas, en
+  orden de fecha: las cuatro del 14 y después las tres del 15.
+
+**El problema de verdad no era un conflicto, era un hueco.** Las dos ramas no
+se vieron nunca: `COMPENSACION_CENTRAL` se agregó en una y el grafo de
+"Ejecutar todo" (`orquestador.py`) en la otra. Git mezcló las dos sin
+quejarse y el resultado tenía la hoja con su botón de fila **pero afuera del
+grafo**: "Ejecutar todo" no la generaba nunca y quedaba PENDIENTE para
+siempre. Se agregó su `Tarea` (`pagos:compensacion_central`, depende de las
+dos hojas de cálculo, requiere `Centrales.xlsx`/`Resumen BESS` por el
+Propietario) y ahora sale en la misma escritura que las otras cuatro.
+
+Para que no se repita: `TestGrafoCompleto` (nuevo, en
+`tests/test_orquestador.py`) recorre `SECCIONES_CONSOLIDADO` y
+`SECCIONES_PAGOS` y exige que **cada hoja tenga su tarea** en el grafo. La
+próxima hoja que se agregue en otra rama va a hacer fallar esa prueba en vez
+de desaparecer en silencio.
+
+**Verificación:** `py_compile` de todo y **136 pruebas** (antes 122 + las 11
+que traía la rama + 3 nuevas del grafo). Las 5 de la ventana corrieron de
+verdad con `xvfb-run` (con el intérprete sin tkinter se saltean). Además se
+volcó la ventana entera: quedó con **25 botones** — el que faltaba era
+**"Resumir compensación"**, el de la fila `hoja 'COMPENSACION_CENTRAL'` —, y
+la ventana del plan ahora lista las 18 tareas, con la compensación adentro.
+
 ---

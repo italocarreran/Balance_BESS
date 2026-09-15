@@ -42,7 +42,8 @@ from .estructura import revisar_estructura
 from .externos import Homologacion
 from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
-    ARCHIVO_SALIDA_PAGOS, HOJA_DICCIONARIO, HOJA_RESUMEN_BESS,
+    ARCHIVO_SALIDA_PAGOS, HOJA_COMPENSACION_CENTRAL, HOJA_DICCIONARIO,
+    HOJA_RESUMEN_BESS,
 )
 from .proceso import generar_consolidado, generar_pagos_bess
 from .medidas_sae import generar_medidas_sae
@@ -233,6 +234,14 @@ TAREAS = (
             "consolidado:cmg", "consolidado:subastas",
         ),
         (),
+    ),
+    Tarea(
+        # Llego despues que el grafo (venia de otra rama): resume por
+        # central lo que calculan las dos hojas de arriba, asi que
+        # depende de las dos y del Propietario de 'Resumen BESS'.
+        "pagos:compensacion_central", f"hoja '{HOJA_COMPENSACION_CENTRAL}'",
+        "pagos", "compensacion_central", "pagos:compensacion_central",
+        _REQ_CENTRALES_RESUMEN, ("pagos:ecostos", "pagos:re545"), (),
     ),
     Tarea(
         "pagos:prorrata_retiros", "hoja 'PRORRATA_RETIROS'",

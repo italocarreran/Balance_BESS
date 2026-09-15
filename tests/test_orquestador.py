@@ -62,6 +62,44 @@ def caso_completo(**cambios):
     return filas_de(estados)
 
 
+class TestGrafoCompleto(unittest.TestCase):
+    """
+    Que ninguna hoja se quede afuera del boton "Ejecutar todo".
+
+    Paso de verdad al juntar dos ramas: COMPENSACION_CENTRAL se agrego
+    en una y el grafo en la otra, asi que la hoja tenia su boton de
+    fila pero "Ejecutar todo" no la generaba nunca. Esta prueba es para
+    que la proxima hoja que se agregue no pueda repetirlo.
+    """
+
+    def test_cada_hoja_de_las_dos_salidas_tiene_su_tarea(self):
+        for grupo, secciones in (
+            ("consolidado", nucleo.SECCIONES_CONSOLIDADO),
+            ("pagos", nucleo.SECCIONES_PAGOS),
+        ):
+            con_tarea = {
+                tarea.seccion for tarea in orquestador.TAREAS
+                if tarea.grupo == grupo
+            }
+            with self.subTest(grupo=grupo):
+                self.assertEqual(
+                    {seccion[0] for seccion in secciones} - con_tarea, set()
+                )
+
+    def test_la_compensacion_va_despues_de_las_dos_hojas_de_calculo(self):
+        tarea = orquestador.TAREA_POR_ID["pagos:compensacion_central"]
+
+        self.assertEqual(
+            set(tarea.depende), {"pagos:ecostos", "pagos:re545"}
+        )
+
+    def test_el_plan_de_cero_incluye_la_compensacion(self):
+        plan = nucleo.planificar("/caso", "2607", filas=caso_vacio())
+        seleccionadas = {t["id"] for t in plan["tareas"] if t["seleccionada"]}
+
+        self.assertIn("pagos:compensacion_central", seleccionadas)
+
+
 class TestPlan(unittest.TestCase):
 
     def test_de_cero_se_hace_todo_y_el_boton_se_puede_apretar(self):
@@ -324,7 +362,11 @@ class TestCorrida(unittest.TestCase):
         )
         self.assertEqual(len(pagos), 1)
         self.assertEqual(
-            pagos[0], ("ecostos", "prorrata_retiros", "re545", "resumen")
+            pagos[0],
+            (
+                "compensacion_central", "ecostos", "prorrata_retiros",
+                "re545", "resumen",
+            ),
         )
 
     def test_dos_pasos_del_mismo_recurso_no_corren_a_la_vez(self):
