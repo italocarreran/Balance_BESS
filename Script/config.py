@@ -6,7 +6,10 @@ El archivo vive al lado de Balance_BESS.py y NO se versiona (esta en
 .gitignore). Tiene dos clases de contenido, y la diferencia importa:
 
   - Secciones POR PC/USUARIO ("<host>_<usuario>"): la carpeta base y el
-    periodo AAMM que dejo abierto cada uno. Las escribe la ventana sola.
+    periodo AAMM que dejo abierto cada uno, mas "carpetas_por_periodo"
+    ({aamm: carpeta}, la carpeta que uso cada mes: de ahi sale que
+    cambiar de mes cambie de carpeta sola, y que dos meses no puedan
+    compartir una). Las escribe la ventana sola.
   - La seccion COMPARTIDA "claves_api": las claves de las dos APIs del
     Coordinador. El valor es el MISMO para todo el equipo -no depende de
     quien corra el programa-, pero como el archivo no se versiona, cada

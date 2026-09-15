@@ -449,6 +449,23 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   siempre juntos, no se pueden actualizar por separado a ese nivel de
   detalle. Hoy cada hoja de las dos mitades tiene su propio botón en la
   fila de esa hoja, y no hay ninguna ventana intermedia de casillas.
+- **Un período, una carpeta — y "no se sabe" no es "sí".** Regla del
+  usuario: *"dos meses no pueden tener la misma carpeta"*. La ventana
+  recuerda en `config.json` qué carpeta usó cada AAMM
+  (`carpetas_por_periodo`), así cambiar de mes cambia de carpeta sola, y
+  una carpeta ya anotada para un mes no se puede reusar para otro.
+
+  Lo que estaba mal antes no era la falta de la pregunta, sino el
+  **tercer caso**: cuando el nombre de la carpeta no traía ningún AAMM, el
+  código decidía "no se puede saber → no molesto" y seguía trabajando
+  sobre la carpeta del mes anterior en silencio. Por eso
+  `carpeta_corresponde_al_periodo()` devuelve tres valores
+  (`CARPETA_DEL_PERIODO` / `CARPETA_DE_OTRO_PERIODO` /
+  `CARPETA_SIN_PERIODO`): con una duda se **pregunta**, no se supone.
+
+  Y si el usuario cancela, se vuelve al período anterior: la ventana
+  nunca queda con un mes escrito arriba apuntando a la carpeta de otro.
+
 - **Una sola planilla de salida, ordenada de fin a inicio, y el control
   aparte.** Pedido explícito del usuario: *"combinar el consolidado
   entradas con pagos bess pero ordenados de fin a inicio, el fin es el

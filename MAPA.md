@@ -190,10 +190,11 @@ importable como cualquier módulo.
   `traer_csv_cmg`,
   `generar_cmg`, `generar_consolidado`, `generar_pagos_bess`,
   `SECCIONES_CONSOLIDADO`, `SECCIONES_PAGOS`, `validar_aamm`,
-  `ErrorEntrada`, `extrae_cmg`); `config.json` (última carpeta base y
-  último AAMM recordados, por PC/usuario).
-- **Produce:** `config.json` actualizado con la carpeta base y el AAMM
-  elegidos; dispara en `nucleo` la escritura del CSV de CMg, `cmg.xlsx`,
+  `ErrorEntrada`, `extrae_cmg`, `carpeta_corresponde_al_periodo`);
+  `config.json` (última carpeta base, último AAMM y
+  `carpetas_por_periodo` —qué carpeta usó cada mes—, por PC/usuario).
+- **Produce:** `config.json` actualizado con la carpeta base, el AAMM y la
+  carpeta de ese período (`recordar_carpeta()`); dispara en `nucleo` la escritura del CSV de CMg, `cmg.xlsx`,
   `Balance_BESS.xlsx` (y `Control_corrida.xlsx`) dentro de la carpeta
   base del caso (cada hoja por su botón).
 - **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`);
@@ -206,6 +207,30 @@ importable como cualquier módulo.
   `nucleo` (es estructura, no dibujo), y el **id** de cada fila es lo que
   la ventana usa para decidir qué botón le cuelga (`_boton_de_fila`): así
   `nucleo/` no sabe nada de botones.
+
+- **Un período, una carpeta.** Regla del usuario: *"dos meses no pueden
+  tener la misma carpeta"*. Al cambiar el AAMM (`aamm_cambiado()`):
+  1. Si ese período ya tuvo carpeta (`carpeta_recordada()`), se vuelve a
+     ella sola.
+  2. Si no, se pregunta a `nucleo.carpeta_corresponde_al_periodo()`, que
+     responde **tres** cosas, no dos: sí, no, o **no se sabe** (el nombre
+     no trae ningún AAMM y nunca se anotó). Antes ese "no se sabe" se
+     trataba como un sí y la ventana se quedaba trabajando sobre la
+     carpeta del mes anterior sin decir nada — el bug que reportó el
+     usuario.
+  3. Si no es la de este período, `ventana_carpeta_del_periodo()`:
+     **Examinar…** / **Crear la carpeta** / (solo en el "no se sabe")
+     **Esta es la de AAMM** / **Cancelar**, que vuelve al período
+     anterior. Elegir una carpeta la deja anotada
+     (`recordar_carpeta()`), así que el mes siguiente ya no la puede
+     reusar.
+
+  Detalles de tkinter que importan: la ventana del período es modal
+  (`grab_set` + `wait_window`) y `ventana_nuevo_caso()` también, porque
+  hay que **esperar** su resultado (si se cancela, el período sigue sin
+  carpeta). Y mientras se pregunta, el campo del AAMM pierde el foco y
+  `<FocusOut>` vuelve a llamar a `aamm_cambiado()`: la marca
+  `preguntando` es lo que evita que se abran dos ventanas encima.
 - **Depende de:** el paquete `Script/` (mismo directorio).
 
 ---
@@ -217,8 +242,9 @@ importable como cualquier módulo.
   versiona).
 
 - **Dos clases de sección, y la diferencia importa:**
-  - `"<hostname>_<usuario>"` — lo de cada PC/usuario: la última carpeta base
-    y el AAMM. Las escribe la ventana sola.
+  - `"<hostname>_<usuario>"` — lo de cada PC/usuario: la última carpeta base,
+    el AAMM y `carpetas_por_periodo` (`{aamm: carpeta}`, la carpeta que usó
+    cada mes). Las escribe la ventana sola.
   - `"claves_api"` — **compartida**: las dos claves de las APIs del
     Coordinador. Nombre reservado (una sección de usuario nunca se llama
     así). El valor es el mismo para todo el equipo, pero como el archivo es

@@ -178,6 +178,77 @@ def nombre_caso_sugerido(aamm, carpeta_modelo=None):
     return aamm
 
 
+# Que relacion tiene una carpeta con un periodo (ver
+# carpeta_corresponde_al_periodo). Son tres respuestas, no dos: "no se
+# sabe" NO es lo mismo que "no", y confundirlos es justo lo que hacia
+# que la ventana se quedara en la carpeta del mes anterior sin decir
+# nada.
+CARPETA_DEL_PERIODO = "si"
+CARPETA_DE_OTRO_PERIODO = "no"
+CARPETA_SIN_PERIODO = "no_se_sabe"
+
+
+def periodos_en_el_nombre(nombre):
+    """
+    Los AAMM que trae el nombre de una carpeta: grupos de 4 digitos
+    sueltos (ni 3 ni 5). "Balance BESS 2607" -> ["2607"].
+    """
+
+    return re.findall(r"(?<!\d)\d{4}(?!\d)", str(nombre))
+
+
+def carpeta_corresponde_al_periodo(carpeta, aamm, carpetas_recordadas=None):
+    """
+    Si 'carpeta' es la del periodo 'aamm'. Devuelve una de las tres
+    constantes CARPETA_*: si, no, o no se sabe.
+
+    Regla del usuario: *"dos meses no pueden tener la misma carpeta"*.
+    Por eso una carpeta que YA es la de otro periodo se responde que
+    NO, aunque su nombre no diga nada: lo que manda es
+    carpetas_recordadas ({aamm: carpeta}, lo que la ventana fue
+    guardando en config.json), y recien despues el nombre.
+
+    Sin registro y sin ningun AAMM en el nombre no hay con que
+    decidir: eso es CARPETA_SIN_PERIODO, y quien llama tiene que
+    PREGUNTAR, no suponer que sirve.
+    """
+
+    if not carpeta:
+        return CARPETA_DE_OTRO_PERIODO
+
+    carpeta = Path(carpeta)
+
+    if not carpeta.is_dir():
+        return CARPETA_DE_OTRO_PERIODO
+
+    recordadas = {
+        str(periodo): Path(ruta)
+        for periodo, ruta in (carpetas_recordadas or {}).items()
+    }
+
+    def misma(a, b):
+        try:
+            return a.resolve() == b.resolve()
+        except OSError:
+            return str(a) == str(b)
+
+    if aamm in recordadas and misma(recordadas[aamm], carpeta):
+        return CARPETA_DEL_PERIODO
+
+    for periodo, ruta in recordadas.items():
+        if periodo != aamm and misma(ruta, carpeta):
+            return CARPETA_DE_OTRO_PERIODO
+
+    periodos = periodos_en_el_nombre(carpeta.name)
+
+    if not periodos:
+        return CARPETA_SIN_PERIODO
+
+    return (
+        CARPETA_DEL_PERIODO if aamm in periodos else CARPETA_DE_OTRO_PERIODO
+    )
+
+
 def validar_aamm(aamm):
     """Levanta ErrorEntrada si aamm no son 4 digitos (ej. '2607')."""
 

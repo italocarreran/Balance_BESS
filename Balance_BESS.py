@@ -6,10 +6,12 @@ Ventana unica: se elige la carpeta base del caso, se ingresa el
 periodo (AAMM) y debajo se dibuja el diagrama de la estructura del
 caso con el estado de cada entrada (OK/FALTA/PENDIENTE).
 
-Si el periodo que se escribe arriba todavia no tiene carpeta, la
-ventana ofrece crearla con todas sus subcarpetas adentro (tambien esta
-el boton "Crear carpeta del caso", abajo de todo); y a un caso al que
-le falte una subcarpeta se la completa desde ahi mismo.
+Cada periodo trabaja en SU carpeta: dos meses no comparten una. Al
+cambiar el AAMM, si ese periodo ya tuvo carpeta se vuelve a ella sola;
+si no, se pregunta cual es (examinar / crear / cancelar), en vez de
+seguir sobre la del mes anterior. Tambien esta el boton "Crear carpeta
+del caso", abajo de todo; y a un caso al que le falte una subcarpeta
+se la completa desde ahi mismo.
 
 Todo lo que el programa puede hacer sale de un boton en la fila que
 corresponde. Ademas, abajo de todo hay un boton "Ejecutar todo": abre
@@ -186,6 +188,63 @@ def guardar_config(data):
     """
 
     config.actualizar_seccion(get_usuario(), data)
+
+
+# La carpeta que uso este PC/usuario para cada periodo:
+# {"2607": "D:/...Balance BESS 2607", "2608": ...}. Es lo que permite
+# cumplir la regla del usuario -"dos meses no pueden tener la misma
+# carpeta"- incluso cuando el nombre de la carpeta no dice el AAMM:
+# una vez que una carpeta quedo asociada a un periodo, cambiar de mes
+# ya no la puede reusar en silencio.
+CLAVE_CARPETAS_PERIODO = "carpetas_por_periodo"
+
+
+def carpetas_por_periodo():
+    """{aamm: carpeta} de este PC/usuario. {} si todavia no hay ninguna."""
+
+    datos = leer_config().get(CLAVE_CARPETAS_PERIODO)
+
+    if not isinstance(datos, dict):
+        return {}
+
+    return {
+        str(periodo): str(ruta)
+        for periodo, ruta in datos.items()
+        if isinstance(ruta, str) and ruta
+    }
+
+
+def carpeta_recordada(aamm):
+    """La carpeta que se uso para ese periodo, si todavia existe."""
+
+    ruta = carpetas_por_periodo().get(str(aamm), "")
+
+    try:
+        return ruta if ruta and Path(ruta).is_dir() else ""
+    except OSError:
+        return ""
+
+
+def recordar_carpeta(aamm, ruta):
+    """
+    Deja anotado que 'ruta' es la carpeta del periodo 'aamm'. Si esa
+    carpeta estaba anotada como la de OTRO periodo, se le saca: una
+    carpeta pertenece a un solo periodo.
+    """
+
+    if not aamm or not ruta:
+        return
+
+    ruta = str(ruta)
+
+    carpetas = {
+        periodo: otra
+        for periodo, otra in carpetas_por_periodo().items()
+        if periodo == str(aamm) or otra != ruta
+    }
+    carpetas[str(aamm)] = ruta
+
+    guardar_config({CLAVE_CARPETAS_PERIODO: carpetas})
 
 
 def carpeta_a_abrir(ruta, es_archivo=False):
@@ -942,23 +1001,41 @@ def main():
             if not (base / sub).is_dir()
         ]
 
-    def seleccionar():
-        inicial = var_base.get()
-        if not inicial or not Path(inicial).is_dir():
-            inicial = ""
-        ruta = filedialog.askdirectory(
-            title="Selecciona la carpeta base del caso",
-            initialdir=inicial,
-        )
-        if not ruta:
-            return
+    def usar_carpeta(ruta, completar=True, parent=None):
+        """
+        Pasa a trabajar sobre esa carpeta: la recuerda como la del
+        periodo que hay escrito arriba, la guarda en config.json y
+        repinta el diagrama.
+
+        completar=True ofrece ademas crear las subcarpetas que le
+        falten (es lo que ya hacia "Examinar"): una carpeta recien
+        elegida no tiene por que estar completa.
+        """
+
+        ruta = str(ruta)
 
         var_base.set(ruta)
         guardar_config({"carpeta_base": ruta})
-        log(f"Carpeta base: {ruta}")
+
+        aamm = var_aamm.get().strip()
+
+        try:
+            nucleo.validar_aamm(aamm)
+        except nucleo.ErrorEntrada:
+            aamm = ""
+
+        if aamm:
+            recordar_carpeta(aamm, ruta)
+            log(f"Carpeta del periodo {aamm}: {ruta}")
+        else:
+            log(f"Carpeta base: {ruta}")
+
         revisar()
 
-        # Una carpeta recien creada (o un caso al que le falta una
+        if not completar:
+            return
+
+        # Una carpeta recien elegida (o un caso al que le falta una
         # subcarpeta) se completa aca mismo, sin obligar a armarlas a
         # mano en el explorador.
         faltan = faltan_subcarpetas(ruta)
@@ -970,71 +1047,234 @@ def main():
             + "\n".join(f"  {sub}/" for sub in faltan)
             + "\n\n¿Las creo ahora? (vacias; no se toca nada de lo que "
               "ya hay)",
+            parent=parent or root,
         ):
             crear_carpetas_en(ruta)
+
+    def examinar(parent=None, titulo="Selecciona la carpeta base del caso"):
+        """El dialogo de carpeta. Devuelve True si se eligio una."""
+
+        inicial = var_base.get()
+
+        if not inicial or not Path(inicial).is_dir():
+            inicial = ""
+
+        ruta = filedialog.askdirectory(
+            title=titulo, initialdir=inicial, parent=parent or root,
+        )
+
+        if not ruta:
+            return False
+
+        usar_carpeta(ruta, parent=parent)
+
+        return True
+
+    def seleccionar():
+        examinar()
 
     tk.Button(frame_carpeta, text="Examinar", command=seleccionar).pack(pady=(6, 0))
 
     # El ultimo AAMM que se proceso, para no volver a preguntar lo
     # mismo cada vez que el campo pierde el foco sin haber cambiado.
+    # Tambien es a donde se vuelve si el usuario cancela: un periodo
+    # sin carpeta propia no se queda escrito arriba.
     ultimo_aamm = {"valor": var_aamm.get().strip()}
 
-    def _es_de_otro_periodo(base, aamm):
+    # Mientras se pregunta por la carpeta de un periodo, el campo del
+    # AAMM pierde el foco -y <FocusOut> vuelve a llamar a
+    # aamm_cambiado()-. Sin esta marca se abriria una segunda ventana
+    # encima de la primera.
+    preguntando = {"activo": False}
+
+    def volver_al_periodo_anterior():
         """
-        Si la carpeta base que hay abierta NO es la de este periodo.
-
-        Dos casos claros: la carpeta no existe, o su nombre trae un
-        AAMM (el del periodo anterior) distinto del que se acaba de
-        escribir. Si el nombre no tiene ningun AAMM no se puede saber,
-        y entonces no se pregunta nada: mejor callarse que molestar.
+        Deshace el cambio de periodo. Se usa cuando el usuario cancela
+        la eleccion de carpeta: quedarse con el mes nuevo sobre la
+        carpeta del mes viejo es justo lo que no puede pasar.
         """
 
-        if not base:
-            return False
+        var_aamm.set(ultimo_aamm["valor"])
+        guardar_config({"aamm": ultimo_aamm["valor"]})
+        revisar()
 
-        base = Path(base)
+    def ventana_carpeta_del_periodo(aamm, situacion):
+        """
+        El periodo que se acaba de escribir no tiene carpeta propia:
+        se pregunta cual es, en vez de seguir trabajando sobre la del
+        mes anterior.
 
-        if not base.is_dir():
-            return True
+        Pedido del usuario: *"dos meses no pueden tener la misma
+        carpeta; si cambio el año y el mes no tiene carpeta debe
+        pedirme examinar y seleccionar o crear"*.
 
-        aamms_en_el_nombre = re.findall(r"(?<!\d)\d{4}(?!\d)", base.name)
+        situacion es lo que devolvio
+        nucleo.carpeta_corresponde_al_periodo():
 
-        return bool(aamms_en_el_nombre) and aamm not in aamms_en_el_nombre
+          - CARPETA_DE_OTRO_PERIODO: la carpeta abierta es la de otro
+            mes (lo dice su nombre, o que ya quedo anotada como la de
+            ese otro mes). Solo se puede examinar o crear.
+          - CARPETA_SIN_PERIODO: no hay con que saberlo (el nombre no
+            trae ningun AAMM y nunca se anoto). Se agrega un tercer
+            boton para decir "esta misma es la de este mes", que deja
+            la carpeta anotada y no vuelve a preguntar.
+        """
+
+        base = var_base.get()
+
+        top = tk.Toplevel(root)
+        top.title(f"Carpeta del periodo {aamm}")
+        top.transient(root)
+        top.resizable(False, False)
+
+        if situacion == nucleo.CARPETA_DE_OTRO_PERIODO:
+            explicacion = (
+                f"La carpeta que esta abierta no es la del periodo "
+                f"{aamm}:\n\n    {base or '(ninguna)'}\n\n"
+                f"Cada periodo trabaja en su propia carpeta. Elegi la "
+                f"de {aamm}, o crea una nueva."
+            )
+        else:
+            explicacion = (
+                f"No se puede saber de que periodo es la carpeta que "
+                f"esta abierta:\n\n    {base}\n\n"
+                f"Su nombre no trae ningun AAMM. Si ESA es la carpeta "
+                f"de {aamm}, decilo con el tercer boton y no se "
+                f"pregunta mas; si no, elegi la de {aamm} o crea una "
+                f"nueva."
+            )
+
+        tk.Label(
+            top, text=explicacion, font=("Segoe UI", 9), justify="left",
+            anchor="w", wraplength=560,
+        ).pack(fill="x", padx=16, pady=(14, 10))
+
+        pie = tk.Frame(top)
+        pie.pack(fill="x", padx=16, pady=(0, 14))
+
+        resuelto = {"si": False}
+
+        def cerrar(ok):
+            resuelto["si"] = ok
+            top.destroy()
+
+        def con_examinar():
+            if examinar(
+                parent=top,
+                titulo=f"Selecciona la carpeta del periodo {aamm}",
+            ):
+                cerrar(True)
+
+        def con_crear():
+            # Se esconde en vez de cerrarse: hay que esperar a ver si
+            # el caso se crea de verdad o se cancela.
+            top.grab_release()
+            top.withdraw()
+            cerrar(ventana_nuevo_caso(aamm))
+
+        def con_esta():
+            usar_carpeta(base, parent=top)
+            cerrar(True)
+
+        tk.Button(
+            pie, text="Examinar...", font=("Segoe UI", 9, "bold"),
+            bg="#fdf0d5", command=con_examinar, width=16,
+        ).pack(side="left")
+
+        tk.Button(
+            pie, text="Crear la carpeta", font=("Segoe UI", 9, "bold"),
+            bg="#fdf0d5", command=con_crear, width=16,
+        ).pack(side="left", padx=8)
+
+        if situacion == nucleo.CARPETA_SIN_PERIODO and base:
+            tk.Button(
+                pie, text=f"Esta es la de {aamm}", command=con_esta,
+                width=18,
+            ).pack(side="left", padx=8)
+
+        tk.Button(
+            pie, text="Cancelar", command=lambda: cerrar(False), width=12,
+        ).pack(side="right")
+
+        top.protocol("WM_DELETE_WINDOW", lambda: cerrar(False))
+
+        top.grab_set()
+        root.wait_window(top)
+
+        # Sin carpeta para el periodo nuevo se vuelve al anterior: la
+        # ventana nunca queda con un mes apuntando a la carpeta de otro.
+        if not resuelto["si"]:
+            log(
+                f"Periodo {aamm}: no se eligio carpeta, se vuelve a "
+                f"{ultimo_aamm['valor'] or '(sin periodo)'}."
+            )
+            volver_al_periodo_anterior()
+
+        return resuelto["si"]
 
     def aamm_cambiado(*_):
 
-        aamm = var_aamm.get().strip()
+        if preguntando["activo"]:
+            return
 
-        guardar_config({"aamm": aamm})
-        revisar()
+        aamm = var_aamm.get().strip()
 
         if aamm == ultimo_aamm["valor"]:
             return
 
-        ultimo_aamm["valor"] = aamm
+        guardar_config({"aamm": aamm})
 
         try:
             nucleo.validar_aamm(aamm)
         except nucleo.ErrorEntrada:
+            # Todavia no son 4 digitos (lo esta tipeando): se repinta
+            # y no se pregunta nada.
+            revisar()
             return
 
         if corriendo["activo"]:
+            revisar()
             return
 
-        # Mes nuevo: si la carpeta abierta es la del mes anterior (o no
-        # existe), se ofrece crear la del periodo con sus subcarpetas
-        # adentro. Pedido del usuario.
-        if _es_de_otro_periodo(var_base.get(), aamm):
-            if messagebox.askyesno(
-                f"Periodo {aamm}",
-                f"La carpeta abierta no es la del periodo {aamm}.\n\n"
-                f"¿Crear la carpeta de este periodo, con todas sus "
-                f"subcarpetas adentro?",
-            ):
-                ventana_nuevo_caso(aamm)
+        anterior = ultimo_aamm["valor"]
+        ultimo_aamm["valor"] = aamm
+
+        # 1. Si este periodo ya tuvo carpeta, se vuelve a ella sola:
+        #    cambiar de mes es cambiar de carpeta.
+        recordada = carpeta_recordada(aamm)
+
+        if recordada and recordada != var_base.get():
+            log(f"Periodo {aamm}: se abre su carpeta, {recordada}")
+            usar_carpeta(recordada, completar=False)
             return
 
-        # Misma carpeta, pero incompleta.
+        # 2. Si no, ¿la carpeta abierta es la de este periodo?
+        situacion = nucleo.carpeta_corresponde_al_periodo(
+            var_base.get(), aamm, carpetas_por_periodo(),
+        )
+
+        if situacion != nucleo.CARPETA_DEL_PERIODO:
+            # Es la de otro mes, o no se sabe: se pregunta. Es el caso
+            # que antes se quedaba callado sobre la carpeta del mes
+            # anterior.
+            ultimo_aamm["valor"] = anterior
+            revisar()
+
+            preguntando["activo"] = True
+            try:
+                elegida = ventana_carpeta_del_periodo(aamm, situacion)
+            finally:
+                preguntando["activo"] = False
+
+            if elegida:
+                ultimo_aamm["valor"] = aamm
+            return
+
+        # 3. Es la de este periodo: queda anotada (asi otro mes no la
+        #    puede reusar) y solo se ofrece completarle lo que falte.
+        recordar_carpeta(aamm, var_base.get())
+        revisar()
+
         faltan = faltan_subcarpetas(var_base.get()) if var_base.get() else []
 
         if faltan and messagebox.askyesno(
@@ -1398,10 +1638,12 @@ def main():
             log(f"{base} ya tenia todas sus carpetas.")
 
         if usar:
-            var_base.set(str(base))
-            guardar_config({"carpeta_base": str(base)})
-
-        revisar()
+            # usar_carpeta() ademas la deja ANOTADA como la carpeta de
+            # este periodo: sin eso, el mes siguiente podria volver a
+            # caer en esta misma.
+            usar_carpeta(base, completar=False)
+        else:
+            revisar()
 
         return True
 
@@ -1419,7 +1661,7 @@ def main():
         """
 
         if corriendo["activo"]:
-            return
+            return False
 
         aamm = (aamm_objetivo or var_aamm.get()).strip()
 
@@ -1440,6 +1682,11 @@ def main():
         top.title("Crear la carpeta del caso")
         top.geometry("760x460")
         top.transient(root)
+
+        # Quien la abre espera el resultado (ver el final de la
+        # funcion): si se cancela, el periodo nuevo se queda sin
+        # carpeta y quien llamo tiene que hacer algo al respecto.
+        resultado = {"ok": False}
 
         var_padre = tk.StringVar(value=padre_inicial)
         var_nombre = tk.StringVar(value=nombre_inicial)
@@ -1531,11 +1778,16 @@ def main():
             ):
                 return
 
+            # El periodo se fija ANTES de crear: crear_carpetas_en()
+            # anota la carpeta como la de "el periodo que hay escrito
+            # arriba", y ese tiene que ser ya el nuevo.
+            if aamm:
+                var_aamm.set(aamm)
+                ultimo_aamm["valor"] = aamm
+                guardar_config({"aamm": aamm})
+
             if crear_carpetas_en(destino):
-                if aamm:
-                    var_aamm.set(aamm)
-                    guardar_config({"aamm": aamm})
-                    revisar()
+                resultado["ok"] = True
                 top.destroy()
 
         tk.Button(
@@ -1546,6 +1798,11 @@ def main():
         tk.Button(frame_pie, text="Cancelar", command=top.destroy).pack(
             side="right", padx=8
         )
+
+        top.grab_set()
+        root.wait_window(top)
+
+        return resultado["ok"]
 
     # --------------------------------------------------------
     # EJECUTAR TODO (una ventana con el plan de la corrida)
@@ -1811,6 +2068,21 @@ def main():
     if var_base.get():
         log(f"Carpeta recordada: {var_base.get()}")
         revisar()
+
+    # El par (carpeta, periodo) con el que arranca la ventana es el que
+    # quedo de la ultima vez: se anota como la carpeta de ESE periodo.
+    # Sin esto, volver a un mes viejo pediria de nuevo su carpeta, que
+    # es justo lo que se acaba de elegir.
+    if var_base.get() and var_aamm.get():
+        try:
+            nucleo.validar_aamm(var_aamm.get())
+        except nucleo.ErrorEntrada:
+            pass
+        else:
+            if nucleo.carpeta_corresponde_al_periodo(
+                var_base.get(), var_aamm.get(), carpetas_por_periodo(),
+            ) != nucleo.CARPETA_DE_OTRO_PERIODO:
+                recordar_carpeta(var_aamm.get(), var_base.get())
 
     root.mainloop()
 

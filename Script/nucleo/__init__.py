@@ -103,7 +103,9 @@ from .rutas import (
     _buscar_archivo_excel_mas_reciente, _es_archivo_de_soc,
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
     SUBCARPETAS_CASO, buscar_soc, crear_estructura_caso,
-    nombre_caso_sugerido, periodo_desde_aamm,
+    CARPETA_DEL_PERIODO, CARPETA_DE_OTRO_PERIODO, CARPETA_SIN_PERIODO,
+    carpeta_corresponde_al_periodo, nombre_caso_sugerido,
+    periodo_desde_aamm, periodos_en_el_nombre,
     resolver_rutas, validar_aamm,
 )
 from .origenes import ORIGENES, origen, ruta_origen
@@ -280,6 +282,8 @@ __all__ = [
     "buscar_archivo_sscc_desempeno",
     "buscar_soc", "periodo_desde_aamm", "resolver_rutas",
     "SUBCARPETAS_CASO", "crear_estructura_caso", "nombre_caso_sugerido",
+    "CARPETA_DEL_PERIODO", "CARPETA_DE_OTRO_PERIODO", "CARPETA_SIN_PERIODO",
+    "carpeta_corresponde_al_periodo", "periodos_en_el_nombre",
     "validar_aamm", "SECCIONES_CONSOLIDADO", "SECCIONES_PAGOS", "_fila",
     "COLUMNAS_ORIGEN", "HOJA_ORIGEN",
     "buscar_archivo_prorrata", "leer_prorrata_retiros",

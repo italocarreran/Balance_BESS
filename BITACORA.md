@@ -4000,3 +4000,55 @@ caso viejo: una carpeta que ya tenga `Consolidado_entradas.xlsx` y
 `Balance_BESS.xlsx` nueva y los dos archivos viejos quedan donde están, sin
 que nadie los toque. Si hace falta arrastrar el contenido viejo, hay que
 volver a generar las hojas (o copiarlas a mano).
+
+## 2026-09-15 (7) — Un periodo, una carpeta: cambiar de mes cambia de carpeta
+
+Reporte del usuario: *"cuando cambio el mes en la casilla se mantiene en la
+carpeta; dos meses no pueden tener la misma carpeta; si cambio el año y el mes
+no tiene carpeta debe pedirme examinar y seleccionar o crear"*.
+
+**Qué estaba mal.** La ventana sí preguntaba... pero solo cuando el nombre de
+la carpeta abierta traía un AAMM distinto del nuevo. El viejo
+`_es_de_otro_periodo()` decía, textualmente, *"si el nombre no tiene ningún
+AAMM no se puede saber, y entonces no se pregunta nada: mejor callarse que
+molestar"*. O sea: con una carpeta llamada "Balance BESS" (o cualquier nombre
+sin 4 dígitos sueltos), cambiar de mes seguía trabajando sobre la carpeta del
+mes anterior, en silencio. Eso es exactamente lo que el usuario vio.
+
+**El arreglo, en dos partes.**
+
+1. `nucleo.carpeta_corresponde_al_periodo()` (en `rutas.py`, con pruebas)
+   devuelve **tres** respuestas, no dos: `CARPETA_DEL_PERIODO`,
+   `CARPETA_DE_OTRO_PERIODO` y `CARPETA_SIN_PERIODO`. "No se sabe" deja de
+   ser un sí: obliga a preguntar.
+2. La ventana recuerda, por PC/usuario en `config.json`, **qué carpeta usó
+   cada período** (`carpetas_por_periodo: {aamm: carpeta}`). Eso es lo que
+   hace cumplible la regla aunque el nombre no diga nada: una vez que una
+   carpeta quedó asociada a un mes, otro mes ya no la puede reusar. El par
+   (carpeta, período) con el que arranca la ventana se anota solo.
+
+**Qué pasa ahora al cambiar el AAMM:**
+
+- El período ya tuvo carpeta → se abre esa, sola, sin preguntar.
+- La carpeta abierta es la de otro mes → ventana con **Examinar…** /
+  **Crear la carpeta** / **Cancelar**.
+- No se puede saber de qué mes es (nombre sin AAMM y nunca anotada) → lo
+  mismo, más un tercer botón **"Esta es la de AAMM"**, que la deja anotada.
+- **Cancelar vuelve al período anterior**: la ventana nunca queda con un mes
+  escrito arriba apuntando a la carpeta de otro.
+
+**Dos detalles de tkinter que costaron.** `ventana_nuevo_caso()` ahora es
+modal y **devuelve** si el caso se creó: antes se abría y se seguía de largo,
+así que cancelarla dejaba el período nuevo sobre la carpeta vieja. Y mientras
+se pregunta, el campo del AAMM pierde el foco, con lo que `<FocusOut>` vuelve
+a llamar a `aamm_cambiado()` y se abría una segunda ventana encima de la
+primera: la marca `preguntando` lo corta.
+
+**Verificación:** 151 pruebas (7 nuevas sobre
+`carpeta_corresponde_al_periodo`). Además se abrió la ventana real con
+`xvfb-run` y se recorrieron los cuatro caminos apretando los botones de
+verdad: cambiar de mes con la carpeta del mes anterior abierta (pregunta),
+cancelar (vuelve el período anterior), Examinar (cambia y anota), volver al
+mes anterior (vuelve solo), carpeta sin AAMM en el nombre (aparece el tercer
+botón) y Crear la carpeta (queda creada con sus 7 subcarpetas y el caso
+abierto ahí).

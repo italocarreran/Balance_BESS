@@ -144,5 +144,112 @@ class TestNombreSugerido(unittest.TestCase):
             nucleo.nombre_caso_sugerido("julio", "/casos/2607")
 
 
+class TestCarpetaDelPeriodo(unittest.TestCase):
+    """
+    De que periodo es la carpeta que esta abierta.
+
+    Pedido del usuario: *"cuando cambio el mes en la casilla se
+    mantiene en la carpeta; dos meses no pueden tener la misma
+    carpeta; si cambio el año y el mes no tiene carpeta debe pedirme
+    examinar y seleccionar o crear"*.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.padre = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def carpeta(self, nombre):
+        ruta = self.padre / nombre
+        ruta.mkdir()
+        return ruta
+
+    def test_el_aamm_en_el_nombre_dice_de_que_periodo_es(self):
+        julio = self.carpeta("Balance BESS 2607")
+
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo(julio, "2607"),
+            nucleo.CARPETA_DEL_PERIODO,
+        )
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo(julio, "2608"),
+            nucleo.CARPETA_DE_OTRO_PERIODO,
+        )
+
+    def test_cambiar_de_año_tambien_cambia_de_carpeta(self):
+        diciembre = self.carpeta("Caso 2612")
+
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo(diciembre, "2701"),
+            nucleo.CARPETA_DE_OTRO_PERIODO,
+        )
+
+    def test_sin_aamm_en_el_nombre_y_sin_registro_no_se_sabe(self):
+        """No es "sirve": es "hay que preguntar"."""
+
+        cualquiera = self.carpeta("Caso de julio")
+
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo(cualquiera, "2607"),
+            nucleo.CARPETA_SIN_PERIODO,
+        )
+
+    def test_una_carpeta_anotada_para_un_periodo_no_sirve_para_otro(self):
+        """La regla del usuario: dos meses no comparten carpeta."""
+
+        cualquiera = self.carpeta("Caso de julio")
+        recordadas = {"2607": str(cualquiera)}
+
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo(
+                cualquiera, "2607", recordadas
+            ),
+            nucleo.CARPETA_DEL_PERIODO,
+        )
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo(
+                cualquiera, "2608", recordadas
+            ),
+            nucleo.CARPETA_DE_OTRO_PERIODO,
+        )
+
+    def test_lo_anotado_le_gana_al_nombre(self):
+        """
+        Una carpeta que se llama "...2607" pero que el usuario dijo
+        que es la de 2608 es la de 2608: lo que el eligio manda.
+        """
+
+        rara = self.carpeta("Balance BESS 2607")
+
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo(
+                rara, "2608", {"2608": str(rara)}
+            ),
+            nucleo.CARPETA_DEL_PERIODO,
+        )
+
+    def test_una_carpeta_que_no_existe_no_es_la_del_periodo(self):
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo(
+                self.padre / "no existe", "2607"
+            ),
+            nucleo.CARPETA_DE_OTRO_PERIODO,
+        )
+        self.assertEqual(
+            nucleo.carpeta_corresponde_al_periodo("", "2607"),
+            nucleo.CARPETA_DE_OTRO_PERIODO,
+        )
+
+    def test_los_aamm_del_nombre(self):
+        self.assertEqual(
+            nucleo.periodos_en_el_nombre("Balance BESS 2607"), ["2607"]
+        )
+        self.assertEqual(nucleo.periodos_en_el_nombre("Caso 123456"), [])
+        self.assertEqual(nucleo.periodos_en_el_nombre("2607 y 2608"),
+                         ["2607", "2608"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -42,9 +42,10 @@ python Balance_BESS.py
    `operacion.coordinador.cl`. Si falta alguna, el programa lo dice con el
    formato exacto para pegar.
 1. Elegir la **carpeta base** del caso (ver estructura abajo). El programa
-   recuerda la última carpeta usada, por PC/usuario, en el mismo
-   `config.json` (en su propia sección: guardar la carpeta no pisa las
-   claves).
+   recuerda, por PC/usuario y en el mismo `config.json` (en su propia
+   sección: guardar la carpeta no pisa las claves), la última carpeta usada
+   **y qué carpeta usó cada período** (`carpetas_por_periodo`), que es lo
+   que le permite volver sola a la del mes que elijas.
 2. Ingresar el **período (AAMM)** en el recuadro de la ventana: 4 dígitos,
    año+mes simplificado (ej. `2607` para julio de 2026). No se adivina del
    nombre de ningún archivo — es el dato con el que el programa ubica el
@@ -59,9 +60,22 @@ python Balance_BESS.py
    `Origen: progdiar_adjudicaSEN` en `DB subastas/`, y `Origen inputs: ...`
    en `cmg.xlsx` y en las tres de FMA, que no se traen hechas pero se arman
    con insumos que sí vienen de afuera.
-   - **Si el período que escribís todavía no tiene carpeta**, la ventana lo
-     nota (la carpeta abierta no existe, o su nombre trae el AAMM de otro
-     mes) y ofrece crearla: propone el nombre de la carpeta que tenías
+   - **Cada período trabaja en su propia carpeta: dos meses nunca
+     comparten una.** Al cambiar el AAMM:
+     - Si ese período ya tuvo carpeta, la ventana **vuelve sola a ella**
+       (se acuerda de qué carpeta usó cada mes, por PC/usuario, en
+       `config.json`).
+     - Si no, y la carpeta abierta es la de otro mes (lo dice su nombre, o
+       que ya quedó anotada como la de ese otro mes), **pregunta**:
+       **Examinar…** para elegir la carpeta de este período, **Crear la
+       carpeta** para armarla nueva, o **Cancelar**, que vuelve al período
+       anterior — el mes nuevo nunca se queda apuntando a la carpeta del
+       mes viejo.
+     - Si el nombre de la carpeta abierta no trae ningún AAMM y nunca se
+       anotó, no hay con qué saberlo: pregunta lo mismo, más un tercer
+       botón **"Esta es la de AAMM"** para decir que sí lo es (queda
+       anotada y no vuelve a preguntar por ese mes).
+   - **Crear la carpeta** propone el nombre de la carpeta que tenías
      abierta con el AAMM cambiado (`Balance BESS 2607` → `Balance BESS
      2608`) y dónde crearla, y las dos cosas se pueden editar antes de
      confirmar. Se crean la carpeta y sus subcarpetas vacías
