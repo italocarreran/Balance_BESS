@@ -26,6 +26,7 @@ Script/
         manifiesto.py          <- que archivo exacto alimento la corrida
         rutas.py               <- rutas del caso y busqueda de entradas
         estructura.py          <- el arbol que dibuja la ventana
+        origenes.py            <- de donde viene lo que se trae (links)
         lectura.py             <- Medidas_SAE.xlsx y Centrales.xlsx
         soc.py                 <- el SoC por bloques del SCADA
         ofertas_sscc.py        <- la hoja Ofertas SSCC (y R, S, T, V)
@@ -128,6 +129,36 @@ importable como cualquier módulo.
   archivo todavía no existe se crea con el resto de las hojas vacías (queda
   registrado en su hoja `Log` y el diagrama las muestra como PENDIENTE).
 
+  **Todo es link.** El nombre de cada archivo y de cada carpeta del
+  diagrama abre en el explorador **la carpeta** de esa ruta (la que
+  contiene al archivo, si la fila es un archivo: nunca se abre el
+  archivo, para no arrancar Excel sin que se lo pidan). Si la ruta
+  todavía no existe (una carpeta que falta, una salida sin generar) se
+  sube hasta el primer ancestro que sí exista — `carpeta_a_abrir()`. La
+  ruta viaja en la fila (`ruta` + `es_carpeta`, los pone
+  `revisar_estructura()`); el prefijo del árbol va en su propia etiqueta
+  para que el subrayado del link tape sólo el nombre.
+
+  Y las filas de lo que viene de **afuera del caso** lo dicen en su
+  detalle, con la etiqueta también como link a la carpeta de origen:
+
+  | Fila | Detalle | Abre |
+  |---|---|---|
+  | `SSCC_Desempeño_*` | **Origen: DCO** | `…\Indicadores Publicar\<Vn>\03 Desempeño para publicar` |
+  | `cmg<AAMM>_def_15minutal.csv` | **Origen: CMg Reales** | `T:\CMgReales 15MIN\<AAAA>\<AAMM>\Mensual\CMg\Cmg para balance` |
+  | `DB subastas/` | **Origen: progdiar_adjudicaSEN** | `RAIZ_SUBASTAS_ORIGEN` |
+  | `cmg.xlsx` | **Origen inputs:** el CSV 15-minutal | la misma carpeta de `T:` |
+  | `fma_cpf_<AAMM>.xlsx` | **Origen inputs:** los reportes diarios de CPF | `<Vn>\01 Respuesta\01 Indices CPF` |
+  | `fma_csf_<AAMM>.xlsx` | **Origen inputs:** los reportes del AGC | `RAIZ_AGC_FACE` |
+  | `fma_cft_<AAMM>.xlsx` | **Origen inputs:** el `CTF_AAMM.csv` | `<Vn>\01 Respuesta\06 Indices CTF` |
+
+  Las tres de FMA dicen "Origen **inputs**" y no "Origen" a propósito: el
+  FMA no se trae hecho, se **construye** — lo que viene de afuera son sus
+  insumos. La ruta se resuelve **recién al hacer click**, en un hilo
+  aparte (`abrir_origen()`): resolverla implica mirar el servidor (qué
+  versión está publicada) y el diagrama se repinta en cada revisada, así
+  que ahí sólo viaja la etiqueta.
+
   Todos los botones corren su función de `nucleo` en un hilo aparte
   (`lanzar()`, helper compartido) reportando al log/barra/timer de la
   ventana, y mientras algo corre **todos** los botones del árbol quedan
@@ -145,7 +176,9 @@ importable como cualquier módulo.
   `Consolidado_entradas.xlsx` y/o `Pagos_BESS.xlsx` dentro de la carpeta
   base del caso (cada uno por su botón).
 - **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`);
-  helpers de presentación del árbol (`_es_ultimo_en_su_nivel`,
+  `carpeta_a_abrir(ruta, es_archivo=False)` y
+  `abrir_en_explorador(ruta, es_archivo=False)` (la carpeta que abre cada
+  link); helpers de presentación del árbol (`_es_ultimo_en_su_nivel`,
   `_prefijos_arbol`) que traducen la lista plana de `revisar_estructura()`
   a prefijos tipo consola — deliberadamente NO viven en `nucleo/`, que no
   conoce conceptos de interfaz. El **nivel** de cada fila sí lo pone
@@ -315,8 +348,11 @@ importable como cualquier módulo.
   la forma completa la muestra el comentario de la rutina de FMA CPF de ese
   mismo script.
 - **Consume:**
-  `\\nas-cen1\DCO\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\04 Desempeño para transferencias`
-  (`RAIZ_DCO_INDICADORES` + `SUBCARPETAS_FD` — ruta confirmada por el usuario).
+  `F:\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores\<AAAA>\<MM>. <Mes>\Indicadores Publicar\<V1|V2>\03 Desempeño para publicar`
+  (`RAIZ_DCO_INDICADORES` + `SUBCARPETAS_FD` — ruta confirmada por el usuario;
+  antes se usaba el UNC `\\nas-cen1\DCO\11 SSCC\…` y la subcarpeta
+  `04 Desempeño para transferencias`, que queda como alternativa —
+  `SUBCARPETAS_FD_ANTIGUA` — para los meses ya cerrados).
 - **Produce:** la copia del FD dentro de `<CARPETA_BASE>/FD y FMA/`, y los Excel
   que venían dentro del `.zip`, sueltos en esa misma carpeta (que es donde
   `buscar_archivo_sscc_desempeno()` los busca después).
@@ -327,7 +363,13 @@ importable como cualquier módulo.
   menor hasta que `buscar` encuentre algo,
   `buscar_archivos_fd(carpeta_version, anio)`,
   `traer_fd(carpeta_destino, aamm, version=None, raiz=None, registrar=print)` →
-  `(copiados, extraidos, carpeta_version)`.
+  `(copiados, extraidos, carpeta_version)`; y, para el link "Origen: DCO" de
+  la ventana, `carpeta_publicacion_o_literal(aamm, raiz=None)`,
+  `carpeta_version_o_literal(aamm, version=None, raiz=None)`,
+  `ruta_origen(aamm, cadenas=None, version=None, raiz=None)` y
+  `ruta_origen_fd(aamm, version=None, raiz=None)` — estas cuatro **no
+  levantan**: con la unidad desconectada devuelven igual la ruta que le
+  correspondería al período.
 - **Depende de:** solo la biblioteca estándar. **No importa `nucleo`.**
 - **Decisiones que se tomaron acá** (no venían dadas):
   - **qué versión usar**: la ventana no tiene selector Pre/Def, así que por
@@ -375,7 +417,11 @@ importable como cualquier módulo.
   `construir_fma_cpf/csf/ctf(...)`, `traer_agc_face(...)`, `TIPOS_FMA`,
   `buscar_reportes_cpf(...)`, `buscar_ctf(...)`,
   `generar_fma(carpeta_destino, aamm, tipos=None, version=None, raiz=None, raiz_agc=None, registrar=print)`
-  → `(escritos, faltantes, versiones)`, donde `versiones` es un dict por tipo:
+  → `(escritos, faltantes, versiones)`; y, para el "Origen inputs: ..." de la
+  ventana, `ruta_origen_cpf(aamm, ...)`, `ruta_origen_csf(aamm=None, ...)`,
+  `ruta_origen_ctf(aamm, ...)` y el dict `RUTAS_ORIGEN_FMA` — que devuelven la
+  carpeta de los insumos sin levantar aunque la unidad esté desconectada. En
+  `versiones` cada tipo elige la suya por separado:
   **cada uno elige su versión por separado**, porque una puede tener el CPF y
   otra el CTF.
 - **Depende de:** `pandas` y `Script/Fd/Indicadores_DCO.py` (comparte con él la
@@ -490,7 +536,9 @@ importable como cualquier módulo.
 - **Produce:** la copia local del CSV; el DataFrame de `cmg.xlsx` (lo
   escribe `nucleo.generar_cmg`).
 - **Expone:** `ErrorCmg`; `nombre_csv_15min(aamm)`,
-  `ruta_csv_en_red(aamm, raiz=None)`, `ruta_csv_local(carpeta_cmg, aamm)`,
+  `ruta_csv_en_red(aamm, raiz=None)`, `carpeta_origen_csv(aamm, raiz=None)`
+  (la carpeta de red, para el link "Origen: CMg Reales" de la ventana),
+  `ruta_csv_local(carpeta_cmg, aamm)`,
   `traer_csv_15min(carpeta_cmg, aamm, raiz=None, registrar=print)`,
   `construir_cmg_desde_csv(ruta_csv, barras, registrar=print)` →
   `(df_salida, resumen_dias)`, `validar_layout(df, registrar=print)`,
@@ -743,7 +791,11 @@ importable como cualquier módulo.
     toda la hoja `Subastas`, con lo que `AC:AT` y `AU` quedan en 0).
   - Estructura del caso: `revisar_estructura(carpeta_base, aamm=None)` →
     `(rutas, filas)`, donde cada fila es un dict `{id, etiqueta, nivel,
-    estado, detalle}` (`estado`: `ok`/`falta`/`pendiente`). El **nivel**
+    estado, detalle, ruta, es_carpeta, origen}` (`estado`:
+    `ok`/`falta`/`pendiente`; `ruta` + `es_carpeta`: lo que la ventana
+    convierte en link — ver `Balance_BESS.py`; `origen`: `None` o
+    `{id, titulo, etiqueta}` de `origenes.py` cuando lo de esa fila viene
+    de afuera del caso). El **nivel**
     (0 = raíz del caso, 1 = dentro de una carpeta/archivo, 2 = un nivel
     más) lo pone `nucleo` porque es estructura, no dibujo; el **id** es
     estable y es lo que la ventana usa para colgarle el botón que
@@ -752,6 +804,13 @@ importable como cualquier módulo.
     el estado hoja por hoja de las dos salidas: una hoja preservada que
     nunca se generó queda con una sola celda vacía y tiene que verse
     PENDIENTE, no generada), `_filas_de_hojas()`.
+  - De dónde viene lo que se trae (`origenes.py`, para los links de la
+    ventana): `ORIGENES` (`id -> (titulo, etiqueta, resolver)`),
+    `origen(id)` → `{id, titulo, etiqueta}` y `ruta_origen(id, aamm)` →
+    la carpeta exacta. Los ids son `fd`, `cmg_csv`, `cmg_xlsx`,
+    `subastas`, `fma_cpf`, `fma_csf`, `fma_ctf`. La ruta se resuelve al
+    hacer click, no al pintar el diagrama: mirar una unidad de red
+    desconectada tarda, y el diagrama se repinta en cada revisada.
   - Ofertas SSCC: `buscar_archivo_ofertas`, `construir_resumen_ofertas_sscc`,
     `cargar_resumen_en_medidores`, `calcular_r`, `calcular_s`,
     `construir_resumen_ventana_oferta`, `calcular_t`.

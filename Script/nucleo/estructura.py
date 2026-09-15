@@ -18,6 +18,7 @@ from .parametros import (
     HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_DICCIONARIO,
     HOJA_PRORRATA_RETIROS, HOJA_RESUMEN, HOJA_RESUMEN_BESS,
 )
+from .origenes import origen as origen_de
 from .prorrata_retiros import buscar_archivo_prorrata
 from .rutas import (
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
@@ -49,7 +50,8 @@ def hojas_de(ruta):
         return None
 
 
-def _fila(id_fila, etiqueta, nivel, estado, detalle=""):
+def _fila(id_fila, etiqueta, nivel, estado, detalle="", ruta=None,
+          es_carpeta=False, origen=None):
     """
     Una fila del diagrama de la ventana.
 
@@ -59,6 +61,16 @@ def _fila(id_fila, etiqueta, nivel, estado, detalle=""):
     2 = adentro de un archivo que esta adentro de una carpeta. Lo
     decide nucleo porque es estructura, no presentacion: como
     dibujarlo (prefijos, colores) es cosa de la ventana.
+    ruta: la ruta de ESA fila en el disco; la ventana la usa para que
+    el nombre sea un link. Siempre se abre una CARPETA (la propia si la
+    fila es una carpeta, la que contiene al archivo si es un archivo):
+    nunca se abre el archivo, para no arrancar Excel sin que se lo
+    pidan.
+    es_carpeta: si la fila es una carpeta (y no un archivo).
+    origen: id de Script/nucleo/origenes.py cuando lo que hay en esa
+    fila viene de afuera del caso (o se arma con insumos que vienen de
+    afuera). La ventana lo muestra como "Origen: <etiqueta>" en el
+    detalle, con la etiqueta como link.
     """
 
     return {
@@ -67,6 +79,9 @@ def _fila(id_fila, etiqueta, nivel, estado, detalle=""):
         "nivel": nivel,
         "estado": estado,
         "detalle": detalle,
+        "ruta": str(ruta) if ruta else "",
+        "es_carpeta": bool(es_carpeta),
+        "origen": origen_de(origen) if origen else None,
     }
 
 
@@ -160,9 +175,13 @@ def revisar_estructura(carpeta_base, aamm=None):
     rutas = resolver_rutas(carpeta_base)
     filas = []
 
-    def agregar(id_fila, etiqueta, nivel, existe, detalle=""):
+    def agregar(id_fila, etiqueta, nivel, existe, detalle="", ruta=None,
+                es_carpeta=False, origen=None):
         filas.append(
-            _fila(id_fila, etiqueta, nivel, "ok" if existe else "falta", detalle)
+            _fila(
+                id_fila, etiqueta, nivel, "ok" if existe else "falta",
+                detalle, ruta=ruta, es_carpeta=es_carpeta, origen=origen,
+            )
         )
 
     try:
@@ -172,10 +191,17 @@ def revisar_estructura(carpeta_base, aamm=None):
 
     rutas["aamm"] = aamm_valido
 
-    agregar("base", "Carpeta base", 0, rutas["base"].is_dir(), str(rutas["base"]))
+    agregar(
+        "base", "Carpeta base", 0, rutas["base"].is_dir(),
+        str(rutas["base"]), ruta=rutas["base"], es_carpeta=True,
+    )
 
     # ---- Medidas/ -------------------------------------------------
-    agregar("medidas_dir", f"{CARPETA_MEDIDAS}/", 0, rutas["medidas_dir"].is_dir())
+    agregar(
+        "medidas_dir", f"{CARPETA_MEDIDAS}/", 0,
+        rutas["medidas_dir"].is_dir(),
+        ruta=rutas["medidas_dir"], es_carpeta=True,
+    )
 
     # Medidas_SAE.xlsx ya no se deja a mano: lo arma el programa desde
     # las dos APIs del Coordinador (ver generar_medidas_sae).
@@ -190,6 +216,7 @@ def revisar_estructura(carpeta_base, aamm=None):
                 if rutas["medidas_sae"].is_file()
                 else "se genera con el boton -> (baja las medidas del mes)"
             ),
+            ruta=rutas["medidas_sae"],
         )
     )
 
@@ -199,7 +226,10 @@ def revisar_estructura(carpeta_base, aamm=None):
         try:
             archivo_soc = buscar_soc(rutas["medidas_dir"], aamm_valido)
             filas.append(
-                _fila("soc", archivo_soc.name, 1, "ok", f"periodo {aamm_valido}")
+                _fila(
+                    "soc", archivo_soc.name, 1, "ok",
+                    f"periodo {aamm_valido}", ruta=archivo_soc,
+                )
             )
             rutas["soc"] = archivo_soc
         except ErrorEntrada as error:
@@ -210,6 +240,8 @@ def revisar_estructura(carpeta_base, aamm=None):
                     1,
                     "falta",
                     str(error).split("\n")[0],
+                    ruta=rutas["medidas_dir"],
+                    es_carpeta=True,
                 )
             )
             rutas["soc"] = None
@@ -221,6 +253,8 @@ def revisar_estructura(carpeta_base, aamm=None):
                 1,
                 "falta",
                 "ingresa el periodo (AAMM) arriba para poder buscarlo",
+                ruta=rutas["medidas_dir"],
+                es_carpeta=True,
             )
         )
         rutas["soc"] = None
@@ -229,8 +263,12 @@ def revisar_estructura(carpeta_base, aamm=None):
     agregar(
         "auxiliares_dir", f"{CARPETA_AUXILIARES}/", 0,
         rutas["auxiliares_dir"].is_dir(),
+        ruta=rutas["auxiliares_dir"], es_carpeta=True,
     )
-    agregar("centrales", ARCHIVO_CENTRALES, 1, rutas["centrales"].is_file())
+    agregar(
+        "centrales", ARCHIVO_CENTRALES, 1, rutas["centrales"].is_file(),
+        ruta=rutas["centrales"],
+    )
 
     if rutas["centrales"].is_file():
 
@@ -265,7 +303,7 @@ def revisar_estructura(carpeta_base, aamm=None):
         filas.append(
             _fila(
                 "homologacion", archivo_homol.name, 1, "ok",
-                f"en {CARPETA_AUXILIARES}/",
+                f"en {CARPETA_AUXILIARES}/", ruta=archivo_homol,
             )
         )
 
@@ -307,18 +345,26 @@ def revisar_estructura(carpeta_base, aamm=None):
                 "homologacion", "Archivo *Homologacion*", 1, "falta",
                 f"ningun Excel de {CARPETA_AUXILIARES}/ tiene "
                 f"'homologacion' en el nombre",
+                ruta=rutas["auxiliares_dir"], es_carpeta=True,
             )
         )
 
     # ---- Ofertas/ -------------------------------------------------
-    agregar("ofertas_dir", f"{CARPETA_OFERTAS}/", 0, rutas["ofertas_dir"].is_dir())
+    agregar(
+        "ofertas_dir", f"{CARPETA_OFERTAS}/", 0,
+        rutas["ofertas_dir"].is_dir(),
+        ruta=rutas["ofertas_dir"], es_carpeta=True,
+    )
 
     archivo_ofertas = buscar_archivo_ofertas(rutas["ofertas_dir"])
     rutas["ofertas"] = archivo_ofertas
 
     if archivo_ofertas:
         filas.append(
-            _fila("ofertas", archivo_ofertas.name, 1, "ok", f"en {CARPETA_OFERTAS}/")
+            _fila(
+                "ofertas", archivo_ofertas.name, 1, "ok",
+                f"en {CARPETA_OFERTAS}/", ruta=archivo_ofertas,
+            )
         )
     else:
         filas.append(
@@ -326,6 +372,7 @@ def revisar_estructura(carpeta_base, aamm=None):
                 "ofertas", "Archivo *OfertasSSCC*", 1, "falta",
                 f"ningun archivo en {CARPETA_OFERTAS}/ contiene "
                 f"'OfertasSSCC' en el nombre",
+                ruta=rutas["ofertas_dir"], es_carpeta=True,
             )
         )
 
@@ -333,7 +380,10 @@ def revisar_estructura(carpeta_base, aamm=None):
     # Dos archivos, en orden de uso: primero se trae el CSV 15-minutal
     # de la unidad de red ("Traer cmg_15min"), y con ese CSV ya al
     # lado se genera cmg.xlsx ("Generar").
-    agregar("cmg_dir", f"{CARPETA_CMG}/", 0, rutas["cmg_dir"].is_dir())
+    agregar(
+        "cmg_dir", f"{CARPETA_CMG}/", 0, rutas["cmg_dir"].is_dir(),
+        ruta=rutas["cmg_dir"], es_carpeta=True,
+    )
 
     rutas["cmg_csv"] = (
         extrae_cmg.ruta_csv_local(rutas["cmg_dir"], aamm_valido)
@@ -345,6 +395,8 @@ def revisar_estructura(carpeta_base, aamm=None):
             _fila(
                 "cmg_csv", "cmg<AAMM>_def_15minutal.csv", 1, "falta",
                 "ingresa el periodo (AAMM) arriba para poder traerlo",
+                ruta=rutas["cmg_dir"], es_carpeta=True,
+                origen="cmg_csv",
             )
         )
     else:
@@ -359,6 +411,8 @@ def revisar_estructura(carpeta_base, aamm=None):
                     if rutas["cmg_csv"].is_file()
                     else "se baja de la unidad de red con el boton ->"
                 ),
+                ruta=rutas["cmg_csv"],
+                origen="cmg_csv",
             )
         )
 
@@ -373,6 +427,8 @@ def revisar_estructura(carpeta_base, aamm=None):
                 if rutas["cmg"].is_file()
                 else "se genera desde el CSV de arriba ->"
             ),
+            ruta=rutas["cmg"],
+            origen="cmg_xlsx",
         )
     )
 
@@ -382,6 +438,7 @@ def revisar_estructura(carpeta_base, aamm=None):
     agregar(
         "sscc_dir", f"{rutas['sscc_desempeno_dir'].name}/", 0,
         rutas["sscc_desempeno_dir"].is_dir(),
+        ruta=rutas["sscc_desempeno_dir"], es_carpeta=True,
     )
 
     archivo_sscc = buscar_archivo_sscc_desempeno(rutas["sscc_desempeno_dir"])
@@ -391,7 +448,8 @@ def revisar_estructura(carpeta_base, aamm=None):
         filas.append(
             _fila(
                 "sscc", archivo_sscc.name, 1, "ok",
-                f"en {CARPETA_FD_FMA}/",
+                f"en {CARPETA_FD_FMA}/", ruta=archivo_sscc,
+                origen="fd",
             )
         )
     else:
@@ -400,6 +458,8 @@ def revisar_estructura(carpeta_base, aamm=None):
                 "sscc", "Archivo SSCC_Desempeño_*", 1, "falta",
                 f"no esta en {CARPETA_FD_FMA}/: se baja del DCO con el "
                 f"boton 'Traer FD' de la carpeta",
+                ruta=rutas["sscc_desempeno_dir"], es_carpeta=True,
+                origen="fd",
             )
         )
 
@@ -425,6 +485,8 @@ def revisar_estructura(carpeta_base, aamm=None):
                     f"fma_{tipo}", archivo.name, 1, "ok",
                     f"alimenta Subastas!FMA ({tipo.upper()}); se rehace "
                     f"con el boton ->",
+                    ruta=archivo,
+                    origen=f"fma_{tipo}",
                 )
             )
         elif not aamm_valido:
@@ -432,6 +494,8 @@ def revisar_estructura(carpeta_base, aamm=None):
                 _fila(
                     f"fma_{tipo}", f"{etiqueta}<AAMM>.xlsx", 1, "pendiente",
                     "ingresa el periodo (AAMM) arriba para buscarlo",
+                    ruta=rutas["sscc_desempeno_dir"], es_carpeta=True,
+                    origen=f"fma_{tipo}",
                 )
             )
         else:
@@ -449,6 +513,8 @@ def revisar_estructura(carpeta_base, aamm=None):
                         "se arma con el boton -> desde el CTF_AAMM.csv "
                         "del DCO"
                     ),
+                    ruta=rutas["sscc_desempeno_dir"] / f"{etiqueta}_{aamm_valido}.xlsx",
+                    origen=f"fma_{tipo}",
                 )
             )
 
@@ -456,6 +522,7 @@ def revisar_estructura(carpeta_base, aamm=None):
     agregar(
         "subastas_dir", f"{CARPETA_SUBASTAS}/", 0,
         rutas["subastas_dir"].is_dir(),
+        ruta=rutas["subastas_dir"], es_carpeta=True,
     )
 
     # Los Access son AHORA el origen de la hoja Subastas. La carpeta la
@@ -491,14 +558,18 @@ def revisar_estructura(carpeta_base, aamm=None):
         estado_db = "pendiente"
 
     filas.append(
-        _fila("db_subastas", f"{CARPETA_DB_SUBASTAS}/", 1, estado_db,
-              detalle_db)
+        _fila(
+            "db_subastas", f"{CARPETA_DB_SUBASTAS}/", 1, estado_db,
+            detalle_db, ruta=rutas["db_subastas_dir"], es_carpeta=True,
+            origen="subastas",
+        )
     )
 
     # ---- Prorrata de retiros --------------------------------------
     agregar(
         "prorrata_dir", f"{CARPETA_PRORRATA_RETIROS}/", 0,
         rutas["prorrata_retiros_dir"].is_dir(),
+        ruta=rutas["prorrata_retiros_dir"], es_carpeta=True,
     )
     try:
         archivo_prorrata = buscar_archivo_prorrata(
@@ -510,10 +581,16 @@ def revisar_estructura(carpeta_base, aamm=None):
             archivo_prorrata.name if archivo_prorrata else "Prorrata_Retiros_AAMM_pre/def.xlsx",
             1, "ok" if archivo_prorrata else "falta",
             "fuente: hoja 'Prorrata 15min'" if archivo_prorrata else "deja aqui el Excel del periodo",
+            ruta=archivo_prorrata or rutas["prorrata_retiros_dir"],
+            es_carpeta=not archivo_prorrata,
         ))
     except ErrorEntrada as error:
         rutas["prorrata_retiros"] = None
-        filas.append(_fila("prorrata_archivo", "Prorrata_Retiros_AAMM_pre/def.xlsx", 1, "falta", str(error).split("\n")[0]))
+        filas.append(_fila(
+            "prorrata_archivo", "Prorrata_Retiros_AAMM_pre/def.xlsx", 1,
+            "falta", str(error).split("\n")[0],
+            ruta=rutas["prorrata_retiros_dir"], es_carpeta=True,
+        ))
 
     # ---- Salidas --------------------------------------------------
     # Las dos salidas se desglosan igual que Centrales.xlsx: el
@@ -546,6 +623,7 @@ def revisar_estructura(carpeta_base, aamm=None):
                 id_salida, nombre, 0,
                 "ok" if (ruta.is_file() and completas) else "pendiente",
                 detalle,
+                ruta=ruta,
             )
         )
         filas.extend(filas_hojas)

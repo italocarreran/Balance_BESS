@@ -164,6 +164,49 @@ def nombre_salida(tipo, aamm):
 
 
 # ============================================================
+# LAS RUTAS DE ORIGEN, PARA MOSTRARLAS EN LA VENTANA
+#
+# El FMA no se trae hecho: se construye. Pero sus insumos SI vienen de
+# afuera, asi que la ventana pone "Origen inputs: ..." en el detalle de
+# cada fila de FMA, con un link a la carpeta de la que salen. Igual que
+# las de Indicadores_DCO, estas funciones no levantan: si el servidor
+# no se puede leer, devuelven la ruta que le corresponderia al periodo.
+# ============================================================
+
+def ruta_origen_cpf(aamm, version=None, raiz=None):
+    """<version>/01 Respuesta/01 Indices CPF -- los reportes diarios."""
+
+    return dco.ruta_origen(
+        aamm, [SUBCARPETAS_CPF], version=version, raiz=raiz
+    )
+
+
+def ruta_origen_ctf(aamm, version=None, raiz=None):
+    """<version>/01 Respuesta/06 Indices CTF -- el CTF_<AAAA><MM>.csv."""
+
+    return dco.ruta_origen(
+        aamm, [SUBCARPETAS_CTF], version=version, raiz=raiz
+    )
+
+
+def ruta_origen_csf(aamm=None, raiz=None):
+    """
+    Los reportes del AGC, que no estan en el arbol del DCO: viven
+    todos juntos en RAIZ_AGC_FACE. El aamm se acepta y se ignora, para
+    que las tres funciones se puedan llamar igual.
+    """
+
+    return ruta_agc_face(raiz)
+
+
+RUTAS_ORIGEN_FMA = {
+    "cpf": ruta_origen_cpf,
+    "csf": ruta_origen_csf,
+    "ctf": ruta_origen_ctf,
+}
+
+
+# ============================================================
 # CPF
 # ============================================================
 

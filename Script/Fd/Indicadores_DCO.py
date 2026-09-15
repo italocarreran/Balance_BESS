@@ -3,10 +3,11 @@
 Indicadores_DCO — trae el FD del periodo desde el arbol del DCO.
 
 Las dos piezas salen de entradas_sscc.py y su
-archivo_de_configuracion.yaml:
+archivo_de_configuracion.yaml, con la raiz actualizada a la que usa hoy
+el usuario (unidad F:, ver RAIZ_DCO_INDICADORES):
 
   - `ruta_fma_dco`, la raiz:
-        \\\\nas-cen1\\DCO\\11 SSCC\\05 Verificación SSCC\\02 Cálculo indicadores
+        F:\\11 SSCC\\05 Verificación SSCC\\02 Cálculo indicadores
   - el nombre del archivo de FD:
         SSCC_Disponibilidad_CSF_<Mes>_<AAAA>_<version>.zip
     con `version_fd` = V1 para el Preliminar y V2 para el Definitivo.
@@ -22,8 +23,9 @@ o sea, la carpeta del periodo es
     <RAIZ>\\<AAAA>\\<MM>. <Mes>\\Indicadores Publicar\\<version>
 
 y adentro de esa, el FD (los "factores de desempeño") cuelga de
-'04 Desempeño para transferencias' -ruta confirmada por el usuario-. El
-boton "Traer FD" busca ahi los archivos del periodo y los copia a
+'03 Desempeño para publicar' -ruta confirmada por el usuario; antes se
+usaba '04 Desempeño para transferencias', que queda como alternativa
+para los meses viejos-. El boton "Traer FD" busca ahi los archivos del periodo y los copia a
 <CARPETA_BASE>/FD y FMA/; si lo que encuentra es el .zip, lo
 descomprime ahi mismo, porque lo que la etapa FD lee despues es el Excel
 SSCC_Desempeño_* que viene adentro.
@@ -50,11 +52,13 @@ from pathlib import Path
 # DONDE PUBLICA EL DCO
 # ============================================================
 
-# `ruta_fma_dco` del archivo_de_configuracion.yaml. Es la tercera (y
-# ultima) ruta del programa que apunta fuera de la carpeta base del
-# caso: si el servidor cambia, se cambia aca y nada mas.
+# `ruta_fma_dco` del archivo_de_configuracion.yaml, con la raiz que usa
+# hoy el usuario: la unidad F: (antes se escribia el UNC
+# \\nas-cen1\DCO\..., que es el mismo arbol montado de otra forma). Es
+# la tercera (y ultima) ruta del programa que apunta fuera de la carpeta
+# base del caso: si el servidor cambia, se cambia aca y nada mas.
 RAIZ_DCO_INDICADORES = (
-    r"\\nas-cen1\DCO\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores"
+    r"F:\11 SSCC\05 Verificación SSCC\02 Cálculo indicadores"
 )
 
 CARPETA_PUBLICACION = "Indicadores Publicar"
@@ -62,12 +66,26 @@ CARPETA_PUBLICACION = "Indicadores Publicar"
 # Dentro de la carpeta de version, el FD (los "factores de desempeño")
 # cuelga de esta subcarpeta -ruta confirmada por el usuario-:
 #
-#   <version>/04 Desempeño para transferencias/
+#   <version>/03 Desempeño para publicar/
 #
-# Se busca ahi primero y, si no aparece, se cae a una busqueda
-# recursiva desde la carpeta de version: el DCO cambia de anidamiento
-# cada tanto y no vale la pena que eso rompa el boton.
-SUBCARPETAS_FD = ("04 Desempeño para transferencias",)
+# La carpeta anterior ('04 Desempeño para transferencias') queda como
+# alternativa: los meses ya cerrados siguen teniendo el FD ahi, y el
+# boton tiene que servir igual para volver a un periodo viejo.
+#
+# Se busca en esas dos, en orden, y si en ninguna aparece se cae a una
+# busqueda recursiva desde la carpeta de version: el DCO cambia de
+# anidamiento cada tanto y no vale la pena que eso rompa el boton.
+SUBCARPETAS_FD = ("03 Desempeño para publicar",)
+SUBCARPETAS_FD_ANTIGUA = ("04 Desempeño para transferencias",)
+
+# Las dos, en el orden en que se prueban. Cada elemento es una CADENA de
+# subcarpetas (se baja una tras otra), no una lista de alternativas.
+CADENAS_FD = (SUBCARPETAS_FD, SUBCARPETAS_FD_ANTIGUA)
+
+# La version que se muestra en la ventana cuando todavia no se puede
+# leer el servidor (no hay como saber cual esta publicada): la ruta que
+# se arma ahi es orientativa, para poder abrir el arbol y mirar.
+VERSION_POR_OMISION = "V1"
 
 # Los dos nombres con los que puede aparecer el FD: el zip que publica
 # el DCO y el Excel que viene adentro (que es el que lee la etapa FD).
@@ -334,6 +352,103 @@ def buscar_en_versiones(
     return None, None, revisadas
 
 
+# ============================================================
+# LA RUTA DE ORIGEN, PARA MOSTRARLA EN LA VENTANA
+#
+# La ventana pone "Origen: DCO" en el detalle de la fila del FD, y ese
+# "DCO" es un link a la carpeta exacta de la que sale. Por eso estas
+# funciones NO levantan ErrorFd: cuando el servidor no esta conectado o
+# el mes todavia no se publico igual hay que poder mostrar (y abrir) la
+# ruta que le corresponderia al periodo.
+# ============================================================
+
+def carpeta_publicacion_o_literal(aamm, raiz=None):
+    """
+    <RAIZ>/<AAAA>/<MM>. <Mes>/Indicadores Publicar, resuelta contra el
+    servidor si se puede leer y armada a mano si no.
+    """
+
+    raiz = Path(raiz or RAIZ_DCO_INDICADORES)
+
+    try:
+        return carpeta_del_periodo(aamm, raiz=raiz)
+    except ErrorFd:
+        pass
+
+    try:
+        anio, mes = periodo_desde_aamm(aamm)
+    except ErrorFd:
+        return raiz
+
+    return (
+        raiz / str(anio) / f"{mes:02d}. {nombre_mes(mes)}"
+        / CARPETA_PUBLICACION
+    )
+
+
+def carpeta_version_o_literal(aamm, version=None, raiz=None):
+    """
+    La carpeta de version (V1, V2, ...) del periodo. Si no se pide una
+    en particular es la MAS ALTA publicada -V2 le gana a V1, igual que
+    en elegir_version-, y si no se puede leer el servidor, la que se
+    haya pedido o VERSION_POR_OMISION.
+    """
+
+    publicacion = carpeta_publicacion_o_literal(aamm, raiz=raiz)
+
+    try:
+        return elegir_version(publicacion, version)
+    except ErrorFd:
+        return publicacion / (version or VERSION_POR_OMISION)
+
+
+def ruta_origen(aamm, cadenas=None, version=None, raiz=None):
+    """
+    La carpeta exacta del arbol del DCO de la que sale algo del
+    periodo: la primera de `cadenas` que exista bajo la carpeta de
+    version y, si ninguna existe, la primera armada a mano.
+
+    cadenas: cadenas de subcarpetas a probar, en orden (cada una se
+    baja nombre por nombre). Por omision, las del FD.
+    """
+
+    try:
+        periodo_desde_aamm(aamm)
+    except ErrorFd:
+        # Sin un periodo valido no hay carpeta de año, mes ni version
+        # que armar: lo unico cierto es la raiz.
+        return Path(raiz or RAIZ_DCO_INDICADORES)
+
+    base = carpeta_version_o_literal(aamm, version=version, raiz=raiz)
+    cadenas = list(cadenas or CADENAS_FD)
+
+    for cadena in cadenas:
+
+        carpeta = bajar_por_subcarpetas(base, cadena)
+
+        if carpeta is not None:
+            return carpeta
+
+    for nombre in cadenas[0]:
+        base = base / nombre
+
+    return base
+
+
+def ruta_origen_fd(aamm, version=None, raiz=None):
+    """
+    De donde sale el FD del periodo:
+
+        <RAIZ>/<AAAA>/<MM>. <Mes>/Indicadores Publicar/<Vn>
+            /03 Desempeño para publicar
+
+    Es la ruta que la ventana muestra como "Origen: DCO" en la fila del
+    SSCC_Desempeño_* y la que abre al hacerle click.
+    """
+
+    return ruta_origen(aamm, CADENAS_FD, version=version, raiz=raiz)
+
+
 def _es_archivo_fd(ruta, anio):
     """
     Un archivo sirve si su nombre empieza con alguno de los prefijos de
@@ -355,17 +470,24 @@ def _es_archivo_fd(ruta, anio):
 def buscar_archivos_fd(carpeta_version, anio):
     """
     Los archivos de FD del periodo dentro de una carpeta de version:
-    primero en '04 Desempeño para transferencias' (la ruta que dio el
-    usuario) y, si ahi no hay, buscando recursivamente desde la carpeta
-    de version. Devuelve la lista ordenada por nombre.
+    primero en '03 Desempeño para publicar' (la ruta que dio el
+    usuario), despues en la carpeta anterior de los meses viejos
+    ('04 Desempeño para transferencias') y, si en ninguna hay, buscando
+    recursivamente desde la carpeta de version. Devuelve la lista
+    ordenada por nombre.
     """
 
     carpeta_version = Path(carpeta_version)
 
-    carpeta_fd = bajar_por_subcarpetas(carpeta_version, SUBCARPETAS_FD)
+    for cadena in CADENAS_FD:
 
-    if carpeta_fd is not None:
+        carpeta_fd = bajar_por_subcarpetas(carpeta_version, cadena)
+
+        if carpeta_fd is None:
+            continue
+
         encontrados = _archivos_fd_en(carpeta_fd, anio, recursivo=True)
+
         if encontrados:
             return encontrados
 
@@ -391,7 +513,8 @@ def _archivos_fd_en(carpeta, anio, recursivo=False):
 
 def _contenido_de_la_carpeta_fd(carpeta_publicacion):
     """
-    Que hay en las carpetas '04 Desempeño para transferencias' de cada
+    Que hay en la carpeta de desempeño ('03 Desempeño para publicar' o,
+    en los meses viejos, '04 Desempeño para transferencias') de cada
     version. Se usa SOLO para el mensaje de error: si el archivo no se
     encontro por su nombre, lo mas util es mostrar que si hay ahi, para
     poder corregir el patron de una.
@@ -401,12 +524,22 @@ def _contenido_de_la_carpeta_fd(carpeta_publicacion):
 
     for carpeta_version in reversed(versiones_publicadas(carpeta_publicacion)):
 
-        carpeta_fd = bajar_por_subcarpetas(carpeta_version, SUBCARPETAS_FD)
+        carpeta_fd = next(
+            (
+                carpeta
+                for carpeta in (
+                    bajar_por_subcarpetas(carpeta_version, cadena)
+                    for cadena in CADENAS_FD
+                )
+                if carpeta is not None
+            ),
+            None,
+        )
 
         if carpeta_fd is None:
             lineas.append(
                 f"  {carpeta_version.name}: no tiene "
-                f"'{SUBCARPETAS_FD[0]}'"
+                f"'{SUBCARPETAS_FD[0]}' ni '{SUBCARPETAS_FD_ANTIGUA[0]}'"
             )
             continue
 
@@ -508,7 +641,7 @@ def traer_fd(carpeta_destino, aamm, version=None, raiz=None, registrar=print):
             f"({' / '.join(p + '*' for p in PREFIJOS_FD)}) del año {anio} "
             f"en {carpeta_publicacion}.\n\n"
             f"Version(es) revisada(s): {', '.join(revisadas)}\n\n"
-            f"Lo que hay en '{SUBCARPETAS_FD[0]}':\n"
+            f"Lo que hay en la carpeta de desempeño de cada version:\n"
             + "\n".join(detalle)
         )
 

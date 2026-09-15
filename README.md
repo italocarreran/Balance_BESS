@@ -49,7 +49,15 @@ python Balance_BESS.py
    nombre de ningún archivo — es el dato con el que el programa ubica el
    SoC del período dentro de `Medidas/` y el CSV de CMg dentro de `Cmg/`.
 3. La ventana detecta automáticamente las entradas y las dibuja como un
-   diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una).
+   diagrama de carpetas (`OK` / `FALTA` / `PENDIENTE` por cada una). El
+   nombre de cada archivo y de cada carpeta es un **link**: el click abre
+   esa carpeta en el explorador (la que contiene al archivo, si es un
+   archivo — nunca se abre el archivo). Y las filas de lo que viene de
+   afuera del caso dicen de dónde en su detalle, también como link:
+   `Origen: DCO` en el `SSCC_Desempeño_*`, `Origen: CMg Reales` en el CSV,
+   `Origen: progdiar_adjudicaSEN` en `DB subastas/`, y `Origen inputs: ...`
+   en `cmg.xlsx` y en las tres de FMA, que no se traen hechas pero se arman
+   con insumos que sí vienen de afuera.
 4. **Cada acción es un botón en la fila que le corresponde** — no hay
    ventanas intermedias ni un botón "Ejecutar" único:
    - `Medidas/Medidas_SAE.xlsx` → **Actualizar** (baja el mes completo de las
