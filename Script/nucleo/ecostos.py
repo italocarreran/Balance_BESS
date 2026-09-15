@@ -194,6 +194,31 @@ NOMBRES_CALCULO_E_COSTOS = {
     "AZ": "Monto a compensar",
 }
 
+# Auxiliares de calculo que NO se escriben (pedido del usuario:
+# "quita los auxiliares innecesarios"). Se siguen calculando igual
+# que antes -- salen de la hoja, no del calculo:
+#
+#   X "Ciclo": es Copia_Ventana copiada tal cual, y Copia_Ventana ya
+#     esta en la hoja como "Ciclo de Carga del mes". Dos columnas con
+#     el mismo numero, una al lado de la otra.
+#
+# NO se sacan las otras columnas intermedias (W "Bloque ordenado", Y,
+# AB, AC, AD de las curvas monotonas, R "ranking cmg", AE/AF): son el
+# paso a paso con el que un coordinado sigue de donde sale cada peso.
+# Tampoco las CTF en 0 (AI, AL, AO, AR): que el CTF sea 0 es un dato,
+# no una columna de relleno.
+COLUMNAS_AUXILIARES_E_COSTOS = ("X",)
+
+# Orden final de columnas internas de la hoja (el de
+# NOMBRES_CALCULO_E_COSTOS sin los auxiliares). Lo usan
+# renombrar_calculo_e_costos() y, para ubicar los encabezados de
+# grupo, escribir_pagos_bess().
+COLUMNAS_SALIDA_E_COSTOS = [
+    clave for clave in NOMBRES_CALCULO_E_COSTOS
+    if clave not in COLUMNAS_AUXILIARES_E_COSTOS
+]
+
+
 # Encabezados de grupo de "Calculo E Costos", confirmados contra
 # docs/Libro1_Subastas_real.xlsx (hoja "E COSTOS", fila 2 real -- la
 # unica hoja de las que tenemos como referencia real que conserva los
@@ -368,6 +393,6 @@ def renombrar_calculo_e_costos(df_ecostos):
     """
 
     return (
-        df_ecostos[list(NOMBRES_CALCULO_E_COSTOS)]
+        df_ecostos[COLUMNAS_SALIDA_E_COSTOS]
         .rename(columns=NOMBRES_CALCULO_E_COSTOS)
     )

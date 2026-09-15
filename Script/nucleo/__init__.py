@@ -66,7 +66,9 @@ from .parametros import (
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_FD_FMA_ANTIGUA,
     CARPETA_MEDIDAS, CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS,
     CARPETA_SUBASTAS,
-    CARPETA_TRABAJO_MEDIDAS, COLUMNAS_AI, COLUMNAS_VACIAS,
+    CARPETA_TRABAJO_MEDIDAS, COLUMNAS_AI,
+    COLUMNAS_AUXILIARES_MEDIDORES, COLUMNAS_MEDIDORES_SALIDA,
+    COLUMNAS_VACIAS,
     EXTENSIONES_EXCEL, HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
     HOJA_PRORRATA_RETIROS, HOJA_RESUMEN,
     HOJA_CMG_ORIGEN, HOJA_CPF_HORARIO, HOJA_CSF_HORARIO,
@@ -96,7 +98,8 @@ from .manifiesto import (
 from .rutas import (
     _buscar_archivo_excel_mas_reciente, _es_archivo_de_soc,
     buscar_archivo_ofertas, buscar_archivo_sscc_desempeno,
-    buscar_soc, periodo_desde_aamm,
+    SUBCARPETAS_CASO, buscar_soc, crear_estructura_caso,
+    nombre_caso_sugerido, periodo_desde_aamm,
     resolver_rutas, validar_aamm,
 )
 from .origenes import ORIGENES, origen, ruta_origen
@@ -136,7 +139,7 @@ from .hojas_entrada import (
     _construir_bloque_fd_cpf, _construir_bloque_fd_csf,
     _contiene_bess_o_sae_sin_bat, _dia_hora_mes_fd,
     _filtrar_bess_sae_posicional, _ordenar_subastas_por_hora_mes,
-    construir_fd, leer_cmg, leer_fd_consolidado,
+    construir_fd, leer_cmg, leer_cmg_consolidado, leer_fd_consolidado,
 )
 from .subastas_accdb import (
     COLUMNA_ENERGIA_SSCC_ACCDB, _control_desde_servicio,
@@ -157,6 +160,7 @@ from .diccionarios import (
     construir_mapa_barra,
 )
 from .ecostos import (
+    COLUMNAS_AUXILIARES_E_COSTOS, COLUMNAS_SALIDA_E_COSTOS,
     GRUPOS_CALCULO_E_COSTOS, NOMBRES_CALCULO_E_COSTOS,
     completar_calculo_e_costos_grupos, construir_calculo_e_costos,
     renombrar_calculo_e_costos,
@@ -180,6 +184,7 @@ from .ecostos_ciclo import (
     calcular_subastas_ciclo, construir_dic_umbrales_subastas,
 )
 from .re545 import (
+    COLUMNAS_AUXILIARES_RE545, COLUMNAS_SALIDA_RE545,
     GRUPOS_CALCULO_RE545, NOMBRES_CALCULO_RE545, calcular_s_re545,
     calcular_u_v_re545, completar_calculo_re545,
     completar_checks_resumen_re545, construir_calculo_re545,
@@ -200,14 +205,19 @@ from .re545_componentes import (
 from .medidores import (
     calcular_clave_auxiliar, calcular_indicador_soc, calcular_ventana,
     completar_ofertas_en_medidores, construir_medidores,
-    construir_ofertas_sscc,
+    construir_ofertas_sscc, reponer_auxiliares_medidores,
 )
+from .formato import formatear_hoja, formatear_libro
 from .escritura import (
     _COLUMNA_Q_INDICE, _HOJAS_CONSOLIDADO,
     _HOJAS_PAGOS, _copiar_hoja_existente, _escribir_encabezados_grupo,
     _escribir_tabla_con_titulo, escribir_pagos_bess, escribir_salida,
 )
 from .proceso import generar_consolidado, generar_pagos_bess
+from .orquestador import (
+    GRUPOS, GRUPO_POR_ID, TAREAS, TAREA_POR_ID, dependientes, ejecutar_plan,
+    planificar, propagar_seleccion,
+)
 from .traer import (
     barras_desde_resumen_bess, generar_cmg, generar_fma, traer_csv_cmg,
     traer_fd, traer_subastas,
@@ -234,7 +244,14 @@ __all__ = [
     "CARPETA_FD_FMA_ANTIGUA", "CARPETA_MEDIDAS", "CARPETA_OFERTAS",
     "CARPETA_PRORRATA_RETIROS",
     "CARPETA_SUBASTAS", "CARPETA_TRABAJO_MEDIDAS", "COLUMNAS_AI",
-    "COLUMNAS_VACIAS", "EXTENSIONES_EXCEL", "HOJA_CALCULO_ECOSTOS",
+    "COLUMNAS_VACIAS", "COLUMNAS_AUXILIARES_MEDIDORES",
+    "COLUMNAS_MEDIDORES_SALIDA", "COLUMNAS_AUXILIARES_E_COSTOS",
+    "COLUMNAS_SALIDA_E_COSTOS", "COLUMNAS_AUXILIARES_RE545",
+    "COLUMNAS_SALIDA_RE545", "reponer_auxiliares_medidores",
+    "formatear_hoja", "formatear_libro", "leer_cmg_consolidado",
+    "GRUPOS", "GRUPO_POR_ID", "TAREAS", "TAREA_POR_ID", "dependientes",
+    "ejecutar_plan", "planificar", "propagar_seleccion",
+    "EXTENSIONES_EXCEL", "HOJA_CALCULO_ECOSTOS",
     "HOJA_CALCULO_RE545", "HOJA_PRORRATA_RETIROS", "HOJA_RESUMEN",
     "HOJA_CMG_ORIGEN", "HOJA_CPF_HORARIO",
     "HOJA_CSF_HORARIO", "HOJA_DICCIONARIO", "HOJA_MEDIDAS_SAE",
@@ -249,6 +266,7 @@ __all__ = [
     "_es_archivo_de_soc", "buscar_archivo_ofertas",
     "buscar_archivo_sscc_desempeno",
     "buscar_soc", "periodo_desde_aamm", "resolver_rutas",
+    "SUBCARPETAS_CASO", "crear_estructura_caso", "nombre_caso_sugerido",
     "validar_aamm", "SECCIONES_CONSOLIDADO", "SECCIONES_PAGOS", "_fila",
     "COLUMNAS_ORIGEN", "HOJA_ORIGEN",
     "buscar_archivo_prorrata", "leer_prorrata_retiros",

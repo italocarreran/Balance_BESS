@@ -3360,6 +3360,240 @@ correrla contra el archivo real del período.
 
 ---
 
+## 2026-09-14 — Planillas ordenadas y auxiliares afuera
+
+Pedido del usuario: *"Está funcionando y los resultados dan igual, sin
+modificar el cálculo, necesito que ordenes las planillas, quita los
+auxiliares innecesarios"*. Nada de esto toca un número: se verificó
+corriendo el caso sintético completo antes y después y comparando las dos
+hojas de cálculo celda por celda — **idénticas salvo las columnas que se
+sacaron**.
+
+### Qué salió de las hojas
+
+| Hoja | Fuera | Por qué | Cómo se recupera |
+|---|---|---|---|
+| `Medidores` | M, P, Q, U | las cuatro columnas deliberadamente vacías del original | en Python no hay letra de Excel que alinear |
+| `Medidores` | N `Clave_Dia_HoraMes` | clave auxiliar `Dia & Hora Mes` | no la lee nadie; `calcular_clave_auxiliar()` sigue estando |
+| `Medidores` | K `Copia_Ventana` | copia fila a fila de `Ventana` | `reponer_auxiliares_medidores()` la repone al leer la hoja |
+| `Calculo E Costos` | X `Ciclo` | repetía `Copia_Ventana` ("Ciclo de Carga del mes"), dos columnas con el mismo número una al lado de la otra | se sigue calculando; la hoja ya lo muestra una vez |
+| `Calculo RE545` | BL | columna **sin nombre**: la suma de CMg que sólo existe para que BM saque su k-ésimo mayor | se sigue calculando; BM no cambia |
+| `Calculo RE545` | BR `Ventana de Valorizacion` | repetía `T` ("Ventana de valorizacion") | se sigue calculando |
+
+La hoja `Medidores` pasa de 18 a 12 columnas. Las que quedan mantienen el
+orden de siempre (el de `LETRA_A_CAMPO`).
+
+**Lo que NO se sacó**, aunque sea intermedio: las curvas monótonas (`W`,
+`Y`, `AB`, `AC`, `AD`), el `ranking cmg`, las energías con FD y todo el paso
+a paso de los Componentes 1 y 2 de RE545. El usuario lo puso así: *"si es
+importante para que los coordinados entiendan y vean parte del cálculo no
+hay que sacarlo, si es trivial sí"*. Tampoco las CTF en 0 (`AI`, `AL`, `AO`,
+`AR`): que el CTF sea 0 es un dato, no relleno.
+
+La lista de lo que se escribe vive en un solo lugar por hoja
+(`COLUMNAS_MEDIDORES_SALIDA`, `COLUMNAS_SALIDA_E_COSTOS`,
+`COLUMNAS_SALIDA_RE545`), y los encabezados de grupo se ubican contra esa
+misma lista — antes se ubicaban contra `NOMBRES_CALCULO_*`, que ahora tiene
+columnas que no se escriben. El grupo "Componente 1" de RE545 dejó de
+nombrar a BL; sigue quedando en celdas contiguas (`BK`, `BM`, `BN`, `BO`).
+
+### El orden de las hojas
+
+`Pagos_BESS.xlsx` abría por `Calculo E Costos` (47 columnas de detalle) y
+dejaba el `Resumen` cuarto. Ahora abre por el `Resumen` — quién paga y quién
+recibe — y sigue con `Calculo E Costos`, `Calculo RE545`,
+`PRORRATA_RETIROS` y las dos hojas de control (`Alertas`, `Ejecucion`) al
+final. `Consolidado_entradas.xlsx` ya salía en su orden de lectura.
+
+### El formato (`Script/nucleo/formato.py`, nuevo)
+
+Las hojas salían tal cual las deja pandas: encabezados sin negrita, todo de
+ancho 8 (los montos como `####`), sin panel fijo. Ahora, en los dos libros y
+también en las hojas que se preservan de una corrida anterior:
+
+- filas de título y de nombres de columna en negrita y centradas;
+- panel inmovilizado justo debajo del encabezado (fila 1, 2 o 3 según la
+  hoja: las de cálculo llevan arriba los encabezados de grupo, y
+  `PRORRATA_RETIROS` el título de cada cuadro);
+- ancho de columna según lo que hay adentro, con tope para que un nombre de
+  central largo no empuje el resto fuera de la pantalla;
+- separador de miles, dos decimales cuando la columna los tiene, y fecha
+  legible en las columnas de fecha.
+
+El formato de número se escribe celda por celda (openpyxl no tiene formato
+por columna que Excel respete): medido, ~1 segundo cada millón y medio de
+celdas, sobre una escritura que ya tarda varias veces eso. Hay un tope
+(`MAXIMO_CELDAS_FORMATO`) para un caso disparatado; si se cruza, el libro
+sale igual, sólo que sin separador de miles.
+
+### Verificación
+
+- 72 pruebas (eran 60), todas verdes, sin avisos de `pyflakes`.
+- `tests/test_planillas_ordenadas.py` (nuevo, 12 pruebas): las columnas que
+  salen de `Medidores` y el orden de las que quedan, la reposición de
+  `Copia_Ventana` (incluido un libro viejo que todavía la trae, que se
+  respeta), los auxiliares fuera de las dos hojas de cálculo y los
+  intermedios que se quedan, los grupos cayendo en celdas contiguas, el
+  `Resumen` primero, y que formatear no cambia ni un valor.
+- Corrida sintética de punta a punta (`generar_pagos_bess` con las dos
+  hojas) antes y después: las dos hojas de cálculo dan exactamente los
+  mismos valores, columna por columna, salvo las quitadas; los encabezados
+  de grupo caen sobre los mismos nombres de columna.
+
+Lo que NO se probó: la corrida contra el archivo real del período.
+
+---
+
+## 2026-09-14 — Que no se abra de mas, y un boton que corre todo
+
+Tres pedidos del usuario en la misma tanda: *"1. Que no se abran planillas
+innecesarias. 2. Que si alguna información está en el consolidado que se
+saque de ahí, quitar redundancias, etc. Que quede optimizadito. 3. Quiero un
+botón que ejecute todo teniendo la información inicial necesaria [...] que el
+botón se bloquee si falta algo [...] que se calcule solo lo restante pero que
+yo pueda seleccionar si quiero repetir algún cálculo [...] Hay cosas que
+pueden ir en paralelo y cosas que dependen de otras. Con cuidado"*.
+
+Ningún número cambia: la corrida sintética de punta a punta da las mismas
+hojas celda por celda antes y después.
+
+### 1 y 2 — lo que se dejó de abrir
+
+| Antes | Ahora |
+|---|---|
+| `Pagos_BESS.xlsx` abría el consolidado **cinco veces** (una por hoja: cada `pd.read_excel(ruta, sheet_name=...)` parsea el libro entero) | una sola apertura (`pd.ExcelFile`) para las cinco (`_leer_entradas_del_consolidado`) |
+| ...y además reabría `cmg.xlsx` | el CMg sale de la hoja `CMg` del consolidado (`leer_cmg_consolidado`) |
+| Recalcular solo `PRORRATA_RETIROS` o el `Resumen` abría igual Medidores, Ofertas SSCC, Subastas, CMg y Centrales | esas dos hojas salen de las hojas de cálculo ya escritas; no se abre el consolidado (ni se exige que exista) |
+| `Centrales.xlsx` se abría dos veces por corrida del consolidado (una por "medidores", otra por "subastas") | una sola vez |
+| La ventana reabría Centrales, el Excel de homologación y las dos salidas **en cada repintado** (al cambiar el AAMM, al terminar cualquier botón) | se acuerda de lo leído mientras el archivo no cambie (clave: ruta + mtime + tamaño) |
+
+Lo del CMg es además una **redundancia peligrosa**, no solo lentitud: bastaba
+con dejar un `cmg.xlsx` más nuevo en la carpeta después de generar el
+consolidado para que los pagos usaran un CMg distinto del de la foto de las
+entradas. Es el mismo criterio que ya se había aplicado a `FD` en la tanda
+anterior. `cmg.xlsx` salió también del manifiesto de entradas de
+`Pagos_BESS.xlsx`: ya no es una entrada de esa etapa.
+
+Lo que NO se tocó: la hoja `Subastas` sigue leyendo el `SSCC_Desempeño_*`
+aunque la hoja `FD` del consolidado salga del mismo archivo. No es el mismo
+dato: de ahí saca el CTF y el Vector de Participación CSF, que la hoja `FD`
+no guarda.
+
+### 3 — "Ejecutar todo"
+
+Módulo nuevo, `Script/nucleo/orquestador.py`: 17 tareas agrupadas en 8 pasos,
+con sus dependencias. No calcula nada nuevo — llama a las mismas funciones
+que los botones sueltos.
+
+```
+Medidas_SAE ─┐
+cmg_csv → cmg.xlsx ─┤
+FD → FMA ────┼→ Consolidado (5 hojas, UNA escritura) → Pagos (4 hojas, UNA escritura)
+subastas ────┘
+```
+
+- **Se hace solo lo que falta.** Lo que está al día no se rehace salvo que se
+  tilde; al tildarlo se tilda solo todo lo que sale de ahí
+  (`propagar_seleccion`), porque rehacer `Medidores` sin rehacer los pagos
+  deja el libro mezclado entre dos corridas. Si se destilda algo de lo que
+  otra cosa depende, esa otra queda `bloqueada` y lo dice, en vez de calcular
+  con datos viejos.
+- **El botón se bloquea** si falta una entrada inicial (`Centrales.xlsx` y sus
+  dos hojas, el Excel de homologación con su hoja `homol`, el `*OfertasSSCC*`,
+  el SoC del período, o el `AAMM`), con el nombre de lo que falta. El Excel de
+  prorrata de retiros —que llega después— **no** bloquea: sus dos hojas quedan
+  fuera del plan, a la vista y con el motivo.
+- **Paralelismo, con tres seguros**: (a) dos tareas que escriben el mismo
+  archivo comparten `recurso` y nunca corren a la vez (por eso "Traer FD" y
+  "Generar FMA", que escriben en la misma carpeta, se turnan); (b) las hojas
+  de cada salida se mandan JUNTAS en una sola llamada, que además escribe el
+  libro una sola vez en vez de cinco; (c) si un paso falla, no se corre nada
+  que dependa de él (y el resumen final dice qué corrió y qué no).
+
+La ventana nueva (`ventana_ejecutar_todo` en `Balance_BESS.py`) solo dibuja el
+plan que devuelve `planificar()`: una fila por tarea con su checkbox, su
+estado y el motivo si no puede correr, más "Solo lo que falta" / "Rehacer
+todo" y el botón `Ejecutar`, que está `disabled` mientras haya bloqueos.
+
+### Verificación
+
+- 93 pruebas (eran 72), todas verdes, sin avisos de `pyflakes`.
+- `tests/test_orquestador.py` (nuevo, 18 pruebas): el plan de cero, el de
+  todo al día, el de "solo falta el Resumen", los bloqueos por entrada
+  inicial y por dependencia, la propagación al rehacer algo del medio, el
+  aviso de lo que queda viejo, el orden topológico, y la corrida real (con
+  grupos falsos) mirando paralelismo, recurso compartido, agrupación de hojas
+  en una escritura y corte de la rama que falla.
+- `tests/test_control_corrida.py`: una corrida de `prorrata_retiros` +
+  `resumen` **después de borrar** `Consolidado_entradas.xlsx` y `cmg.xlsx`,
+  que pasa — es la prueba de que no se abren.
+- La ventana se probó de verdad (Xvfb): abre, dibuja los 17 pasos con sus
+  estados, el botón queda habilitado cuando se puede y bloqueado al destildar
+  una dependencia.
+- Corrida sintética completa antes/después: las hojas de `Pagos_BESS.xlsx`
+  dan exactamente los mismos valores.
+
+Lo que NO se probó: la corrida real contra las APIs y la unidad de red (no
+hay acceso desde acá), así que el paralelismo de las cuatro bajadas está
+probado con funciones falsas, no contra el Coordinador.
+
+---
+
+## 2026-09-15 — Un mes que todavia no existe: crear la carpeta con todo adentro
+
+Pedido del usuario: *"cuando yo elija un mes que no exista, me permita elegir
+y crear la carpeta con las carpetas dentro"*.
+
+**Cuando se ofrece.** Al escribir un período nuevo arriba, la ventana mira la
+carpeta que está abierta y pregunta solo cuando está segura: o no existe, o su
+nombre trae un AAMM (el del mes anterior) distinto del que se acaba de
+escribir. Si el nombre no tiene ningún AAMM no se puede saber y no se
+pregunta nada — mejor callarse que molestar en cada `FocusOut`. También está
+el botón fijo **Crear carpeta del caso**, para cuando se quiere hacer a mano.
+
+**Qué propone.** No se impone ninguna convención de nombre: se toma el nombre
+de la carpeta que se estaba usando y se le cambia SOLO el AAMM
+(`Balance BESS 2607` → `Balance BESS 2608`, `nombre_caso_sugerido()`); si no
+trae ninguno, se propone el AAMM pelado. La ventana muestra ese nombre y la
+carpeta donde crearla (por defecto, al lado de la del mes anterior) en dos
+campos editables, más la lista de lo que va a crear. Recién ahí se crea, y el
+caso queda abierto en ese período.
+
+**Qué crea** (`crear_estructura_caso()`, `SUBCARPETAS_CASO`): la carpeta base
+y `Medidas/`, `Auxiliares/`, `Ofertas/`, `Cmg/`, `FD y FMA/`, `Subastas/`,
+`Subastas/DB subastas/` y `Prorrata retiros/`. NO crea `Medidas/_trabajo`
+(son los andamios de la descarga, los arma `generar_medidas_sae`).
+
+Tres cuidados:
+
+- **Es idempotente y no toca nada**: crea solo las carpetas que faltan, nunca
+  borra ni mueve. Por eso sirve igual para completar un caso al que le falta
+  una subcarpeta — lo que ahora también se ofrece al elegir carpeta con
+  "Examinar" y al cambiar de período sin cambiar de carpeta.
+- **Un caso viejo con `SSCC_Desempeño/`** (el nombre anterior de `FD y FMA/`)
+  no recibe una `FD y FMA/` vacía al lado: se respeta la que ya está usando,
+  que es la misma regla de `resolver_rutas()`.
+- Si el nombre elegido ya existe como ARCHIVO, se dice y no se hace nada.
+
+### Verificación
+
+- 103 pruebas (eran 93), todas verdes, sin avisos de `pyflakes`.
+- `tests/test_caso_nuevo.py` (nuevo, 10 pruebas): la carpeta que nace con
+  todo adentro, la segunda corrida que no hace nada, completar solo lo que
+  falta sin tocar un archivo que ya estaba, el caso viejo que conserva su
+  carpeta de FD, el nombre ocupado por un archivo, y que
+  `revisar_estructura()` sobre el caso recién creado no marca NINGUNA carpeta
+  en falta (las que se crean son exactamente las que el programa busca).
+  Más el nombre sugerido: cambia el AAMM y conserva el resto, no se come un
+  número de 6 dígitos, y avisa si el período no es válido.
+- La ventana se probó de verdad (Xvfb): se escribe `2608` con un caso
+  `Balance BESS 2607` abierto, aparece la pregunta, la ventana propone
+  `Balance BESS 2608` en la carpeta de al lado, se crea con sus 7
+  subcarpetas + `DB subastas`, y la ventana queda abierta en ese caso con el
+  período guardado.
+
+---
+
 ## 2026-09-15 — El FD sale de `03 Desempeño para publicar` (unidad `F:`), y la ventana es toda links
 
 **Lo que pidió el usuario**, textual: que los FD se saquen de
@@ -3466,5 +3700,4 @@ sueltos siguen funcionando igual · `""`/`None`/`Potencia` → `mwh`.
 dos nuevas están en `tests/test_unidades_y_fd.py`: la tabla de canales con
 sufijo, y que la MISMA respuesta de la API entra x1000 con `MWhR` y tal cual
 con `kWhR` — que es la prueba de que ahora el cambio en el archivo se nota.
-
 ---

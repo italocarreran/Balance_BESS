@@ -321,22 +321,6 @@ class PagosBessEndToEndTest(unittest.TestCase):
               1.0, 1.0, 1.0, 1.0, 1.0, "si", 1.0, 1.0, 1]]
         ).set_axis(list(nucleo.NOMBRES_FD_CPF.values()), axis=1)
 
-        with pd.ExcelWriter(base / "Consolidado_entradas.xlsx") as w:
-            medidores.to_excel(w, sheet_name="Medidores", index=False)
-            subastas.to_excel(w, sheet_name="Subastas", index=False)
-            fd_csf.to_excel(w, sheet_name="FD", index=False, startcol=0)
-            fd_cpf.to_excel(
-                w, sheet_name="FD", index=False,
-                startcol=nucleo._COLUMNA_Q_INDICE,
-            )
-            escribir_tabla(
-                w, nucleo.TITULO_OFERTAS_POR_DIA, ofertas_por_dia, 0
-            )
-            escribir_tabla(
-                w, nucleo.TITULO_RESUMEN_VENTANA, resumen_ventana,
-                len(ofertas_por_dia.columns) + 2,
-            )
-
         # cmg.xlsx se lee POR POSICION (A:I): D=Barra, F=CMg,
         # H=Cuarto de Hora, I=CMg Promedio (ver construir_dic_cmg).
         cmg = pd.DataFrame({
@@ -351,6 +335,25 @@ class PagosBessEndToEndTest(unittest.TestCase):
             "I_CMgProm": [45.0] * cuartos,
         })
         cmg.to_excel(base / "Cmg" / "cmg.xlsx", index=False)
+
+        with pd.ExcelWriter(base / "Consolidado_entradas.xlsx") as w:
+            medidores.to_excel(w, sheet_name="Medidores", index=False)
+            # El CMg de los pagos sale de la hoja 'CMg' del
+            # consolidado, no de volver a abrir cmg.xlsx.
+            cmg.to_excel(w, sheet_name="CMg", index=False)
+            subastas.to_excel(w, sheet_name="Subastas", index=False)
+            fd_csf.to_excel(w, sheet_name="FD", index=False, startcol=0)
+            fd_cpf.to_excel(
+                w, sheet_name="FD", index=False,
+                startcol=nucleo._COLUMNA_Q_INDICE,
+            )
+            escribir_tabla(
+                w, nucleo.TITULO_OFERTAS_POR_DIA, ofertas_por_dia, 0
+            )
+            escribir_tabla(
+                w, nucleo.TITULO_RESUMEN_VENTANA, resumen_ventana,
+                len(ofertas_por_dia.columns) + 2,
+            )
 
         return base, medidores
 
@@ -388,6 +391,58 @@ class PagosBessEndToEndTest(unittest.TestCase):
             texto = "\n".join(str(l) for l in lineas)
             self.assertIn("Conciliando energia", texto)
 
+
+    def test_la_prorrata_y_el_resumen_no_abren_el_consolidado(self):
+        """
+        Pedido del usuario: "que no se abran planillas innecesarias".
+        PRORRATA_RETIROS y el Resumen salen de las dos hojas de
+        calculo ya escritas en Pagos_BESS.xlsx, asi que se recalculan
+        aunque el consolidado (y cmg.xlsx) ya no esten.
+        """
+
+        with tempfile.TemporaryDirectory() as carpeta:
+            base, _ = self.armar_caso(carpeta)
+
+            (base / "Prorrata retiros").mkdir(parents=True, exist_ok=True)
+            pd.DataFrame({
+                "Cuarto de Hora": [1, 1],
+                "Suministrador": ["EMPRESA UNO", "EMPRESA DOS"],
+                "Prorrata": [0.5, 0.5],
+            }).to_excel(
+                base / "Prorrata retiros" / "Prorrata_Retiros_2607_def.xlsx",
+                sheet_name="Prorrata 15min", index=False,
+            )
+
+            nucleo.generar_pagos_bess(
+                base, {"ecostos", "re545"}, registrar=lambda *a: None,
+                aamm="2607",
+            )
+
+            # Se van las entradas de las hojas de calculo: si la
+            # prorrata las abriera, la corrida se caeria.
+            (base / "Consolidado_entradas.xlsx").unlink()
+            (base / "Cmg" / "cmg.xlsx").unlink()
+
+            lineas = []
+            try:
+                nucleo.generar_pagos_bess(
+                    base, {"prorrata_retiros", "resumen"},
+                    registrar=lineas.append, aamm="2607",
+                )
+            except nucleo.ErrorEntrada as error:
+                self.fail(f"abrio algo que no necesitaba: {error}")
+
+            hojas = pd.ExcelFile(base / "Pagos_BESS.xlsx").sheet_names
+            self.assertIn(nucleo.HOJA_PRORRATA_RETIROS, hojas)
+
+            resumen = pd.read_excel(
+                base / "Pagos_BESS.xlsx", sheet_name=nucleo.HOJA_RESUMEN
+            )
+            self.assertIn("NETO", resumen.columns)
+
+            texto = "\n".join(str(l) for l in lineas)
+            self.assertNotIn("Leyendo hoja 'Medidores'", texto)
+            self.assertNotIn("Leyendo hoja 'Subastas'", texto)
 
     def test_las_dos_hojas_juntas_concilian(self):
         """

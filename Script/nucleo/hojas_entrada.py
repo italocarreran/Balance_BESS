@@ -359,6 +359,67 @@ def _ordenar_subastas_por_hora_mes(df):
     return df.reset_index(drop=True)
 
 
+# La hoja 'CMg' del consolidado: la copia ya ordenada de cmg.xlsx
+# (leer_cmg escribe sus 9 columnas A:I tal cual, con el encabezado
+# real del archivo).
+HOJA_CMG_CONSOLIDADO = "CMg"
+
+
+def leer_cmg_consolidado(ruta_consolidado, registrar=print, libro=None):
+    """
+    La hoja 'CMg' de Consolidado_entradas.xlsx, tal como la dejo
+    leer_cmg(): las 9 columnas A:I, ya ordenadas.
+
+    Mismo criterio que leer_fd_consolidado() y que 'Medidores' y
+    'Subastas': el consolidado es la UNICA foto de las entradas con la
+    que se calculan los pagos. Hasta ahora "Calculo E Costos" y
+    "Calculo RE545" volvian a abrir cmg.xlsx aunque el mismo dato ya
+    estuviera en el consolidado -- una planilla mas abierta en cada
+    corrida y, peor, la posibilidad de que el CMg de los pagos no
+    fuera el de la hoja 'CMg' (basta con dejar un cmg.xlsx mas nuevo
+    en la carpeta despues de generar el consolidado).
+
+    Las columnas NO se renombran (igual que leer_cmg): todo lo que las
+    consume -construir_dic_cmg()- las busca por POSICION.
+
+    libro: un pd.ExcelFile ya abierto del consolidado (ver
+    leer_ofertas_sscc_consolidado).
+    """
+
+    ruta_consolidado = Path(ruta_consolidado)
+    fuente = ruta_consolidado if libro is None else libro
+
+    try:
+        df = pd.read_excel(fuente, sheet_name=HOJA_CMG_CONSOLIDADO)
+    except ValueError as error:
+        raise ErrorEntrada(
+            f"{ruta_consolidado.name} no tiene la hoja "
+            f"'{HOJA_CMG_CONSOLIDADO}' todavia. Genera "
+            f"Consolidado_entradas.xlsx primero (tildando 'CMg')."
+        ) from error
+
+    if df.empty:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_CMG_CONSOLIDADO}' de "
+            f"{ruta_consolidado.name} esta vacia. Genera "
+            f"Consolidado_entradas.xlsx primero (tildando 'CMg')."
+        )
+
+    if df.shape[1] < 9:
+        raise ErrorEntrada(
+            f"La hoja '{HOJA_CMG_CONSOLIDADO}' de "
+            f"{ruta_consolidado.name} tiene {df.shape[1]} columnas y se "
+            f"esperaban al menos 9 (A:I). Regenerala con su boton "
+            f"'Actualizar'."
+        )
+
+    df = df.iloc[:, :9].copy()
+
+    registrar(f"  filas de CMg: {len(df):,}")
+
+    return df
+
+
 # La hoja 'FD' del consolidado: los dos bloques quedan separados por
 # columnas vacias (escritura.py escribe el CSF en A y el CPF en Q).
 HOJA_FD_CONSOLIDADO = "FD"
@@ -392,7 +453,7 @@ def _bloques_de_columnas(df):
     return bloques
 
 
-def leer_fd_consolidado(ruta_consolidado, registrar=print):
+def leer_fd_consolidado(ruta_consolidado, registrar=print, libro=None):
     """
     Los dos bloques de la hoja 'FD' de Consolidado_entradas.xlsx, tal
     como los dejo construir_fd(): (df_csf, df_cpf).
@@ -412,13 +473,17 @@ def leer_fd_consolidado(ruta_consolidado, registrar=print):
     estar REPETIDOS a proposito ("Hora Mes" sale dos veces en cada
     bloque), asi que se leen con header=None y se aplican con
     set_axis(), nunca con el header= de read_excel.
+
+    libro: un pd.ExcelFile ya abierto del consolidado (ver
+    leer_ofertas_sscc_consolidado).
     """
 
     ruta_consolidado = Path(ruta_consolidado)
+    fuente = ruta_consolidado if libro is None else libro
 
     try:
         crudo = pd.read_excel(
-            ruta_consolidado, sheet_name=HOJA_FD_CONSOLIDADO, header=None
+            fuente, sheet_name=HOJA_FD_CONSOLIDADO, header=None
         )
     except ValueError as error:
         raise ErrorEntrada(

@@ -4,6 +4,7 @@ Los dos procesos completos, de punta a punta.
 """
 
 import pandas as pd
+from pathlib import Path
 
 from .externos import desempeno_fd, ofertas_adj
 
@@ -26,13 +27,15 @@ from .fma import (
     TITULO_BLOQUE_FD, TITULO_BLOQUE_FMA_CPF, cargar_tablas_fma,
     construir_dic_bloque_diccionario,
 )
-from .hojas_entrada import construir_fd, leer_cmg, leer_fd_consolidado
+from .hojas_entrada import (
+    construir_fd, leer_cmg, leer_cmg_consolidado, leer_fd_consolidado,
+)
 from .lectura import (
     construir_homologacion, leer_centrales, leer_medidas_sae,
 )
 from .medidores import (
     completar_ofertas_en_medidores, construir_medidores,
-    construir_ofertas_sscc,
+    construir_ofertas_sscc, reponer_auxiliares_medidores,
 )
 from .ofertas_sscc import leer_ofertas_sscc_consolidado
 from .parametros import (
@@ -110,6 +113,17 @@ def generar_consolidado(
 
     rutas = resolver_rutas(carpeta_base)
 
+    # Centrales.xlsx lo necesitan dos secciones ("medidores" y
+    # "subastas"): se abre UNA vez por corrida, no una por seccion
+    # (pedido del usuario: "que no se abran planillas innecesarias").
+    centrales_leidas = {}
+
+    def leer_centrales_una_vez():
+        if "datos" not in centrales_leidas:
+            registrar(f"Leyendo {ARCHIVO_CENTRALES}...")
+            centrales_leidas["datos"] = leer_centrales(rutas["centrales"])
+        return centrales_leidas["datos"]
+
     df_medidores = None
     avisos, incidencias = [], []
     df_wxy = df_resumen_ventana = None
@@ -151,8 +165,7 @@ def generar_consolidado(
 
         registrar(f"Periodo indicado: {anio}-{mes:02d} ({aamm_val})")
 
-        registrar("Leyendo Centrales.xlsx...")
-        _, diccionario = leer_centrales(rutas["centrales"])
+        _, diccionario = leer_centrales_una_vez()
         mapa = construir_homologacion(diccionario)
         registrar(f"  homologaciones cargadas: {len(mapa):,}")
         avanzar(20)
@@ -234,9 +247,7 @@ def generar_consolidado(
             diccionario_centrales = None
 
             if rutas["centrales"].is_file():
-                resumen_bess, diccionario_centrales = leer_centrales(
-                    rutas["centrales"]
-                )
+                resumen_bess, diccionario_centrales = leer_centrales_una_vez()
                 mapa_propietarios = construir_mapa_propietario(resumen_bess)
                 dic_cpf = construir_dic_bloque_diccionario(
                     diccionario_centrales, TITULO_BLOQUE_FMA_CPF
@@ -347,6 +358,103 @@ def generar_consolidado(
     return rutas["salida"]
 
 
+def _leer_entradas_del_consolidado(ruta_salida, quiere_fd, registrar):
+    """
+    Las hojas de Consolidado_entradas.xlsx que necesitan las dos
+    hojas de calculo, leidas con UNA sola apertura del archivo.
+
+    Devuelve (df_medidores, df_wxy, df_resumen_ventana, df_cmg,
+    df_subastas, df_fd_csf, df_fd_cpf); los dos ultimos son None si
+    no se pidio "ecostos" (RE545 no usa FD).
+
+    Existe para dos cosas que pidio el usuario:
+      - que no se abran planillas innecesarias: un
+        pd.read_excel(ruta, sheet_name=...) por hoja volvia a parsear
+        el libro entero cinco veces, y es el archivo mas grande del
+        caso;
+      - que lo que ya esta en el consolidado salga de ahi: ninguna de
+        estas cinco hojas se vuelve a calcular ni se lee de su origen.
+    """
+
+    ruta_salida = Path(ruta_salida)
+
+    with pd.ExcelFile(ruta_salida) as libro:
+
+        registrar(f"Leyendo hoja 'Medidores' de {ruta_salida.name}...")
+
+        try:
+            df_medidores = pd.read_excel(libro, sheet_name="Medidores")
+        except ValueError as error:
+            raise ErrorEntrada(
+                f"{ruta_salida.name} no tiene la hoja 'Medidores' "
+                f"todavia. Genera Consolidado_entradas.xlsx primero "
+                f"(tildando 'Medidores + Ofertas SSCC')."
+            ) from error
+
+        if df_medidores.empty:
+            raise ErrorEntrada(
+                f"La hoja 'Medidores' de {ruta_salida.name} esta "
+                f"vacia. Genera Consolidado_entradas.xlsx primero "
+                f"(tildando 'Medidores + Ofertas SSCC')."
+            )
+
+        registrar(f"  filas: {len(df_medidores):,}")
+
+        # La hoja ya no trae Copia_Ventana ("Ciclo de Carga del mes"):
+        # es copia de Ventana y se repone aca, sin recalcular nada.
+        # Ver COLUMNAS_AUXILIARES_MEDIDORES.
+        df_medidores = reponer_auxiliares_medidores(df_medidores)
+
+        # Las tres columnas que salen de Ofertas SSCC (R, S, T) ya no
+        # viven en la hoja Medidores: se reconstruyen a partir de las
+        # dos tablas de la hoja "Ofertas SSCC". T es la que decide,
+        # fila por fila, si la energia va a "Calculo E Costos" o a
+        # "Calculo RE545", asi que sin esto no hay calculo posible.
+        registrar(f"Leyendo hoja 'Ofertas SSCC' de {ruta_salida.name}...")
+        df_wxy, df_resumen_ventana = leer_ofertas_sscc_consolidado(
+            ruta_salida, registrar=registrar, libro=libro
+        )
+
+        registrar(f"Leyendo hoja 'CMg' de {ruta_salida.name}...")
+        df_cmg = leer_cmg_consolidado(
+            ruta_salida, registrar=registrar, libro=libro
+        )
+
+        registrar(f"Leyendo hoja 'Subastas' de {ruta_salida.name}...")
+
+        try:
+            df_subastas = pd.read_excel(libro, sheet_name="Subastas")
+        except ValueError as error:
+            raise ErrorEntrada(
+                f"{ruta_salida.name} no tiene la hoja 'Subastas' "
+                f"todavia. Genera Consolidado_entradas.xlsx primero "
+                f"(tildando 'Subastas')."
+            ) from error
+
+        if df_subastas.empty:
+            raise ErrorEntrada(
+                f"La hoja 'Subastas' de {ruta_salida.name} esta "
+                f"vacia. Genera Consolidado_entradas.xlsx primero "
+                f"(tildando 'Subastas')."
+            )
+
+        df_fd_csf = df_fd_cpf = None
+
+        if quiere_fd:
+            # AM:AR salen de la hoja 'FD' del consolidado, no de
+            # releer el SSCC_Desempeño_*: el consolidado es la foto de
+            # las entradas con la que se calcula todo.
+            registrar(f"Leyendo hoja 'FD' de {ruta_salida.name}...")
+            df_fd_csf, df_fd_cpf = leer_fd_consolidado(
+                ruta_salida, registrar=registrar, libro=libro
+            )
+
+    return (
+        df_medidores, df_wxy, df_resumen_ventana, df_cmg, df_subastas,
+        df_fd_csf, df_fd_cpf,
+    )
+
+
 def generar_pagos_bess(
     carpeta_base, secciones_activas, registrar=print, progreso=None, aamm=None
 ):
@@ -401,115 +509,103 @@ def generar_pagos_bess(
 
     rutas = resolver_rutas(carpeta_base)
 
-    if not rutas["salida"].is_file():
-        raise ErrorEntrada(
-            f"No se encontro {rutas['salida']}. Primero hay que "
-            f"generar Consolidado_entradas.xlsx (boton 'Generar' de "
-            f"esa fila)."
+    # ----------------------------------------------------------
+    # LECTURA DE ENTRADAS: SOLO LO QUE PIDEN LAS SECCIONES TILDADAS
+    #
+    # Pedido del usuario ("que no se abran planillas innecesarias"):
+    # antes esta funcion abria Medidores, Ofertas SSCC, Subastas,
+    # Centrales.xlsx y cmg.xlsx SIEMPRE, incluso para recalcular solo
+    # PRORRATA_RETIROS o el Resumen -- dos hojas que no miran ninguna
+    # de esas entradas, sino las dos hojas de calculo ya escritas.
+    #
+    #   Medidores / Ofertas SSCC / Subastas / CMg  -> solo si hay que
+    #     recalcular alguna de las dos hojas de calculo;
+    #   Centrales.xlsx -> ademas para el Resumen (el Propietario de
+    #     cada central);
+    #   la hoja 'FD' del consolidado -> solo para E Costos (RE545 no
+    #     usa FD), como ya era.
+    # ----------------------------------------------------------
+
+    quiere_calculo = quiere_ecostos or quiere_re545
+
+    df_medidores = None
+    df_wxy = df_resumen_ventana = None
+    df_cmg = df_subastas = None
+    df_fd_csf = df_fd_cpf = None
+    resumen = diccionario = None
+    mapa_barra = dic_cmg = dic_factor = umbral_soc_minimo = None
+    dic_eficiencia = dic_capacidad = None
+    periodo_medidores = validar_aamm(aamm) if aamm else ""
+
+    if quiere_calculo:
+
+        # El consolidado solo hace falta para las dos hojas de
+        # calculo: PRORRATA_RETIROS y el Resumen salen de las hojas ya
+        # escritas en Pagos_BESS.xlsx, asi que ni se abre.
+        if not rutas["salida"].is_file():
+            raise ErrorEntrada(
+                f"No se encontro {rutas['salida']}. Primero hay que "
+                f"generar Consolidado_entradas.xlsx (boton 'Generar' de "
+                f"esa fila)."
+            )
+
+        (
+            df_medidores, df_wxy, df_resumen_ventana, df_cmg, df_subastas,
+            df_fd_csf, df_fd_cpf,
+        ) = _leer_entradas_del_consolidado(
+            rutas["salida"], quiere_ecostos, registrar
         )
 
-    registrar(f"Leyendo hoja 'Medidores' de {rutas['salida'].name}...")
-
-    try:
-        df_medidores = pd.read_excel(rutas["salida"], sheet_name="Medidores")
-    except ValueError as error:
-        raise ErrorEntrada(
-            f"{rutas['salida'].name} no tiene la hoja 'Medidores' "
-            f"todavia. Genera Consolidado_entradas.xlsx primero "
-            f"(tildando 'Medidores + Ofertas SSCC')."
-        ) from error
-
-    if df_medidores.empty:
-        raise ErrorEntrada(
-            f"La hoja 'Medidores' de {rutas['salida'].name} esta "
-            f"vacia. Genera Consolidado_entradas.xlsx primero "
-            f"(tildando 'Medidores + Ofertas SSCC')."
+        # La hoja Medidores de la que salen los dos calculos tiene que
+        # ser de un solo mes: si trae dos, el libro quedo mezclado
+        # entre corridas de periodos distintos y todo lo que siga paga
+        # mal.
+        meses = sorted(
+            int(m) for m in pd.to_numeric(
+                df_medidores["Mes"], errors="coerce"
+            ).dropna().unique()
         )
+        periodo_medidores = "-".join(f"{m:02d}" for m in meses)
 
-    registrar(f"  filas: {len(df_medidores):,}")
-
-    # Las tres columnas que salen de Ofertas SSCC (R, S, T) ya no
-    # viven en la hoja Medidores: se reconstruyen aca a partir de las
-    # dos tablas de la hoja "Ofertas SSCC" del consolidado. T es la que
-    # decide, fila por fila, si la energia va a "Calculo E Costos" o a
-    # "Calculo RE545", asi que sin esto no hay calculo posible.
-    registrar(f"Leyendo hoja 'Ofertas SSCC' de {rutas['salida'].name}...")
-    df_wxy, df_resumen_ventana = leer_ofertas_sscc_consolidado(
-        rutas["salida"], registrar=registrar
-    )
-
-    # La hoja Medidores de la que salen los dos calculos tiene que ser
-    # de un solo mes: si trae dos, el libro quedo mezclado entre
-    # corridas de periodos distintos y todo lo que siga paga mal.
-    meses = sorted(
-        int(m) for m in pd.to_numeric(
-            df_medidores["Mes"], errors="coerce"
-        ).dropna().unique()
-    )
-    periodo_medidores = "-".join(f"{m:02d}" for m in meses)
-
-    if len(meses) > 1:
-        anotar(registrar, Alerta(
-            "PER-001", CRITICA, "Traspaso",
-            f"La hoja 'Medidores' de {rutas['salida'].name} tiene "
-            f"{len(meses)} meses distintos ({periodo_medidores}): el "
-            f"libro quedo mezclado entre corridas de periodos distintos.",
-            valor_encontrado=periodo_medidores,
-            valor_esperado="un unico mes",
-            accion="corrida NO APROBADA",
-            archivo=rutas["salida"].name, hoja="Medidores",
-            origen_control="CATALOGO PER-001",
-        ))
+        if len(meses) > 1:
+            anotar(registrar, Alerta(
+                "PER-001", CRITICA, "Traspaso",
+                f"La hoja 'Medidores' de {rutas['salida'].name} tiene "
+                f"{len(meses)} meses distintos ({periodo_medidores}): el "
+                f"libro quedo mezclado entre corridas de periodos distintos.",
+                valor_encontrado=periodo_medidores,
+                valor_esperado="un unico mes",
+                accion="corrida NO APROBADA",
+                archivo=rutas["salida"].name, hoja="Medidores",
+                origen_control="CATALOGO PER-001",
+            ))
 
     avanzar(10)
 
-    if not rutas["centrales"].is_file():
-        raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
+    if quiere_calculo or quiere_resumen:
 
-    registrar("Leyendo Centrales.xlsx...")
-    resumen, diccionario = leer_centrales(rutas["centrales"])
+        if not rutas["centrales"].is_file():
+            raise ErrorEntrada(f"No se encontro {rutas['centrales']}")
 
-    df_medidores, _ = completar_ofertas_en_medidores(
-        df_medidores, df_wxy, df_resumen_ventana, diccionario,
-        registrar=registrar,
-    )
+        registrar(f"Leyendo {ARCHIVO_CENTRALES}...")
+        resumen, diccionario = leer_centrales(rutas["centrales"])
 
-    mapa_barra = construir_mapa_barra(resumen)
-    dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
+    if quiere_calculo:
 
-    # Eficiencia y Capacidad solo las usa RE545 (V y U/BC/BN).
-    dic_eficiencia = dic_capacidad = None
-    if quiere_re545:
-        dic_eficiencia = construir_dic_resumen_eficiencia(resumen)
-        dic_capacidad = construir_dic_resumen_capacidad(resumen)
-
-    avanzar(20)
-
-    if not rutas["cmg"].is_file():
-        raise ErrorEntrada(f"No se encontro {rutas['cmg']}")
-
-    registrar(f"Leyendo {ARCHIVO_CMG}...")
-    df_cmg = leer_cmg(rutas["cmg"], registrar=registrar)
-    dic_cmg = construir_dic_cmg(df_cmg)
-    avanzar(30)
-
-    registrar(f"Leyendo hoja 'Subastas' de {rutas['salida'].name}...")
-
-    try:
-        df_subastas = pd.read_excel(rutas["salida"], sheet_name="Subastas")
-    except ValueError as error:
-        raise ErrorEntrada(
-            f"{rutas['salida'].name} no tiene la hoja 'Subastas' "
-            f"todavia. Genera Consolidado_entradas.xlsx primero "
-            f"(tildando 'Subastas')."
-        ) from error
-
-    if df_subastas.empty:
-        raise ErrorEntrada(
-            f"La hoja 'Subastas' de {rutas['salida'].name} esta "
-            f"vacia. Genera Consolidado_entradas.xlsx primero "
-            f"(tildando 'Subastas')."
+        df_medidores, _ = completar_ofertas_en_medidores(
+            df_medidores, df_wxy, df_resumen_ventana, diccionario,
+            registrar=registrar,
         )
+
+        mapa_barra = construir_mapa_barra(resumen)
+        dic_factor, umbral_soc_minimo = construir_dic_resumen_factor(resumen)
+
+        # Eficiencia y Capacidad solo las usa RE545 (V y U/BC/BN).
+        if quiere_re545:
+            dic_eficiencia = construir_dic_resumen_eficiencia(resumen)
+            dic_capacidad = construir_dic_resumen_capacidad(resumen)
+
+        dic_cmg = construir_dic_cmg(df_cmg)
 
     avanzar(40)
 
@@ -539,17 +635,11 @@ def generar_pagos_bess(
         )
         avanzar(50)
 
-        # AM:AR salen de la hoja 'FD' del consolidado, no de releer el
-        # SSCC_Desempeño_*: el consolidado es la foto de las entradas
-        # con la que se calcula todo (igual que 'Medidores' y
-        # 'Subastas'). Si la hoja FD esta vieja, se regenera con su
-        # propio boton 'Actualizar'.
-        registrar(
-            f"Leyendo la hoja 'FD' de {rutas['salida'].name}..."
-        )
-        df_fd_csf, df_fd_cpf = leer_fd_consolidado(
-            rutas["salida"], registrar=registrar
-        )
+        # df_fd_csf/df_fd_cpf ya vienen leidos de la hoja 'FD' del
+        # consolidado (_leer_entradas_del_consolidado), no de releer
+        # el SSCC_Desempeño_*: el consolidado es la foto de las
+        # entradas con la que se calcula todo. Si la hoja FD esta
+        # vieja, se regenera con su propio boton 'Actualizar'.
         avanzar(60)
 
         registrar(
@@ -690,10 +780,11 @@ def generar_pagos_bess(
             "error": f"{type(error).__name__}: {error}",
         }
 
+    # cmg.xlsx ya no es una entrada de esta etapa: el CMg sale de la
+    # hoja 'CMg' del consolidado, que si esta en el manifiesto.
     manifiesto = construir_manifiesto([
         ("Consolidado_entradas", rutas["salida"]),
         ("Centrales", rutas["centrales"]),
-        ("cmg", rutas["cmg"]),
         ("Prorrata retiros", archivo_prorrata),
     ])
 
