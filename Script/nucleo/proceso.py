@@ -71,12 +71,13 @@ def generar_consolidado(
     carpeta_base, aamm, secciones_activas, registrar=print, progreso=None
 ):
     """
-    Genera/actualiza Consolidado_entradas.xlsx, recalculando solo las
+    Genera/actualiza las hojas de ENTRADA de la planilla de salida
+    (ARCHIVO_SALIDA), recalculando solo las
     hojas de las secciones pedidas (ids de SECCIONES_CONSOLIDADO) y
     preservando el resto tal cual estaba en el archivo existente (ver
     escribir_salida). Si el archivo no existe, se crea. La usan los
     botones "Actualizar" de las filas-hoja del diagrama (y el
-    "Actualizar todo" de la fila del archivo, que manda todas).
+    "Actualizar" de la fila del archivo, que manda todas).
 
     secciones_activas: iterable de ids de SECCIONES_CONSOLIDADO
     ("medidores", "ofertas_sscc", "cmg", "fd", "subastas") a
@@ -333,7 +334,7 @@ def generar_consolidado(
                 f"No hay de donde sacar las subastas del periodo "
                 f"{aamm_val}: {rutas['db_subastas_dir']} no tiene "
                 f"ningun Access del periodo. Traelos con el boton "
-                f"'Traer subastas'."
+                f"'Traer' de esa fila."
             )
 
     avanzar(92)
@@ -353,6 +354,7 @@ def generar_consolidado(
         ruta_existente=rutas["salida"],
         hojas_regenerar=hojas_regenerar,
         registrar=registrar,
+        ruta_control=rutas["control"],
     )
 
     avanzar(100)
@@ -363,7 +365,7 @@ def generar_consolidado(
 
 def _leer_entradas_del_consolidado(ruta_salida, quiere_fd, registrar):
     """
-    Las hojas de Consolidado_entradas.xlsx que necesitan las dos
+    Las hojas de entrada de la planilla que necesitan las dos
     hojas de calculo, leidas con UNA sola apertura del archivo.
 
     Devuelve (df_medidores, df_wxy, df_resumen_ventana, df_cmg,
@@ -390,14 +392,14 @@ def _leer_entradas_del_consolidado(ruta_salida, quiere_fd, registrar):
         except ValueError as error:
             raise ErrorEntrada(
                 f"{ruta_salida.name} no tiene la hoja 'Medidores' "
-                f"todavia. Genera Consolidado_entradas.xlsx primero "
+                f"todavia. Genera esa hoja primero "
                 f"(tildando 'Medidores + Ofertas SSCC')."
             ) from error
 
         if df_medidores.empty:
             raise ErrorEntrada(
                 f"La hoja 'Medidores' de {ruta_salida.name} esta "
-                f"vacia. Genera Consolidado_entradas.xlsx primero "
+                f"vacia. Genera esa hoja primero "
                 f"(tildando 'Medidores + Ofertas SSCC')."
             )
 
@@ -430,14 +432,14 @@ def _leer_entradas_del_consolidado(ruta_salida, quiere_fd, registrar):
         except ValueError as error:
             raise ErrorEntrada(
                 f"{ruta_salida.name} no tiene la hoja 'Subastas' "
-                f"todavia. Genera Consolidado_entradas.xlsx primero "
+                f"todavia. Genera esa hoja primero "
                 f"(tildando 'Subastas')."
             ) from error
 
         if df_subastas.empty:
             raise ErrorEntrada(
                 f"La hoja 'Subastas' de {ruta_salida.name} esta "
-                f"vacia. Genera Consolidado_entradas.xlsx primero "
+                f"vacia. Genera esa hoja primero "
                 f"(tildando 'Subastas')."
             )
 
@@ -471,7 +473,7 @@ def generar_pagos_bess(
     las filas-hoja del diagrama.
 
     No recalcula Medidores ni Subastas: los lee tal cual estan en
-    Consolidado_entradas.xlsx, que debe generarse primero con su
+    la misma planilla, que debe generarse primero con su
     propio boton "Actualizar". Centrales.xlsx y cmg.xlsx si se leen/
     recalculan frescos. El archivo SSCC_Desempeño_* solo se exige si
     se pide "ecostos" -- "re545" no usa FD.
@@ -549,8 +551,9 @@ def generar_pagos_bess(
         if not rutas["salida"].is_file():
             raise ErrorEntrada(
                 f"No se encontro {rutas['salida']}. Primero hay que "
-                f"generar Consolidado_entradas.xlsx (boton 'Generar' de "
-                f"esa fila)."
+                f"generar las hojas de entrada de la planilla "
+                f"(Medidores, Ofertas SSCC, CMg, FD y Subastas) con sus "
+                f"botones 'Actualizar'."
             )
 
         (
@@ -707,15 +710,16 @@ def generar_pagos_bess(
     if quiere_prorrata or quiere_resumen or quiere_compensacion:
         # Estas hojas tienen botones independientes. Si las hojas de calculo
         # no se recalcularon en esta misma accion, se consumen las versiones
-        # ya guardadas en Pagos_BESS.xlsx.
+        # ya guardadas en la planilla.
         def calculo_existente(nombre):
             try:
                 return pd.read_excel(
-                    rutas["salida_pagos"], sheet_name=nombre, header=1
+                    rutas["salida"], sheet_name=nombre, header=1
                 )
             except (FileNotFoundError, ValueError) as error:
                 raise ErrorEntrada(
-                    f"Primero calcula la hoja '{nombre}' de Pagos_BESS.xlsx."
+                    f"Primero calcula la hoja '{nombre}' de "
+                    f"{rutas['salida'].name}."
                 ) from error
 
         df_ecostos_asignacion = (
@@ -779,7 +783,7 @@ def generar_pagos_bess(
                 registrar=registrar,
             )
 
-    registrar(f"Escribiendo {rutas['salida_pagos'].name}...")
+    registrar(f"Escribiendo {rutas['salida'].name}...")
     # TRA: la energia de Medidores tiene que repartirse entera entre
     # las dos hojas. Va antes de escribir: si no cuadra, la corrida
     # queda NO APROBADA y eso se escribe en el libro.
@@ -810,7 +814,7 @@ def generar_pagos_bess(
     # cmg.xlsx ya no es una entrada de esta etapa: el CMg sale de la
     # hoja 'CMg' del consolidado, que si esta en el manifiesto.
     manifiesto = construir_manifiesto([
-        ("Consolidado_entradas", rutas["salida"]),
+        ("Planilla de entradas", rutas["salida"]),
         ("Centrales", rutas["centrales"]),
         ("Prorrata retiros", archivo_prorrata),
     ])
@@ -818,7 +822,7 @@ def generar_pagos_bess(
     # Todo por nombre: son once tablas y el orden posicional ya se
     # presto una vez a confusion.
     escribir_pagos_bess(
-        rutas["salida_pagos"],
+        rutas["salida"],
         df_ecostos=df_ecostos,
         df_re545=df_re545,
         df_resumen_re545=df_resumen_re545,
@@ -829,17 +833,18 @@ def generar_pagos_bess(
         df_compensacion_cuarto=df_compensacion_cuarto,
         df_pagos_suministrador=df_pagos_suministrador,
         df_resumen=df_resumen,
-        ruta_existente=rutas["salida_pagos"],
+        ruta_existente=rutas["salida"],
         hojas_regenerar=hojas_regenerar,
         registrar=registrar,
         registro=registro,
         manifiesto=manifiesto,
         conciliacion=conciliacion,
         periodo=periodo_medidores,
+        ruta_control=rutas["control"],
     )
 
     avanzar(100)
-    registrar(f"Listo: {rutas['salida_pagos']}")
+    registrar(f"Listo: {rutas['salida']}")
 
     for linea in registro.resumen(
         periodo=periodo_medidores,
@@ -847,4 +852,4 @@ def generar_pagos_bess(
     ).split("\n"):
         registrar(linea)
 
-    return rutas["salida_pagos"]
+    return rutas["salida"]

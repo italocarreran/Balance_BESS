@@ -367,7 +367,7 @@ HOJA_CMG_CONSOLIDADO = "CMg"
 
 def leer_cmg_consolidado(ruta_consolidado, registrar=print, libro=None):
     """
-    La hoja 'CMg' de Consolidado_entradas.xlsx, tal como la dejo
+    La hoja 'CMg' de la planilla de salida, tal como la dejo
     leer_cmg(): las 9 columnas A:I, ya ordenadas.
 
     Mismo criterio que leer_fd_consolidado() y que 'Medidores' y
@@ -395,14 +395,14 @@ def leer_cmg_consolidado(ruta_consolidado, registrar=print, libro=None):
         raise ErrorEntrada(
             f"{ruta_consolidado.name} no tiene la hoja "
             f"'{HOJA_CMG_CONSOLIDADO}' todavia. Genera "
-            f"Consolidado_entradas.xlsx primero (tildando 'CMg')."
+            f"esa hoja primero (tildando 'CMg')."
         ) from error
 
     if df.empty:
         raise ErrorEntrada(
             f"La hoja '{HOJA_CMG_CONSOLIDADO}' de "
             f"{ruta_consolidado.name} esta vacia. Genera "
-            f"Consolidado_entradas.xlsx primero (tildando 'CMg')."
+            f"esa hoja primero (tildando 'CMg')."
         )
 
     if df.shape[1] < 9:
@@ -455,7 +455,7 @@ def _bloques_de_columnas(df):
 
 def leer_fd_consolidado(ruta_consolidado, registrar=print, libro=None):
     """
-    Los dos bloques de la hoja 'FD' de Consolidado_entradas.xlsx, tal
+    Los dos bloques de la hoja 'FD' de la planilla de salida, tal
     como los dejo construir_fd(): (df_csf, df_cpf).
 
     Por que existe esta funcion (pedido del usuario: "Ecostos: se leen
@@ -489,7 +489,7 @@ def leer_fd_consolidado(ruta_consolidado, registrar=print, libro=None):
         raise ErrorEntrada(
             f"{ruta_consolidado.name} no tiene la hoja "
             f"'{HOJA_FD_CONSOLIDADO}' todavia. Genera "
-            f"Consolidado_entradas.xlsx primero (tildando 'FD')."
+            f"esa hoja primero (tildando 'FD')."
         ) from error
 
     bloques = [

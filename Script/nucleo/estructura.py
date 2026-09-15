@@ -11,13 +11,14 @@ from .externos import (
     Homologacion, extrae_cmg, fma_subastas, ofertas_adj,
 )
 from .parametros import (
-    ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
-    ARCHIVO_SALIDA_PAGOS, CARPETA_AUXILIARES, CARPETA_CMG,
+    ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_CONTROL, ARCHIVO_MEDIDAS_SAE,
+    ARCHIVO_SALIDA, CARPETA_AUXILIARES, CARPETA_CMG,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_MEDIDAS,
     CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS, CARPETA_SUBASTAS,
-    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
-    HOJA_COMPENSACION_CENTRAL, HOJA_DICCIONARIO,
-    HOJA_PRORRATA_RETIROS, HOJA_RESUMEN, HOJA_RESUMEN_BESS,
+    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_CMG,
+    HOJA_COMPENSACION_CENTRAL, HOJA_DICCIONARIO, HOJA_FD,
+    HOJA_MEDIDORES, HOJA_OFERTAS_SSCC, HOJA_PRORRATA_RETIROS,
+    HOJA_RESUMEN, HOJA_RESUMEN_BESS, HOJA_SUBASTAS, ORDEN_HOJAS_SALIDA,
 )
 from .origenes import origen as origen_de
 from .prorrata_retiros import buscar_archivo_prorrata
@@ -171,16 +172,20 @@ def hojas_con_datos(ruta):
     return _con_cache(ruta, "hojas_con_datos", _leer)
 
 
-def _filas_de_hojas(ruta_archivo, secciones, prefijo_id, nivel):
+def _filas_de_hojas(ruta_archivo, secciones, nivel):
     """
-    Una fila por hoja de una de las dos salidas
-    (SECCIONES_CONSOLIDADO / SECCIONES_PAGOS): 'ok' si la hoja ya
+    Una fila por hoja de la planilla de salida: 'ok' si la hoja ya
     existe en el archivo, 'pendiente' si todavia no se genero.
 
-    Las dos salidas se desglosan como el resto del arbol -el archivo
-    como "carpeta", sus hojas adentro- y cada hoja trae su propio
-    boton "Actualizar" en la ventana: por eso no hace falta ninguna
-    ventana intermedia para elegir que recalcular.
+    secciones: SECCIONES_SALIDA, o sea las dos mitades (entradas y
+    calculo) ya en el orden en que quedan las hojas del libro -de fin
+    a inicio-, cada una con el prefijo de id que dice que boton la
+    genera ("consolidado" / "pagos").
+
+    La salida se desglosa como el resto del arbol -el archivo como
+    "carpeta", sus hojas adentro- y cada hoja trae su propio boton en
+    la ventana: por eso no hace falta ninguna ventana intermedia para
+    elegir que recalcular.
     """
 
     hojas = hojas_con_datos(ruta_archivo)
@@ -191,7 +196,7 @@ def _filas_de_hojas(ruta_archivo, secciones, prefijo_id, nivel):
 
     filas = []
 
-    for id_seccion, etiqueta, _, nombres_hoja in secciones:
+    for prefijo_id, (id_seccion, etiqueta, _, nombres_hoja) in secciones:
 
         presentes = [
             nombre for nombre in nombres_hoja
@@ -439,7 +444,7 @@ def revisar_estructura(carpeta_base, aamm=None):
 
     # ---- Cmg/ -----------------------------------------------------
     # Dos archivos, en orden de uso: primero se trae el CSV 15-minutal
-    # de la unidad de red ("Traer cmg_15min"), y con ese CSV ya al
+    # de la unidad de red (boton "Traer"), y con ese CSV ya al
     # lado se genera cmg.xlsx ("Generar").
     agregar(
         "cmg_dir", f"{CARPETA_CMG}/", 0, rutas["cmg_dir"].is_dir(),
@@ -518,7 +523,7 @@ def revisar_estructura(carpeta_base, aamm=None):
             _fila(
                 "sscc", "Archivo SSCC_Desempeño_*", 1, "falta",
                 f"no esta en {CARPETA_FD_FMA}/: se baja del DCO con el "
-                f"boton 'Traer FD' de la carpeta",
+                f"boton 'Traer' de esta fila",
                 ruta=rutas["sscc_desempeno_dir"], es_carpeta=True,
                 origen="fd",
             )
@@ -653,41 +658,48 @@ def revisar_estructura(carpeta_base, aamm=None):
             ruta=rutas["prorrata_retiros_dir"], es_carpeta=True,
         ))
 
-    # ---- Salidas --------------------------------------------------
-    # Las dos salidas se desglosan igual que Centrales.xlsx: el
-    # archivo y, adentro, una fila por hoja. Cada hoja se actualiza
-    # por separado desde su propio boton; si el archivo todavia no
-    # existe, se crea al actualizar la primera hoja.
-    for id_salida, nombre, ruta, secciones in (
-        ("consolidado", ARCHIVO_SALIDA, rutas["salida"], SECCIONES_CONSOLIDADO),
-        (
-            "pagos", ARCHIVO_SALIDA_PAGOS, rutas["salida_pagos"],
-            SECCIONES_PAGOS,
-        ),
-    ):
-        filas_hojas = _filas_de_hojas(ruta, secciones, id_salida, 1)
+    # ---- Salida ---------------------------------------------------
+    # UNA sola planilla (el usuario pidio combinar las dos que habia),
+    # desglosada igual que Centrales.xlsx: el archivo y, adentro, una
+    # fila por hoja, en el mismo orden en que quedan las hojas del
+    # libro -de fin a inicio: el Resumen arriba y las entradas abajo-.
+    # Cada hoja se actualiza por separado desde su propio boton; si el
+    # archivo todavia no existe, se crea al actualizar la primera hoja.
+    filas_hojas = _filas_de_hojas(rutas["salida"], SECCIONES_SALIDA, 1)
 
-        # El archivo esta "ok" solo si TODAS sus hojas tienen datos:
-        # que el .xlsx exista no dice nada (se crea entero, con las
-        # hojas que todavia no se generaron vacias).
-        completas = all(fila["estado"] == "ok" for fila in filas_hojas)
+    # El archivo esta "ok" solo si TODAS sus hojas tienen datos: que el
+    # .xlsx exista no dice nada (se crea entero, con las hojas que
+    # todavia no se generaron vacias).
+    completas = all(fila["estado"] == "ok" for fila in filas_hojas)
 
-        if not ruta.is_file():
-            detalle = "salida: se crea al actualizar la primera hoja ->"
-        elif completas:
-            detalle = "salida: se actualiza hoja por hoja ->"
-        else:
-            detalle = "salida: le faltan hojas por generar ->"
+    if not rutas["salida"].is_file():
+        detalle_salida = "salida: se crea al actualizar la primera hoja ->"
+    elif completas:
+        detalle_salida = "salida: se actualiza hoja por hoja ->"
+    else:
+        detalle_salida = "salida: le faltan hojas por generar ->"
 
-        filas.append(
-            _fila(
-                id_salida, nombre, 0,
-                "ok" if (ruta.is_file() and completas) else "pendiente",
-                detalle,
-                ruta=ruta,
-            )
+    filas.append(
+        _fila(
+            "salida", ARCHIVO_SALIDA, 0,
+            "ok" if (rutas["salida"].is_file() and completas) else "pendiente",
+            detalle_salida,
+            ruta=rutas["salida"],
         )
-        filas.extend(filas_hojas)
+    )
+    filas.extend(filas_hojas)
+
+    # El control de la corrida (Alertas, Ejecucion, Log) vive en su
+    # propio archivo, al lado de la planilla: no se genera solo, lo
+    # deja cada corrida.
+    filas.append(
+        _fila(
+            "control", ARCHIVO_CONTROL, 0,
+            "ok" if rutas["control"].is_file() else "pendiente",
+            "control de la corrida: Alertas, Ejecucion y Log",
+            ruta=rutas["control"],
+        )
+    )
 
     return rutas, filas
 
@@ -695,12 +707,12 @@ def revisar_estructura(carpeta_base, aamm=None):
 # ============================================================
 # PROCESO COMPLETO
 #
-# Dos salidas independientes:
+# UNA salida (ARCHIVO_SALIDA), escrita por dos mitades independientes:
 #
-#   - generar_consolidado(): Consolidado_entradas.xlsx.
-#   - generar_pagos_bess(): Pagos_BESS.xlsx -- lee Medidores y
-#     Subastas de Consolidado_entradas.xlsx ya generado, no los
-#     recalcula.
+#   - generar_consolidado(): las hojas de ENTRADA (Medidores, Ofertas
+#     SSCC, CMg, FD, Subastas).
+#   - generar_pagos_bess(): las hojas de CALCULO -- lee Medidores y
+#     Subastas ya escritas en la misma planilla, no las recalcula.
 #
 # Las dos reciben un set de "secciones activas": lo que entra se
 # recalcula y lo que queda afuera se preserva tal cual estaba en el
@@ -727,7 +739,7 @@ SECCIONES_CONSOLIDADO = (
         f"Usa {ARCHIVO_MEDIDAS_SAE}, el SoC del periodo y "
         f"{ARCHIVO_CENTRALES}. Ya NO usa OfertasSSCC: las columnas "
         f"que salian de ahi viven en la hoja 'Ofertas SSCC'.",
-        ("Medidores",),
+        (HOJA_MEDIDORES,),
     ),
     (
         "ofertas_sscc",
@@ -736,20 +748,20 @@ SECCIONES_CONSOLIDADO = (
         f"'Medidores' (centrales y ventanas). Guarda las dos tablas de "
         f"las que salen las columnas R, S y T de la planilla original: "
         f"'Medidores' ya no las trae ni depende de este archivo.",
-        ("Ofertas SSCC",),
+        (HOJA_OFERTAS_SSCC,),
     ),
     (
         "cmg",
         "CMg",
         f"Usa {ARCHIVO_CMG}.",
-        ("CMg",),
+        (HOJA_CMG,),
     ),
     (
         "fd",
         "FD",
         f"Usa el archivo {CARPETA_FD_FMA}/ (hojas CPF/CSF "
         f"Horario).",
-        ("FD",),
+        (HOJA_FD,),
     ),
     (
         "subastas",
@@ -759,7 +771,7 @@ SECCIONES_CONSOLIDADO = (
         f"(fma_cpf/fma_csf/fma_cft) y el SSCC_Desempeño_* (columna FD y "
         f"Vector de Participacion CSF), mas {ARCHIVO_CENTRALES} "
         f"(Propietario + nomenclaturas).",
-        ("Subastas",),
+        (HOJA_SUBASTAS,),
     ),
 )
 
@@ -769,7 +781,7 @@ SECCIONES_PAGOS = (
         "ecostos",
         "Calculo E Costos",
         f"Usa las hojas 'Medidores', 'Ofertas SSCC', 'FD' y 'Subastas' "
-        f"de {ARCHIVO_SALIDA}, mas {ARCHIVO_CENTRALES} y "
+        f"de esta misma planilla, mas {ARCHIVO_CENTRALES} y "
         f"{ARCHIVO_CMG}. El FD homologado de AM:AR sale de la hoja "
         f"'FD' del consolidado, no de releer el SSCC_Desempeño_*.",
         (HOJA_CALCULO_ECOSTOS,),
@@ -778,7 +790,7 @@ SECCIONES_PAGOS = (
         "re545",
         "Calculo RE545",
         f"Usa las hojas 'Medidores', 'Ofertas SSCC' y 'Subastas' de "
-        f"{ARCHIVO_SALIDA}, mas {ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- "
+        f"esta misma planilla, mas {ARCHIVO_CENTRALES} y {ARCHIVO_CMG} -- "
         f"no necesita el FD.",
         (HOJA_CALCULO_RE545,),
     ),
@@ -802,4 +814,35 @@ SECCIONES_PAGOS = (
         "Consolida por empresa cuanto RECIBE, PAGA y su NETO.",
         (HOJA_RESUMEN,),
     ),
+)
+
+
+# Las hojas de la planilla, en el orden en que quedan en el libro (de
+# FIN A INICIO: el Resumen primero, las entradas al final) y con el
+# prefijo de id que dice quien las genera: "consolidado" para las
+# entradas, "pagos" para el calculo. Es lo que recorre el diagrama de
+# la ventana, y sale de dar vuelta las dos tuplas de arriba -- que
+# estan escritas en el orden en que se CALCULAN, que es justo el
+# inverso del orden en que se LEEN.
+SECCIONES_SALIDA = (
+    tuple(("pagos", seccion) for seccion in reversed(SECCIONES_PAGOS))
+    + tuple(
+        ("consolidado", seccion)
+        for seccion in reversed(SECCIONES_CONSOLIDADO)
+    )
+)
+
+# Control de coherencia: el orden de las filas del diagrama y el de
+# las hojas del libro tienen que ser el mismo. Si alguien agrega una
+# hoja en un lado y se olvida del otro, revienta al importar, no en la
+# ventana del usuario.
+_HOJAS_DE_LAS_SECCIONES = tuple(
+    hoja
+    for _, (_, _, _, hojas) in SECCIONES_SALIDA
+    for hoja in hojas
+)
+
+assert _HOJAS_DE_LAS_SECCIONES == ORDEN_HOJAS_SALIDA, (
+    "El orden de las hojas del diagrama no coincide con "
+    "ORDEN_HOJAS_SALIDA: " + str(_HOJAS_DE_LAS_SECCIONES)
 )

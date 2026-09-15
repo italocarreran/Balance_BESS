@@ -77,27 +77,33 @@ python Balance_BESS.py
    el botón **Ejecutar todo**, abajo de todo — ver más abajo):
    - `Medidas/Medidas_SAE.xlsx` → **Actualizar** (baja el mes completo de las
      dos APIs del Coordinador y arma el archivo).
-   - `Cmg/cmg<AAMM>_def_15minutal.csv` → **Traer cmg_15min** (lo baja de la
+   - `Cmg/cmg<AAMM>_def_15minutal.csv` → **Traer** (lo baja de la
      unidad de red).
    - `Cmg/cmg.xlsx` → **Generar** (lo arma con ese CSV).
-   - `Consolidado_entradas.xlsx` y `Pagos_BESS.xlsx` se desglosan por hoja,
-     igual que `Centrales.xlsx`, y cada hoja tiene su botón **Actualizar**
-     (el de la fila del archivo, **Actualizar todo**, las hace todas). Lo
-     que no se actualiza se conserva tal cual estaba; si el archivo todavía
-     no existe, se crea.
-   - `COMPENSACION_CENTRAL` tiene **Resumir compensación**: la compensación
+   - `Balance_BESS.xlsx` —la única planilla de salida— se desglosa por hoja,
+     igual que `Centrales.xlsx`, y cada hoja tiene su botón (**Actualizar**
+     las de entrada, **Calcular** las de cálculo). El de la fila del
+     archivo, **Actualizar**, las hace todas: primero las entradas y
+     después el cálculo. Lo que no se actualiza se conserva tal cual
+     estaba; si el archivo todavía no existe, se crea.
+   - `COMPENSACION_CENTRAL` tiene **Resumir**: la compensación
      de `Calculo E Costos` (por central y `Ciclo de Carga del mes`) y la de
      `Calculo RE545` (por central y `Ventana de valorizacion`), más el total
      que recibe cada empresa según el `Propietario` de `Resumen BESS`.
-   - `PRORRATA_RETIROS` tiene **Traer prorrata**: consume `Prorrata 15min`
+   - `PRORRATA_RETIROS` tiene **Traer**: consume `Prorrata 15min`
      del Excel de `Prorrata retiros/` (A: cuarto de hora, B: suministrador,
      C: prorrata) y reparte, cuarto de hora por cuarto de hora, el monto a
      compensar de `Calculo E Costos` + `Calculo RE545` entre las empresas
      que retiraron en ese mismo cuarto, según su peso. La hoja queda con
      tres cuadros: el monto de cada cuarto, el reparto de ese monto entre
      las empresas, y el total del mes de cada empresa. `Resumen` tiene
-     **Asignar pagos** y muestra cuánto `RECIBE`, `PAGA` y el `NETO` de
+     **Asignar** y muestra cuánto `RECIBE`, `PAGA` y el `NETO` de
      cada empresa.
+
+   Los botones dicen **solo el verbo** (`Traer`, `Generar`, `Resumir`,
+   `Actualizar`, `Calcular`, `Asignar`): de qué se trata ya lo dice la fila
+   en la que está el botón. Todos miden lo mismo y quedan en una columna
+   recta, igual que la de `Estado`.
 
 ### El botón "Ejecutar todo"
 
@@ -117,9 +123,9 @@ hay que hacerlo, con su estado (`se genera` / `se rehace` / `al dia` /
   aparece.
 - **Respeta las dependencias y aprovecha lo que puede ir en paralelo**: las
   cuatro bajadas (medidas SAE, CSV de CMg, FD, subastas) y la generación de
-  FMA corren juntas; `cmg.xlsx` espera su CSV; el consolidado espera a todo
-  eso y se escribe **una sola vez** con todas sus hojas; `Pagos_BESS.xlsx`
-  espera al consolidado. Dos pasos que escriben en el mismo lugar nunca
+  FMA corren juntas; `cmg.xlsx` espera su CSV; las hojas de entrada esperan
+  a todo eso y se escriben **una sola vez**; las de cálculo esperan a las de
+  entrada. Dos pasos que escriben en el mismo lugar nunca
   corren a la vez, y si un paso falla no se corre nada que dependa de él.
 
 El grafo (quién depende de quién), el plan y la corrida viven en
@@ -137,7 +143,9 @@ cálculo conserva el comportamiento de la planilla —algunos faltantes quedan
 vacíos y otros se rellenan con cero—, pero ahora informa la causa, las
 centrales/claves afectadas y el impacto antes de continuar.
 
-`Pagos_BESS.xlsx` sale además con dos hojas de control:
+Cada corrida deja además, **en una planilla aparte** (`Control_corrida.xlsx`,
+al lado de `Balance_BESS.xlsx`), las hojas de control — a pedido del usuario,
+para que no ensucien la planilla de trabajo:
 
 - **`Alertas`** — una fila por alerta, con su id, severidad, etapa, central y
   clave. Es el detalle **completo**: la pantalla muestra un resumen con hasta 15
@@ -147,6 +155,8 @@ centrales/claves afectadas y el impacto antes de continuar.
   en esta pasada, la conciliación de energía (`Medidores = Calculo E Costos +
   Calculo RE545`) con su tolerancia, y el manifiesto de las entradas: nombre,
   tamaño, fecha y `sha256` de cada archivo que alimentó el cálculo.
+- **`Log`** — los avisos e incidencias de la generación de las hojas de
+  entrada (antes era una hoja más de `Consolidado_entradas.xlsx`).
 
 El catálogo de controles, con lo que está implementado y lo que falta, está en
 `docs/Alertas_y_Controles_Traspaso_Python_BESS.md`.
@@ -203,20 +213,26 @@ Ver `MAPA.md` para qué hace cada módulo.
 ├── Ofertas/
 │   └── <algún archivo Excel cuyo nombre contenga "OfertasSSCC">
 ├── Cmg/
-│   ├── cmg<AAMM>_def_15minutal.csv   (botón "Traer cmg_15min")
+│   ├── cmg<AAMM>_def_15minutal.csv   (botón "Traer")
 │   └── cmg.xlsx                      (botón "Generar")
 ├── SSCC_Desempeño/
 │   └── <algún archivo Excel cuyo nombre empiece con "SSCC_Desempeño_">
 ├── Subastas/
-│   └── DB subastas/                  (botón "Traer subastas")
+│   └── DB subastas/                  (botón "Traer")
 │       └── OfertasSSCCAdj*.accdb     <- el origen real de las subastas
 ├── Prorrata retiros/
 │   └── Prorrata_Retiros_<AAMM>_pre.xlsx o _def.xlsx
 │       (hoja "Prorrata 15min")
-├── Consolidado_entradas.xlsx    <- salida (una fila por hoja en la
-│                                   ventana, cada una con "Actualizar")
-└── Pagos_BESS.xlsx              <- incluye COMPENSACION_CENTRAL,
-                                    PRORRATA_RETIROS y Resumen
+├── Balance_BESS.xlsx            <- LA salida: entradas y cálculo en un
+│                                   solo libro, ordenado de fin a
+│                                   inicio (Resumen, PRORRATA_RETIROS,
+│                                   COMPENSACION_CENTRAL, Calculo RE545,
+│                                   Calculo E Costos, Subastas, FD, CMg,
+│                                   Ofertas SSCC, Medidores). Una fila
+│                                   por hoja en la ventana, cada una con
+│                                   su botón
+└── Control_corrida.xlsx         <- Ejecucion, Alertas y Log de la
+                                    última corrida
 ```
 
 Ningún archivo (salvo `cmg.xlsx`) sigue un nombre fijo:
@@ -322,7 +338,26 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
 
 ## Estado actual
 
-`Consolidado_entradas.xlsx` (antes `Hoja_Medidas.xlsx`) tiene seis hojas:
+`Balance_BESS.xlsx` es **la** planilla de salida: antes eran dos
+(`Consolidado_entradas.xlsx` y `Pagos_BESS.xlsx`) y el usuario pidió
+combinarlas. Sus hojas quedan ordenadas **de fin a inicio** — arriba el
+`Resumen`, que es lo primero que se mira, y abajo las entradas de las que
+sale todo:
+
+```
+Resumen | PRORRATA_RETIROS | COMPENSACION_CENTRAL | Calculo RE545 |
+Calculo E Costos | Subastas | FD | CMg | Ofertas SSCC | Medidores
+```
+
+Las hojas de control (`Ejecucion`, `Alertas`, `Log`) viven aparte, en
+`Control_corrida.xlsx`.
+
+Las dos mitades se siguen escribiendo por separado (cada hoja tiene su
+botón), y la que escribe **preserva** las hojas de la otra: actualizar
+`Medidores` no toca el `Resumen`, y calcular el `Resumen` no toca
+`Medidores`.
+
+### Las hojas de entrada
 
 - `Medidores` — 12 columnas: A:J de entrada más `Ventana` e `Indicador_SoC`
   calculadas. **Sin los auxiliares** de la planilla original (las cuatro
@@ -353,12 +388,12 @@ resultado, siempre que la carpeta base seleccionada sea la misma.
   (`Concepto`, `Control`, `Sub_Baj`, ..., `Energía SSCC`, `FD`, `FMA`). Sale
   en el orden del origen (no se ordena por `Hora_mes`). La columna "Ciclo"
   queda vacía: depende de `Calculo E Costos`.
-- `Log` — avisos e incidencias detectadas durante el cálculo.
 
-`Pagos_BESS.xlsx` (nombre provisorio, a pedido del usuario) abre por el
-`Resumen` (quién paga y quién recibe) y sigue con el detalle:
-`Calculo E Costos`, `Calculo RE545`, `PRORRATA_RETIROS` y, al final, las dos
-hojas de control (`Alertas` y `Ejecucion`).
+### Las hojas de cálculo
+
+El libro abre por el `Resumen` (quién paga y quién recibe) y sigue hacia
+atrás con el detalle: `PRORRATA_RETIROS`, `COMPENSACION_CENTRAL`,
+`Calculo RE545` y `Calculo E Costos`.
 
 - `Calculo E Costos` — traspaso desde `Medidores`, asignación de CMg, y casi
   toda `Actualizar_Calculos_Columnas` (`L, M, N, O, R, S, T, U, W, X, Y, AB,
@@ -370,8 +405,8 @@ hojas de control (`Alertas` y `Ejecucion`).
   `cargada`, las Prorratas y el FD homologado (`CPF(±)`/`CSF(±)`/`CTF(±)`,
   este último siempre en 0 — confirmado que no existe), `Ingreso descarga`,
   `Costo carga`, `Descuento FD`, `Total` y `Monto a compensar`, entre otros.
-  El FD homologado sale de la hoja `FD` del propio
-  `Consolidado_entradas.xlsx`, no de releer el `SSCC_Desempeño_*`. La hoja
+  El FD homologado sale de la hoja `FD` de la misma planilla, no de releer
+  el `SSCC_Desempeño_*`. La hoja
   queda **completa** (`A:AZ`, sin la columna `AY`, que
   la macro original tampoco escribe).
 - `Calculo RE545` — la hoja hermana, también **completa** (`A:CE`): mismo
@@ -380,7 +415,7 @@ hojas de control (`Alertas` y `Ejecucion`).
   central+ventana (`AW:BG`, una tabla de otro largo que se escribe al lado) y
   los Componentes 1 y 2 (`BI:CE`), hasta el `Monto a compensar`.
 
-Las dos hojas de `Pagos_BESS.xlsx` llevan además, arriba de los nombres de
+Las dos hojas de cálculo llevan además, arriba de los nombres de
 columna, los encabezados de grupo con celdas combinadas del archivo real
 (`Dia`, `Nombre`, `BESS`, `Prorratas (-)/(+)`, `FD`, `Subastas`, `FMA`,
 `Componente 1`/`Componente 2` — `GRUPOS_CALCULO_E_COSTOS`/
@@ -396,23 +431,23 @@ calculando igual: sólo dejaron de ocupar una columna. Los intermedios que sí
 dejan seguir el cálculo (las curvas monótonas, el `ranking cmg`, las
 energías con FD, todo el paso a paso de los Componentes 1 y 2) se quedan.
 
-Todas las hojas de los dos libros salen formateadas para leer (`formato.py`):
+Todas las hojas salen formateadas para leer (`formato.py`):
 nombres de columna en negrita, panel inmovilizado bajo el encabezado, ancho
 de columna según el contenido y separador de miles en las columnas
 numéricas. Es sólo aspecto: no toca un valor.
 
-Cada etapa abre **solo** lo que necesita, y lo que ya está en el consolidado
-sale de ahí:
+Cada etapa abre **solo** lo que necesita, y lo que ya está escrito en la
+planilla sale de ahí:
 
-- `Pagos_BESS.xlsx` lee `Medidores`, `Ofertas SSCC`, `CMg`, `Subastas` y `FD`
-  del consolidado **con una sola apertura del archivo** (antes cada hoja
-  volvía a parsear el libro entero), y ya no reabre `cmg.xlsx`: el CMg es el
-  de la hoja `CMg` del consolidado, que es el mismo dato — así no puede pasar
-  que los pagos usen un CMg distinto del que quedó en la foto de las entradas.
-- Recalcular solo `PRORRATA_RETIROS` o el `Resumen` no abre el consolidado ni
-  `Centrales.xlsx` de más: esas dos hojas salen de las dos hojas de cálculo ya
-  escritas (el `Resumen` sí necesita `Centrales.xlsx` para el propietario de
-  cada central).
+- Las hojas de cálculo leen `Medidores`, `Ofertas SSCC`, `CMg`, `Subastas` y
+  `FD` **con una sola apertura del archivo** (antes cada hoja volvía a
+  parsear el libro entero), y ya no reabren `cmg.xlsx`: el CMg es el de la
+  hoja `CMg`, que es el mismo dato — así no puede pasar que los pagos usen
+  un CMg distinto del que quedó en la foto de las entradas.
+- Recalcular solo `PRORRATA_RETIROS` o el `Resumen` no lee las hojas de
+  entrada ni `Centrales.xlsx` de más: esas dos hojas salen de las dos hojas
+  de cálculo ya escritas (el `Resumen` sí necesita `Centrales.xlsx` para el
+  propietario de cada central).
 - `Centrales.xlsx` se abre una vez por corrida, aunque lo necesiten dos
   secciones, y la ventana no reabre las planillas grandes en cada repintado
   (se acuerda de lo leído mientras el archivo no cambie).

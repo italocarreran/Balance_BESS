@@ -70,9 +70,15 @@ estado, no un historial.
   `…\Indicadores Publicar\<Vn>\03 Desempeño para publicar` y que los links
   de "Origen: ..." abren el explorador en esa carpeta (lo unico de esta
   sesion que no se puede probar sin la unidad).
-- Abrir la ventana en Windows y confirmar el ancho de la columna "Acción"
-  (`ANCHO_ACCION`, hoy 150 px) contra los botones más largos ("Traer
-  cmg_15min", "Actualizar todo") y el alto de fila (`ALTO_ACCION`, 26 px).
+- Abrir la ventana en Windows y confirmar los anchos de columna del
+  diagrama (`ANCHO_ESTRUCTURA` 420 px, `ANCHO_ESTADO` 86 px,
+  `ANCHO_ACCION` 104 px) con las fuentes reales de Windows (Consolas /
+  Segoe UI): en Linux, medido con `xvfb`, las columnas quedan rectas y los
+  botones todos de 96x22, pero las fuentes no son exactamente las mismas.
+- Correr un caso REAL con la planilla combinada (`Balance_BESS.xlsx`) y
+  confirmar que actualizar una hoja sola no toca ninguna de las otras
+  nueve. Está cubierto por pruebas con casos sintéticos, no con un libro
+  real de ~27.000 filas.
 - Correr `traer_csv_cmg()`/`generar_cmg()` una vez contra el CSV real de
   `T:\CMgReales 15MIN`
   para confirmar que las barras de `Resumen BESS!Barra inyección` están
@@ -3929,3 +3935,68 @@ ningún aviso, y se revisó que no quedara otro `SyntaxWarning` en ningún `.py`
 del repo. 140 pruebas, igual que antes.
 
 ---
+
+## 2026-09-15 (6) — Una sola planilla (de fin a inicio), el control aparte y la ventana derecha
+
+Cuatro pedidos del usuario en la misma tanda: *"puedes hacer que las hojas de
+Alertas, Ejecución y agregar log queden en una planilla diferente, y combinar
+el consolidado entradas con pagos bess pero ordenados de fin a inicio, el fin
+es el resumen y el inicio las entradas"*, *"en la ventana se ve desordenado la
+columna de estados y los botones quiero que se vean rectos"*, *"los botones de
+resumir y traer que digan solo eso"*, *"quita los detalles, deja solo los que
+dan el origen de entradas y esos links"*.
+
+**1. Una sola planilla, ordenada de fin a inicio.**
+`Consolidado_entradas.xlsx` + `Pagos_BESS.xlsx` = **`Balance_BESS.xlsx`**
+(`ARCHIVO_SALIDA`). Las hojas quedan en `ORDEN_HOJAS_SALIDA`
+(`parametros.py`): `Resumen`, `PRORRATA_RETIROS`, `COMPENSACION_CENTRAL`,
+`Calculo RE545`, `Calculo E Costos`, `Subastas`, `FD`, `CMg`, `Ofertas SSCC`,
+`Medidores`.
+
+Las dos mitades se siguen escribiendo por separado (`escribir_salida()` /
+`escribir_pagos_bess()`: cada hoja tiene su botón y su cálculo detrás), así
+que lo nuevo es que **cada una preserva las hojas de la otra**
+(`_preservar_ajenas()`) y reordena el libro al terminar (`_ordenar_hojas()`).
+
+**Trampa que hay que tener presente:** el `ExcelWriter` **trunca** el archivo.
+Por eso ahora el libro anterior se lee SIEMPRE antes de abrirlo
+(`_abrir_existente()`), no solo cuando la corrida es parcial: si eso se
+saltea, escribir una hoja se lleva puestas las otras nueve. También por eso
+los grupos `consolidado` y `pagos` del orquestador comparten el recurso
+`"salida"`: escriben el mismo archivo y no pueden correr a la vez.
+
+**2. El control, en otra planilla.** `Alertas`, `Ejecucion` y `Log` salieron
+de la planilla de trabajo y viven en **`Control_corrida.xlsx`**
+(`ARCHIVO_CONTROL`), que escribe la nueva `escribir_control()` — pública, con
+el mismo criterio de preservar lo que esa pasada no reescribe (la corrida de
+entradas deja el `Log` sin tocar `Alertas`/`Ejecucion`, y al revés).
+
+**3. La ventana derecha.** Las columnas del diagrama eran `width=N` en
+*caracteres*: una fila en negrita (las de nivel 0) mide más que la misma fila
+en redonda aunque las dos digan 52 caracteres, y por eso el estado y los
+botones de esas filas quedaban corridos. Ahora cada celda es un `Frame` de
+ancho fijo **en píxeles** con `pack_propagate(False)`, y el botón ocupa su
+celda entera: medido con la ventana real (`xvfb`), las 33 filas tienen la
+columna `Estado` en x=420, la de `Acción` en x=506 y **todos** los botones
+miden 96x22.
+
+**4. Botones de una palabra y sin detalle.** `Traer cmg_15min`/`Traer FD`/
+`Traer subastas`/`Traer prorrata` → **Traer**; `Resumir compensación` →
+**Resumir**; `Asignar pagos` → **Asignar**; `Actualizar todo`/`Calcular todo`
+→ **Actualizar** (una sola fila de archivo: hace las dos mitades seguidas,
+`actualizar_planilla_entera()`). La columna `Detalle` se sacó entera: a la
+derecha del botón queda solo el `Origen: ...` con su link, que es lo que el
+usuario pidió conservar. El motivo de un error al revisar la carpeta ahora va
+al registro, que es donde se puede leer entero.
+
+**Verificación:** 144 pruebas (4 nuevas: orden de las hojas, que cada mitad
+preserve la otra, que el control salga aparte y que conserve sus hojas).
+Además se abrió la ventana de verdad con `xvfb-run` sobre un caso sintético
+para medir las columnas y mirar la captura.
+
+**Ojo:** lo único que NO se probó contra un caso real es la migración de un
+caso viejo: una carpeta que ya tenga `Consolidado_entradas.xlsx` y
+`Pagos_BESS.xlsx` no se lee ni se convierte — el programa empieza una
+`Balance_BESS.xlsx` nueva y los dos archivos viejos quedan donde están, sin
+que nadie los toque. Si hace falta arrastrar el contenido viejo, hay que
+volver a generar las hojas (o copiarlas a mano).

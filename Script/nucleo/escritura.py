@@ -1,6 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-Escritura de los dos libros de salida.
+Escritura de la planilla de salida (una sola) y del archivo de
+control de la corrida.
+
+Son dos archivos, y ninguno de los dos es el de antes:
+
+  - ARCHIVO_SALIDA: las entradas y el calculo JUNTOS en un mismo
+    libro (antes eran Consolidado_entradas.xlsx y Pagos_BESS.xlsx),
+    ordenado de fin a inicio -- el Resumen primero y las entradas al
+    final (ORDEN_HOJAS_SALIDA).
+  - ARCHIVO_CONTROL: las hojas de control de la corrida (Alertas,
+    Ejecucion, Log), que ya no viven en la planilla de trabajo.
+
+Las dos mitades de la planilla se siguen escribiendo por separado
+(escribir_salida / escribir_pagos_bess: cada una tiene su boton en la
+ventana y su propio calculo detras), pero como ahora comparten
+archivo, cada una PRESERVA las hojas de la otra: lo que no se
+recalcula en esta pasada se copia tal cual del libro anterior.
 """
 
 from pathlib import Path
@@ -17,31 +33,87 @@ from .ofertas_sscc import (
     HOJA_OFERTAS_SSCC, TITULO_OFERTAS_POR_DIA, TITULO_RESUMEN_VENTANA,
 )
 from .parametros import (
-    HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_COMPENSACION_CENTRAL,
-    HOJA_PRORRATA_RETIROS, HOJA_RESUMEN,
+    HOJA_ALERTAS, HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545, HOJA_CMG,
+    HOJA_COMPENSACION_CENTRAL, HOJA_EJECUCION, HOJA_FD, HOJA_LOG,
+    HOJA_MEDIDORES, HOJA_PRORRATA_RETIROS, HOJA_RESUMEN, HOJA_SUBASTAS,
+    ORDEN_HOJAS_CONTROL, ORDEN_HOJAS_SALIDA,
 )
 from .re545 import COLUMNAS_SALIDA_RE545, GRUPOS_CALCULO_RE545
 
 
-# En el orden en que quedan las hojas del libro: primero el Resumen
-# (lo primero que se mira: quien paga y quien recibe), despues las dos
-# hojas de calculo con el detalle, despues la compensacion por central,
-# despues el reparto entre empresas y al final las dos hojas de control
-# (Alertas y Ejecucion), que no las escribe este listado sino
-# _escribir_control().
+# Las hojas que escribe cada mitad de la planilla. No definen el
+# orden del libro (ese es ORDEN_HOJAS_SALIDA, comun a las dos): dicen
+# de quien es cada hoja, o sea cual de las dos funciones la puede
+# dejar vacia si no se regenero y no habia version anterior. Las de la
+# otra mitad no se tocan nunca: se copian tal cual.
 _HOJAS_PAGOS = (
     HOJA_RESUMEN, HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
     HOJA_COMPENSACION_CENTRAL, HOJA_PRORRATA_RETIROS,
 )
 
+
+def _abrir_existente(ruta):
+    """
+    El libro que hay hoy en 'ruta' (solo valores), o None si no
+    existe o no se puede abrir. Se llama SIEMPRE antes de abrir el
+    ExcelWriter: el writer trunca el archivo, asi que lo que no se
+    haya leido antes se pierde.
+    """
+
+    if ruta is None:
+        return None
+
+    ruta = Path(ruta)
+
+    if not ruta.is_file():
+        return None
+
+    try:
+        return openpyxl.load_workbook(ruta, data_only=True)
+    except Exception:
+        return None
+
+
+def _preservar_ajenas(writer, wb_existente, escritas):
+    """
+    Copia al libro nuevo toda hoja del anterior que esta pasada no
+    haya escrito. Es lo que hace posible que las dos mitades de la
+    planilla (entradas y calculo) compartan archivo: la que escribe
+    no sabe nada de las hojas de la otra, solo que no las toca.
+    """
+
+    if wb_existente is None:
+        return
+
+    for nombre in wb_existente.sheetnames:
+        if nombre in escritas or nombre in writer.book.sheetnames:
+            continue
+        _copiar_hoja_existente(wb_existente, nombre, writer.book)
+
+
+def _ordenar_hojas(wb, orden):
+    """
+    Deja las hojas del libro en el orden pedido. Lo que no este en
+    'orden' queda al final, en el orden en que estaba (una hoja que
+    agrego el usuario a mano no se pierde ni se mete al medio).
+    """
+
+    posicion = {nombre: i for i, nombre in enumerate(orden)}
+    wb._sheets.sort(key=lambda ws: posicion.get(ws.title, len(posicion)))
+
+
 # Fila (1-indexada) donde estan los NOMBRES de columna de cada hoja,
 # para formatear_libro(): las dos hojas de calculo llevan arriba la
-# fila de encabezados de grupo, y PRORRATA_RETIROS el titulo de la
-# hoja y el de cada cuadro.
-_FILAS_ENCABEZADO_PAGOS = {
+# fila de encabezados de grupo, PRORRATA_RETIROS el titulo de la hoja
+# y el de cada cuadro, y "Ofertas SSCC" el titulo de cada tabla. Es
+# una sola tabla para todo el libro (las dos mitades se formatean
+# juntas: cualquiera de las dos escrituras formatea tambien las hojas
+# preservadas de la otra).
+_FILAS_ENCABEZADO = {
     HOJA_CALCULO_ECOSTOS: 2,
     HOJA_CALCULO_RE545: 2,
     HOJA_PRORRATA_RETIROS: 3,
+    HOJA_OFERTAS_SSCC: 2,
 }
 
 
@@ -81,44 +153,91 @@ def _escribir_encabezados_grupo(ws, columnas_internas, grupos, fila=1, columna_i
         ws.cell(row=fila, column=columna_desde, value=etiqueta)
 
 
-def _escribir_control(
-    writer, registro, manifiesto, conciliacion, periodo, hojas_regeneradas
+def escribir_control(
+    ruta_control,
+    df_log=None,
+    registro=None,
+    manifiesto=None,
+    conciliacion=None,
+    periodo="",
+    hojas_regeneradas=(),
 ):
     """
-    Escribe las hojas "Alertas" y "Ejecucion" del libro de pagos.
+    Escribe el archivo de control de la corrida (ARCHIVO_CONTROL), que
+    a pedido del usuario vive APARTE de la planilla de trabajo:
 
-    Se salta sola si no hay registro: asi escribir_pagos_bess() sigue
-    sirviendo suelto (pruebas, scripts) sin armar una corrida entera.
+      - "Ejecucion": el estado de la corrida (APROBADA / NO APROBADA),
+        el conteo por severidad, la conciliacion de energia y el
+        manifiesto de entradas.
+      - "Alertas": una fila por alerta de la corrida, con su id,
+        severidad, central y clave.
+      - "Log": los avisos e incidencias de la generacion de las hojas
+        de entrada.
+
+    Cada mitad de la corrida escribe lo suyo y PRESERVA el resto (la
+    corrida de entradas deja el Log sin tocar Alertas/Ejecucion, y al
+    reves), igual que las hojas de la planilla.
+
+    OJO con las corridas parciales: si hojas_regeneradas trae una sola
+    hoja, las otras vienen de una corrida ANTERIOR y el estado no
+    habla de ellas. Por eso "Ejecucion" escribe siempre que hojas se
+    recalcularon en esta pasada.
+
+    Se salta sola si no hay nada que escribir: asi las dos funciones de
+    escritura siguen sirviendo sueltas (pruebas, scripts) sin armar
+    una corrida entera.
     """
 
-    if registro is None:
-        return
+    if ruta_control is None or (df_log is None and registro is None):
+        return None
 
-    registro.tabla().to_excel(writer, sheet_name="Alertas", index=False)
+    ruta_control = Path(ruta_control)
+    wb_existente = _abrir_existente(ruta_control)
+    escritas = set()
 
-    filas = [
-        ("estado", registro.estado()),
-        ("periodo", periodo),
-        ("corrida", registro.inicio.strftime("%Y-%m-%d %H:%M:%S")),
-        ("hojas_recalculadas", ", ".join(hojas_regeneradas)),
-    ]
+    with pd.ExcelWriter(ruta_control, engine="openpyxl") as writer:
 
-    for severidad, cuantas in registro.conteo().items():
-        filas.append((f"alertas_{severidad.lower()}", cuantas))
+        if registro is not None:
 
-    if conciliacion:
-        filas += list(conciliacion.items())
+            filas = [
+                ("estado", registro.estado()),
+                ("periodo", periodo),
+                ("corrida", registro.inicio.strftime("%Y-%m-%d %H:%M:%S")),
+                ("hojas_recalculadas", ", ".join(hojas_regeneradas)),
+            ]
 
-    pd.DataFrame(filas, columns=["campo", "valor"]).to_excel(
-        writer, sheet_name="Ejecucion", index=False
-    )
+            for severidad, cuantas in registro.conteo().items():
+                filas.append((f"alertas_{severidad.lower()}", cuantas))
 
-    if manifiesto is not None and not manifiesto.empty:
-        _escribir_tabla_con_titulo(
-            writer, "Ejecucion", manifiesto,
-            "Entradas de esta corrida (sha256 del contenido)",
-            fila_inicio=len(filas) + 3,
-        )
+            if conciliacion:
+                filas += list(conciliacion.items())
+
+            pd.DataFrame(filas, columns=["campo", "valor"]).to_excel(
+                writer, sheet_name=HOJA_EJECUCION, index=False
+            )
+            escritas.add(HOJA_EJECUCION)
+
+            if manifiesto is not None and not manifiesto.empty:
+                _escribir_tabla_con_titulo(
+                    writer, HOJA_EJECUCION, manifiesto,
+                    "Entradas de esta corrida (sha256 del contenido)",
+                    fila_inicio=len(filas) + 3,
+                )
+
+            registro.tabla().to_excel(
+                writer, sheet_name=HOJA_ALERTAS, index=False
+            )
+            escritas.add(HOJA_ALERTAS)
+
+        if df_log is not None:
+            df_log.to_excel(writer, sheet_name=HOJA_LOG, index=False)
+            escritas.add(HOJA_LOG)
+
+        _preservar_ajenas(writer, wb_existente, escritas)
+        _ordenar_hojas(writer.book, ORDEN_HOJAS_CONTROL)
+        formatear_libro(writer.book)
+
+    return ruta_control
 
 
 def escribir_pagos_bess(
@@ -140,40 +259,30 @@ def escribir_pagos_bess(
     manifiesto=None,
     conciliacion=None,
     periodo="",
+    ruta_control=None,
 ):
     """
-    Escribe Pagos_BESS.xlsx: la hoja "Calculo E Costos" (si se pasa
-    df_ecostos) y la hoja "Calculo RE545" (si se pasa df_re545, con
-    la tabla resumen df_resumen_re545 al lado si tambien se pasa). El
-    usuario pidio explicitamente que esto viva en un archivo separado
-    de Consolidado_entradas.xlsx ("pagos_bess o algo asi por ahora")
-    -- el nombre es provisorio.
+    Escribe la MITAD DE CALCULO de la planilla de salida: "Calculo E
+    Costos" (si se pasa df_ecostos), "Calculo RE545" (si se pasa
+    df_re545, con la tabla resumen df_resumen_re545 al lado si
+    tambien se pasa), COMPENSACION_CENTRAL, PRORRATA_RETIROS y el
+    Resumen.
+
+    Es el mismo archivo que escribe escribir_salida() con las hojas de
+    entrada (el usuario pidio combinarlos): las hojas de entrada que
+    ya estan en el libro se copian tal cual, no se tocan.
 
     hojas_regenerar: None (por defecto) escribe cada hoja para la que
-    se paso su DataFrame, sin mas (asi funcionaba antes de que
-    generar_pagos_bess() recibiera secciones). Si es un set
-    con alguno de los nombres de _HOJAS_PAGOS ("Calculo E Costos",
-    "Calculo RE545"), la(s) que NO esten en el set se copian tal cual
-    desde ruta_existente en vez de escribirse desde el DataFrame --
-    mismo criterio que escribir_salida()/hojas_regenerar para
-    Consolidado_entradas.xlsx (una hoja que no se pidio actualizar se
-    preserva, no se recalcula). Si una hoja a preservar
-    no existe en ruta_existente, queda vacia y se registra un aviso.
+    se paso su DataFrame, sin mas. Si es un set con alguno de los
+    nombres de _HOJAS_PAGOS, la(s) que NO esten en el set se copian
+    tal cual desde ruta_existente en vez de escribirse desde el
+    DataFrame (una hoja que no se pidio actualizar se preserva, no se
+    recalcula). Si una hoja a preservar no existe en ruta_existente,
+    queda vacia y se registra un aviso.
 
-    Ademas de las dos hojas de calculo escribe, cuando se le pasan:
-
-      - "Alertas": una fila por alerta de la corrida (registro), con
-        su id, severidad, central y clave. Es el registro persistente
-        que pide el catalogo de controles: hasta ahora estas alertas
-        vivian solo en la caja de texto de la ventana.
-      - "Ejecucion": el estado de la corrida (APROBADA / NO APROBADA),
-        el conteo por severidad, la conciliacion de energia y el
-        manifiesto de entradas.
-
-    OJO con las corridas parciales: si hojas_regenerar trae una sola
-    hoja, la otra viene de una corrida ANTERIOR y el estado no habla
-    de ella. Por eso "Ejecucion" escribe siempre que hojas se
-    recalcularon en esta pasada.
+    ruta_control: si se pasa, ahi se escribe el control de la corrida
+    (Alertas + Ejecucion, ver escribir_control) -- en su propio
+    archivo, ya no como hojas de esta planilla.
     """
 
     ruta_salida = Path(ruta_salida)
@@ -182,13 +291,10 @@ def escribir_pagos_bess(
         set(_HOJAS_PAGOS) if hojas_regenerar is None else set(hojas_regenerar)
     )
 
-    wb_existente = None
-    if hojas_regenerar is not None and ruta_existente is not None:
-        ruta_existente = Path(ruta_existente)
-        if ruta_existente.is_file():
-            wb_existente = openpyxl.load_workbook(
-                ruta_existente, data_only=True
-            )
+    # Siempre se lee el libro que hay: aunque se regeneren TODAS las
+    # hojas de calculo, las de entrada (la otra mitad de la planilla)
+    # hay que preservarlas igual.
+    wb_existente = _abrir_existente(ruta_existente or ruta_salida)
 
     avisos_preservacion = []
     escritas = []
@@ -346,11 +452,19 @@ def escribir_pagos_bess(
         else:
             _preservar_o_avisar(writer, HOJA_PRORRATA_RETIROS)
 
-        _escribir_control(
-            writer, registro, manifiesto, conciliacion, periodo, escritas,
-        )
+        _preservar_ajenas(writer, wb_existente, set())
+        _ordenar_hojas(writer.book, ORDEN_HOJAS_SALIDA)
 
-        formatear_libro(writer.book, _FILAS_ENCABEZADO_PAGOS)
+        formatear_libro(writer.book, _FILAS_ENCABEZADO)
+
+    escribir_control(
+        ruta_control,
+        registro=registro,
+        manifiesto=manifiesto,
+        conciliacion=conciliacion,
+        periodo=periodo,
+        hojas_regeneradas=escritas,
+    )
 
     for mensaje in avisos_preservacion:
         registrar(f"  [{ALTA}] PAG-001: {mensaje}")
@@ -451,11 +565,9 @@ def _copiar_hoja_existente(wb_origen, nombre_hoja, wb_destino):
     return True
 
 
-_HOJAS_CONSOLIDADO = ("Medidores", "Ofertas SSCC", "CMg", "FD", "Subastas")
-
-# Igual que _FILAS_ENCABEZADO_PAGOS: la hoja "Ofertas SSCC" lleva el
-# titulo de cada cuadro arriba de los nombres de columna.
-_FILAS_ENCABEZADO_CONSOLIDADO = {HOJA_OFERTAS_SSCC: 2}
+_HOJAS_CONSOLIDADO = (
+    HOJA_MEDIDORES, HOJA_OFERTAS_SSCC, HOJA_CMG, HOJA_FD, HOJA_SUBASTAS,
+)
 
 
 def escribir_salida(
@@ -472,14 +584,19 @@ def escribir_salida(
     ruta_existente=None,
     hojas_regenerar=None,
     registrar=print,
+    ruta_control=None,
 ):
     """
-    Escribe Consolidado_entradas.xlsx: la tabla Medidores (A:U, una
-    fila por registro), las tablas auxiliares de Ofertas SSCC -de
-    otro largo, ver comentario de LETRA_A_CAMPO- juntas en una misma
-    hoja (HOJA_OFERTAS_SSCC, una debajo de la otra), CMg, FD (el
-    bloque CSF y el bloque CPF lado a lado, de distinto largo cada
-    uno - ver construir_fd), Subastas, y un Log.
+    Escribe la MITAD DE ENTRADAS de la planilla de salida: la tabla
+    Medidores (A:U, una fila por registro), las tablas auxiliares de
+    Ofertas SSCC -de otro largo, ver comentario de LETRA_A_CAMPO-
+    juntas en una misma hoja (HOJA_OFERTAS_SSCC, una debajo de la
+    otra), CMg, FD (el bloque CSF y el bloque CPF lado a lado, de
+    distinto largo cada uno - ver construir_fd) y Subastas.
+
+    Es el mismo archivo que escribe escribir_pagos_bess() con las
+    hojas de calculo (el usuario pidio combinarlos): esas hojas se
+    copian tal cual, no se tocan.
 
     hojas_regenerar: None (por defecto) regenera las 5 hojas de datos
     con lo que se haya pasado. Si es un set con algunos nombres de
@@ -489,6 +606,10 @@ def escribir_salida(
     su boton "Actualizar". Si una hoja a preservar no existe en
     ruta_existente, queda vacia y se registra un aviso (en el log de
     esta corrida y como fila del Log).
+
+    ruta_control: si se pasa, ahi se escribe la hoja "Log" (avisos e
+    incidencias) -- en el archivo de control, ya no como una hoja mas
+    de esta planilla.
     """
 
     ruta_salida = Path(ruta_salida)
@@ -499,13 +620,10 @@ def escribir_salida(
         else set(hojas_regenerar)
     )
 
-    wb_existente = None
-    if hojas_regenerar is not None and ruta_existente is not None:
-        ruta_existente = Path(ruta_existente)
-        if ruta_existente.is_file():
-            wb_existente = openpyxl.load_workbook(
-                ruta_existente, data_only=True
-            )
+    # Siempre se lee el libro que hay: aunque se regeneren TODAS las
+    # hojas de entrada, las de calculo (la otra mitad de la planilla)
+    # hay que preservarlas igual.
+    wb_existente = _abrir_existente(ruta_existente or ruta_salida)
 
     avisos_preservacion = []
 
@@ -541,16 +659,16 @@ def escribir_salida(
 
     with pd.ExcelWriter(ruta_salida, engine="openpyxl") as writer:
 
-        if "Medidores" in regenerar:
+        if HOJA_MEDIDORES in regenerar:
             df.to_excel(
                 writer,
-                sheet_name="Medidores",
+                sheet_name=HOJA_MEDIDORES,
                 index=False,
             )
         else:
-            _preservar_o_avisar(writer, "Medidores")
+            _preservar_o_avisar(writer, HOJA_MEDIDORES)
 
-        if "Ofertas SSCC" in regenerar:
+        if HOJA_OFERTAS_SSCC in regenerar:
 
             columna = 0
 
@@ -574,22 +692,22 @@ def escribir_salida(
         else:
             _preservar_o_avisar(writer, HOJA_OFERTAS_SSCC)
 
-        if "CMg" in regenerar:
+        if HOJA_CMG in regenerar:
             if df_cmg is not None:
                 df_cmg.to_excel(
                     writer,
-                    sheet_name="CMg",
+                    sheet_name=HOJA_CMG,
                     index=False,
                 )
         else:
-            _preservar_o_avisar(writer, "CMg")
+            _preservar_o_avisar(writer, HOJA_CMG)
 
-        if "FD" in regenerar:
+        if HOJA_FD in regenerar:
 
             if df_fd_csf is not None:
                 df_fd_csf.to_excel(
                     writer,
-                    sheet_name="FD",
+                    sheet_name=HOJA_FD,
                     index=False,
                     startcol=0,
                 )
@@ -597,29 +715,28 @@ def escribir_salida(
             if df_fd_cpf is not None:
                 df_fd_cpf.to_excel(
                     writer,
-                    sheet_name="FD",
+                    sheet_name=HOJA_FD,
                     index=False,
                     startcol=_COLUMNA_Q_INDICE,
                 )
         else:
-            _preservar_o_avisar(writer, "FD")
+            _preservar_o_avisar(writer, HOJA_FD)
 
-        if "Subastas" in regenerar:
+        if HOJA_SUBASTAS in regenerar:
             if df_subastas is not None:
                 df_subastas.to_excel(
                     writer,
-                    sheet_name="Subastas",
+                    sheet_name=HOJA_SUBASTAS,
                     index=False,
                 )
         else:
-            _preservar_o_avisar(writer, "Subastas")
+            _preservar_o_avisar(writer, HOJA_SUBASTAS)
 
-        _armar_log().to_excel(
-            writer,
-            sheet_name="Log",
-            index=False,
-        )
+        _preservar_ajenas(writer, wb_existente, set())
+        _ordenar_hojas(writer.book, ORDEN_HOJAS_SALIDA)
 
-        formatear_libro(writer.book, _FILAS_ENCABEZADO_CONSOLIDADO)
+        formatear_libro(writer.book, _FILAS_ENCABEZADO)
+
+    escribir_control(ruta_control, df_log=_armar_log())
 
     return ruta_salida

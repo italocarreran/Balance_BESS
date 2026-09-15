@@ -220,8 +220,8 @@ if __name__ == "__main__":
 class PagosBessEndToEndTest(unittest.TestCase):
     """
     El camino real: generar_pagos_bess() sobre un caso sintetico
-    minimo, para comprobar que el libro sale con "Alertas" y
-    "Ejecucion" y que el estado refleja lo que paso.
+    minimo, para comprobar que el archivo de control sale con
+    "Alertas" y "Ejecucion" y que el estado refleja lo que paso.
     """
 
     def armar_caso(self, carpeta):
@@ -336,7 +336,7 @@ class PagosBessEndToEndTest(unittest.TestCase):
         })
         cmg.to_excel(base / "Cmg" / "cmg.xlsx", index=False)
 
-        with pd.ExcelWriter(base / "Consolidado_entradas.xlsx") as w:
+        with pd.ExcelWriter(base / nucleo.ARCHIVO_SALIDA) as w:
             medidores.to_excel(w, sheet_name="Medidores", index=False)
             # El CMg de los pagos sale de la hoja 'CMg' del
             # consolidado, no de volver a abrir cmg.xlsx.
@@ -369,12 +369,22 @@ class PagosBessEndToEndTest(unittest.TestCase):
             except nucleo.ErrorEntrada as error:
                 self.fail(f"el caso sintetico no corrio: {error}")
 
-            salida = base / "Pagos_BESS.xlsx"
+            salida = base / nucleo.ARCHIVO_SALIDA
             hojas = pd.ExcelFile(salida).sheet_names
-            self.assertIn("Alertas", hojas)
-            self.assertIn("Ejecucion", hojas)
+            self.assertIn(nucleo.HOJA_CALCULO_RE545, hojas)
 
-            ejecucion = pd.read_excel(salida, sheet_name="Ejecucion")
+            # El control ya no ensucia la planilla: vive aparte.
+            self.assertNotIn(nucleo.HOJA_ALERTAS, hojas)
+            self.assertNotIn(nucleo.HOJA_EJECUCION, hojas)
+
+            control = base / nucleo.ARCHIVO_CONTROL
+            hojas_control = pd.ExcelFile(control).sheet_names
+            self.assertIn(nucleo.HOJA_ALERTAS, hojas_control)
+            self.assertIn(nucleo.HOJA_EJECUCION, hojas_control)
+
+            ejecucion = pd.read_excel(
+                control, sheet_name=nucleo.HOJA_EJECUCION
+            )
             campos = dict(zip(ejecucion["campo"], ejecucion["valor"]))
 
             self.assertIn("estado", campos)
@@ -396,8 +406,8 @@ class PagosBessEndToEndTest(unittest.TestCase):
         """
         Pedido del usuario: "que no se abran planillas innecesarias".
         PRORRATA_RETIROS y el Resumen salen de las dos hojas de
-        calculo ya escritas en Pagos_BESS.xlsx, asi que se recalculan
-        aunque el consolidado (y cmg.xlsx) ya no esten.
+        calculo ya escritas en la planilla, asi que no releen las
+        hojas de entrada ni cmg.xlsx (que aca ni siquiera esta).
         """
 
         with tempfile.TemporaryDirectory() as carpeta:
@@ -418,9 +428,10 @@ class PagosBessEndToEndTest(unittest.TestCase):
                 aamm="2607",
             )
 
-            # Se van las entradas de las hojas de calculo: si la
-            # prorrata las abriera, la corrida se caeria.
-            (base / "Consolidado_entradas.xlsx").unlink()
+            # Se va cmg.xlsx: si la prorrata lo abriera, la corrida
+            # se caeria. Las hojas de entrada ya no se pueden borrar
+            # (viven en la misma planilla que el calculo), asi que se
+            # controla por el log: no se leen.
             (base / "Cmg" / "cmg.xlsx").unlink()
 
             lineas = []
@@ -432,11 +443,16 @@ class PagosBessEndToEndTest(unittest.TestCase):
             except nucleo.ErrorEntrada as error:
                 self.fail(f"abrio algo que no necesitaba: {error}")
 
-            hojas = pd.ExcelFile(base / "Pagos_BESS.xlsx").sheet_names
+            hojas = pd.ExcelFile(base / nucleo.ARCHIVO_SALIDA).sheet_names
             self.assertIn(nucleo.HOJA_PRORRATA_RETIROS, hojas)
 
+            # y las hojas de entrada siguen ahi: la escritura del
+            # calculo preserva la otra mitad de la planilla.
+            self.assertIn(nucleo.HOJA_MEDIDORES, hojas)
+            self.assertIn(nucleo.HOJA_SUBASTAS, hojas)
+
             resumen = pd.read_excel(
-                base / "Pagos_BESS.xlsx", sheet_name=nucleo.HOJA_RESUMEN
+                base / nucleo.ARCHIVO_SALIDA, sheet_name=nucleo.HOJA_RESUMEN
             )
             self.assertIn("NETO", resumen.columns)
 
@@ -463,8 +479,10 @@ class PagosBessEndToEndTest(unittest.TestCase):
             except nucleo.ErrorEntrada as error:
                 self.fail(f"el caso sintetico no corrio: {error}")
 
-            salida = base / "Pagos_BESS.xlsx"
-            ejecucion = pd.read_excel(salida, sheet_name="Ejecucion")
+            ejecucion = pd.read_excel(
+                base / nucleo.ARCHIVO_CONTROL,
+                sheet_name=nucleo.HOJA_EJECUCION,
+            )
             campos = dict(zip(ejecucion["campo"], ejecucion["valor"]))
 
             self.assertTrue(bool(campos["conciliacion_completa"]))

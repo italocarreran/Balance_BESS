@@ -178,7 +178,7 @@ class TestLibroDePagosOrdenado(unittest.TestCase):
         )
 
     def escribir(self, carpeta):
-        ruta = Path(carpeta) / "Pagos_BESS.xlsx"
+        ruta = Path(carpeta) / nucleo.ARCHIVO_SALIDA
         nucleo.escribir_pagos_bess(
             ruta,
             df_ecostos=self.armar_calculo(),
@@ -222,6 +222,107 @@ class TestLibroDePagosOrdenado(unittest.TestCase):
                                header=1)
             self.assertEqual(list(df["Descarga kWh"]), [1.5, 2.5, 3.5])
             self.assertEqual(list(df["Configuracion"]), ["SAE UNO"] * 3)
+
+
+class TestUnaSolaPlanilla(unittest.TestCase):
+    """
+    Pedido del usuario: "combinar el consolidado entradas con pagos
+    bess pero ordenados de fin a inicio, el fin es el resumen y el
+    inicio las entradas", y las hojas de control en otra planilla.
+
+    Las dos mitades (entradas y calculo) escriben el MISMO archivo por
+    separado: la que escribe tiene que dejar intacta la otra mitad.
+    """
+
+    def entradas(self, ruta, control=None):
+        nucleo.escribir_salida(
+            pd.DataFrame({"Mes": [7, 7]}),
+            ruta,
+            ["un aviso de la corrida"],
+            [],
+            df_cmg=pd.DataFrame({"cmg": [1.0, 2.0]}),
+            df_subastas=pd.DataFrame({"subasta": [1, 2]}),
+            hojas_regenerar={
+                nucleo.HOJA_MEDIDORES, nucleo.HOJA_CMG, nucleo.HOJA_SUBASTAS,
+            },
+            ruta_existente=ruta,
+            ruta_control=control,
+            registrar=lambda *a: None,
+        )
+
+    def calculo(self, ruta):
+        nucleo.escribir_pagos_bess(
+            ruta,
+            df_resumen=pd.DataFrame({
+                "NOMBRE": ["EMPRESA UNO"], "RECIBE": [1.0],
+                "PAGA": [0.0], "NETO": [1.0],
+            }),
+            hojas_regenerar={nucleo.HOJA_RESUMEN},
+            ruta_existente=ruta,
+            registrar=lambda *a: None,
+        )
+
+    def test_las_hojas_quedan_del_resumen_a_las_entradas(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / nucleo.ARCHIVO_SALIDA
+            self.entradas(ruta)
+            self.calculo(ruta)
+
+            hojas = pd.ExcelFile(ruta).sheet_names
+
+            self.assertEqual(hojas, list(nucleo.ORDEN_HOJAS_SALIDA))
+            self.assertEqual(hojas[0], nucleo.HOJA_RESUMEN)
+            self.assertEqual(hojas[-1], nucleo.HOJA_MEDIDORES)
+
+    def test_cada_mitad_preserva_la_otra(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / nucleo.ARCHIVO_SALIDA
+
+            self.entradas(ruta)
+            self.calculo(ruta)
+
+            # El calculo no se llevo puestas las entradas...
+            self.assertEqual(
+                len(pd.read_excel(ruta, sheet_name=nucleo.HOJA_MEDIDORES)), 2
+            )
+
+            # ...ni las entradas se llevan puesto el calculo.
+            self.entradas(ruta)
+            resumen = pd.read_excel(ruta, sheet_name=nucleo.HOJA_RESUMEN)
+            self.assertEqual(list(resumen["NOMBRE"]), ["EMPRESA UNO"])
+
+    def test_el_control_va_en_su_propio_archivo(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / nucleo.ARCHIVO_SALIDA
+            control = Path(carpeta) / nucleo.ARCHIVO_CONTROL
+
+            self.entradas(ruta, control)
+
+            self.assertNotIn(nucleo.HOJA_LOG, pd.ExcelFile(ruta).sheet_names)
+
+            log = pd.read_excel(control, sheet_name=nucleo.HOJA_LOG)
+            self.assertIn("un aviso de la corrida", list(log["detalle"]))
+
+    def test_el_control_conserva_las_hojas_que_no_reescribe(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            control = Path(carpeta) / nucleo.ARCHIVO_CONTROL
+
+            registro = nucleo.Registro()
+            nucleo.escribir_control(
+                control, registro=registro, periodo="07",
+                hojas_regeneradas=["Calculo RE545"],
+            )
+            nucleo.escribir_control(
+                control,
+                df_log=pd.DataFrame(
+                    [("ok", "Sin observaciones.")],
+                    columns=["tipo", "detalle"],
+                ),
+            )
+
+            hojas = pd.ExcelFile(control).sheet_names
+
+            self.assertEqual(hojas, list(nucleo.ORDEN_HOJAS_CONTROL))
 
 
 class TestFormatoNoTocaLosDatos(unittest.TestCase):
@@ -276,7 +377,7 @@ class TestNoSeAbrenPlanillasDeMas(unittest.TestCase):
         """
 
         with tempfile.TemporaryDirectory() as carpeta:
-            ruta = Path(carpeta) / "Consolidado_entradas.xlsx"
+            ruta = Path(carpeta) / nucleo.ARCHIVO_SALIDA
             cmg = pd.DataFrame({
                 "A": ["x"], "B": ["y"], "C": ["z"],
                 "D_Barra": ["BARRA A"], "E": [""], "F_CMg": [50.0],
@@ -295,7 +396,7 @@ class TestNoSeAbrenPlanillasDeMas(unittest.TestCase):
 
     def test_sin_la_hoja_cmg_el_error_dice_que_hay_que_generarla(self):
         with tempfile.TemporaryDirectory() as carpeta:
-            ruta = Path(carpeta) / "Consolidado_entradas.xlsx"
+            ruta = Path(carpeta) / nucleo.ARCHIVO_SALIDA
             pd.DataFrame({"a": [1]}).to_excel(
                 ruta, sheet_name="Medidores", index=False
             )

@@ -265,12 +265,12 @@ class FilasConRutaTest(unittest.TestCase):
                 "base", "medidas_dir", "medidas_sae", "auxiliares_dir",
                 "centrales", "ofertas_dir", "cmg_dir", "cmg_csv",
                 "cmg_xlsx", "sscc_dir", "sscc", "subastas_dir",
-                "db_subastas", "prorrata_dir", "consolidado", "pagos",
+                "db_subastas", "prorrata_dir", "salida", "control",
             ):
                 with self.subTest(id_fila=id_fila):
                     self.assertTrue(filas[id_fila]["ruta"], id_fila)
 
-            # Las hojas de las salidas no son archivos: no llevan link.
+            # Las hojas de la salida no son archivos: no llevan link.
             self.assertEqual(filas["consolidado:medidores"]["ruta"], "")
 
     def test_las_carpetas_se_marcan_como_carpetas(self):
@@ -279,7 +279,7 @@ class FilasConRutaTest(unittest.TestCase):
             self.assertTrue(filas["medidas_dir"]["es_carpeta"])
             self.assertTrue(filas["db_subastas"]["es_carpeta"])
             self.assertFalse(filas["centrales"]["es_carpeta"])
-            self.assertFalse(filas["consolidado"]["es_carpeta"])
+            self.assertFalse(filas["salida"]["es_carpeta"])
 
     def test_las_filas_que_traen_algo_dicen_de_donde(self):
         with tempfile.TemporaryDirectory() as tmp:

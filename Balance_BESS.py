@@ -32,34 +32,46 @@ Script/nucleo/orquestador.py; esta ventana solo los dibuja.
         Ofertas/
             <algo>OfertasSSCC<algo>.xlsx (o .xlsm/.xlsb/.xls)
         Cmg/
-            cmg<AAMM>_def_15minutal.csv    [Traer cmg_15min]
+            cmg<AAMM>_def_15minutal.csv    [Traer]
             cmg.xlsx                       [Generar]
         FD y FMA/
-            SSCC_Desempeño_<algo>.xlsx     [Traer FD]
+            SSCC_Desempeño_<algo>.xlsx     [Traer]
             fma_cpf_<AAMM>.xlsx            [Generar]
             fma_csf_<AAMM>.xlsx            [Generar]
             fma_cft_<AAMM>.xlsx            [Generar]
         Subastas/
-            DB subastas/                   [Traer subastas]
-        Consolidado_entradas.xlsx          [Actualizar todo]
-            hoja 'Medidores'               [Actualizar]
-            hoja 'Ofertas SSCC'            [Actualizar]
-            hoja 'CMg'                     [Actualizar]
-            hoja 'FD'                      [Actualizar]
-            hoja 'Subastas'                [Actualizar]
-        Pagos_BESS.xlsx                    [Calcular todo]
-            hoja 'Calculo E Costos'        [Calcular]
+            DB subastas/                   [Traer]
+        Balance_BESS.xlsx                  [Actualizar]
+            hoja 'Resumen'                 [Asignar]
+            hoja 'PRORRATA_RETIROS'        [Traer]
+            hoja 'COMPENSACION_CENTRAL'    [Resumir]
             hoja 'Calculo RE545'           [Calcular]
+            hoja 'Calculo E Costos'        [Calcular]
+            hoja 'Subastas'                [Actualizar]
+            hoja 'FD'                      [Actualizar]
+            hoja 'CMg'                     [Actualizar]
+            hoja 'Ofertas SSCC'            [Actualizar]
+            hoja 'Medidores'               [Actualizar]
+        Control_corrida.xlsx
 
-Las dos salidas se desglosan por hoja igual que Centrales.xlsx: cada
-hoja se actualiza sola, y lo que no se toca se conserva tal cual
-estaba en el archivo. Si el archivo todavia no existe, se crea al
-actualizar la primera hoja.
+La salida es UNA sola planilla (antes eran dos,
+Consolidado_entradas.xlsx y Pagos_BESS.xlsx) y sus hojas quedan
+ordenadas de FIN A INICIO: arriba el Resumen -lo primero que se mira-
+y abajo las entradas de las que sale todo. Las hojas de control de la
+corrida (Alertas, Ejecucion, Log) ya no estan ahi adentro: viven en
+Control_corrida.xlsx, al lado.
+
+La planilla se desglosa por hoja igual que Centrales.xlsx: cada hoja
+se actualiza sola, y lo que no se toca se conserva tal cual estaba en
+el archivo. Si el archivo todavia no existe, se crea al actualizar la
+primera hoja.
 
 Cada archivo y cada carpeta del diagrama es un LINK a su ruta: el
 click abre la carpeta en el explorador (la que contiene al archivo, si
-la fila es un archivo -- nunca se abre el archivo). Y las filas que
-traen algo de afuera del caso dicen de donde en su detalle:
+la fila es un archivo -- nunca se abre el archivo). El diagrama no
+lleva columna de detalle (se saco a pedido del usuario): lo unico que
+queda a la derecha del boton es, en las filas que traen algo de
+afuera del caso, de donde viene:
 
     SSCC_Desempeño_*      Origen: DCO
     cmg<AAMM>_..._.csv    Origen: CMg Reales
@@ -116,14 +128,26 @@ COLOR_ESTADO = {
     "pendiente": COLOR_PENDIENTE,
 }
 
-# Anchos de las columnas del diagrama. La de acciones (los botones)
-# va ANTES del detalle, a pedido del usuario, y por eso necesita un
-# ancho fijo en pixeles: si no, cada fila correria el detalle segun el
-# largo de su boton.
-ANCHO_ESTRUCTURA = 52      # caracteres (Consolas 9)
-ANCHO_ESTADO = 11          # caracteres
-ANCHO_ACCION = 150         # pixeles
-ALTO_ACCION = 26           # pixeles
+# Anchos de las columnas del diagrama, TODOS en pixeles y cada celda
+# en un Frame de ancho fijo (pack_propagate(False)).
+#
+# Antes estaban en "caracteres" (width=N de un Label) y las columnas
+# salian torcidas: una fila en negrita mide mas que la misma fila en
+# redonda aunque las dos digan 52 caracteres, asi que el estado y el
+# boton de las filas de nivel 0 quedaban corridos a la derecha
+# respecto del resto. En pixeles no hay forma de que se corran: la
+# celda mide lo mismo diga lo que diga adentro.
+ANCHO_ESTRUCTURA = 420     # pixeles
+ANCHO_ESTADO = 86          # pixeles
+ANCHO_ACCION = 104         # pixeles
+ALTO_ACCION = 26           # pixeles (alto de una fila CON boton)
+ALTO_FILA = 18             # pixeles (alto de una fila sin boton)
+
+# El boton ocupa su celda entera: todos los botones del diagrama miden
+# exactamente lo mismo y quedan en una columna recta (pedido del
+# usuario). Por eso los textos son de una palabra ("Traer",
+# "Resumir", "Generar", "Actualizar", "Calcular").
+RELLENO_ACCION = 4         # pixeles de aire alrededor del boton
 
 # Rueda del mouse. La ventana entera se desplaza de a PIXELES, no de a
 # "unidades" del Canvas: una unidad de Canvas sin yscrollincrement es
@@ -523,25 +547,22 @@ def main():
     enc_arbol = tk.Frame(frame_arbol)
     enc_arbol.pack(fill="x")
 
-    tk.Label(
-        enc_arbol, text="Estructura", font=("Segoe UI", 8, "bold"),
-        width=ANCHO_ESTRUCTURA, anchor="w",
-    ).pack(side="left")
-    tk.Label(
-        enc_arbol, text="Estado", font=("Segoe UI", 8, "bold"),
-        width=ANCHO_ESTADO, anchor="w",
-    ).pack(side="left")
-
-    celda_enc_accion = tk.Frame(enc_arbol, width=ANCHO_ACCION, height=16)
-    celda_enc_accion.pack(side="left")
-    celda_enc_accion.pack_propagate(False)
-    tk.Label(
-        celda_enc_accion, text="Accion", font=("Segoe UI", 8, "bold"),
-        anchor="w",
-    ).pack(side="left")
+    # Las mismas celdas de ancho fijo que las filas, para que el
+    # titulo de cada columna caiga justo arriba de su columna.
+    for texto, ancho in (
+        ("Estructura", ANCHO_ESTRUCTURA),
+        ("Estado", ANCHO_ESTADO),
+        ("Accion", ANCHO_ACCION),
+    ):
+        celda = tk.Frame(enc_arbol, width=ancho, height=16)
+        celda.pack(side="left")
+        celda.pack_propagate(False)
+        tk.Label(
+            celda, text=texto, font=("Segoe UI", 8, "bold"), anchor="w",
+        ).pack(side="left")
 
     tk.Label(
-        enc_arbol, text="Detalle", font=("Segoe UI", 8, "bold"), anchor="w",
+        enc_arbol, text="Origen", font=("Segoe UI", 8, "bold"), anchor="w",
     ).pack(side="left")
 
     filas_arbol = tk.Frame(frame_arbol)
@@ -591,20 +612,30 @@ def main():
 
         threading.Thread(target=trabajo, daemon=True).start()
 
-    def _fila_arbol(parent, prefijo, texto, estado=None, detalle="",
-                    negrita=False, boton=None, id_fila=None, ruta="",
-                    es_carpeta=False, origen=None):
+    def _celda(parent, ancho, alto):
+        """Una celda de ancho fijo: lo de adentro no mueve la columna."""
+
+        celda = tk.Frame(parent, width=ancho, height=alto)
+        celda.pack(side="left")
+        celda.pack_propagate(False)
+        return celda
+
+    def _fila_arbol(parent, prefijo, texto, estado=None, negrita=False,
+                    boton=None, id_fila=None, ruta="", es_carpeta=False,
+                    origen=None):
         """
         Una fila del diagrama. Columnas, en orden: estructura, estado,
-        accion (el boton, si la fila tiene uno) y detalle -- el boton
-        va a la IZQUIERDA del detalle, y por eso su celda tiene ancho
-        fijo: asi el detalle arranca siempre en la misma columna,
-        tenga o no boton esa fila.
+        accion (el boton, si la fila tiene uno) y origen.
+
+        Cada una vive en una celda de ancho fijo EN PIXELES, asi que
+        el estado y los botones quedan en una columna recta aunque la
+        fila este en negrita o el nombre sea largo.
 
         El nombre de la fila (no el prefijo del arbol) es un link a su
-        ruta cuando la fila tiene una, y el detalle termina en
-        "Origen: <algo>" -tambien link- cuando lo que hay en esa fila
-        viene de afuera del caso.
+        ruta cuando la fila tiene una. La ultima columna ya no trae el
+        detalle (el usuario lo pidio sacar): queda solo el
+        "Origen: <algo>" -tambien link- de las filas que traen algo de
+        afuera del caso.
         """
 
         fila = tk.Frame(parent)
@@ -612,24 +643,26 @@ def main():
 
         estilo = "bold" if negrita else "normal"
 
+        # Una fila sin boton no necesita el alto de un boton: asi el
+        # diagrama no se estira al doble de largo.
+        alto = ALTO_ACCION if boton is not None else ALTO_FILA
+
+        celda_estructura = _celda(fila, ANCHO_ESTRUCTURA, alto)
+
         # El prefijo del arbol (├── / └── / │) va en su propia etiqueta
-        # para que el subrayado del link tape solo el nombre. Las dos
-        # son Consolas 9, asi que juntas siguen midiendo lo mismo que
-        # la columna de antes.
+        # para que el subrayado del link tape solo el nombre.
         if prefijo:
             tk.Label(
-                fila,
+                celda_estructura,
                 text=prefijo,
                 font=("Consolas", 9, estilo),
-                width=len(prefijo),
                 anchor="w",
             ).pack(side="left")
 
         etiqueta = tk.Label(
-            fila,
+            celda_estructura,
             text=texto,
             font=("Consolas", 9, f"{estilo} underline" if ruta else estilo),
-            width=ANCHO_ESTRUCTURA - len(prefijo),
             anchor="w",
             fg=COLOR_LINK if ruta else "black",
             cursor="hand2" if ruta else "",
@@ -642,18 +675,17 @@ def main():
                 lambda e, r=ruta, c=es_carpeta: abrir_ruta_de_fila(r, c),
             )
 
+        celda_estado = _celda(fila, ANCHO_ESTADO, alto)
+
         tk.Label(
-            fila,
+            celda_estado,
             text=SIMBOLO.get(estado, estado) if estado is not None else "",
-            width=ANCHO_ESTADO,
             anchor="w",
             fg=COLOR_ESTADO.get(estado, COLOR_NEUTRO),
             font=("Segoe UI", 9, "bold"),
         ).pack(side="left")
 
-        celda_accion = tk.Frame(fila, width=ANCHO_ACCION, height=ALTO_ACCION)
-        celda_accion.pack(side="left")
-        celda_accion.pack_propagate(False)
+        celda_accion = _celda(fila, ANCHO_ACCION, alto)
 
         if boton is not None:
             texto_boton, comando = boton
@@ -661,30 +693,22 @@ def main():
                 celda_accion, text=texto_boton, font=("Segoe UI", 8, "bold"),
                 bg="#fdf0d5", command=comando,
             )
-            widget.pack(side="left", padx=(0, 6))
+            # Ocupa la celda entera: todos los botones salen del mismo
+            # tamaño, uno debajo del otro y sin escalones.
+            widget.pack(
+                fill="both", expand=True,
+                padx=(0, RELLENO_ACCION * 2), pady=RELLENO_ACCION // 2,
+            )
             if id_fila is not None:
                 botones_arbol[id_fila] = widget
 
-        celda_detalle = tk.Frame(fila)
-        celda_detalle.pack(side="left", fill="x", expand=True)
-
-        tk.Label(
-            celda_detalle,
-            text=detalle,
-            anchor="w",
-            fg=COLOR_NEUTRO,
-            font=("Segoe UI", 8),
-            wraplength=380,
-            justify="left",
-        ).pack(anchor="w")
+        celda_origen = tk.Frame(fila)
+        celda_origen.pack(side="left", fill="x", expand=True)
 
         if origen:
 
-            linea_origen = tk.Frame(celda_detalle)
-            linea_origen.pack(anchor="w")
-
             tk.Label(
-                linea_origen,
+                celda_origen,
                 text=f"{origen['titulo']}: ",
                 anchor="w",
                 fg=COLOR_NEUTRO,
@@ -692,7 +716,7 @@ def main():
             ).pack(side="left")
 
             link = tk.Label(
-                linea_origen,
+                celda_origen,
                 text=origen["etiqueta"],
                 anchor="w",
                 fg=COLOR_LINK,
@@ -718,7 +742,7 @@ def main():
             return ("Actualizar", actualizar_medidas_sae)
 
         if id_fila == "cmg_csv":
-            return ("Traer cmg_15min", traer_cmg_15min)
+            return ("Traer", traer_cmg_15min)
 
         if id_fila == "cmg_xlsx":
             return ("Generar", generar_cmg)
@@ -727,30 +751,32 @@ def main():
         # archivo, y las tres salidas de FMA las arma un solo boton,
         # colgado de la primera de las tres.
         if id_fila == "sscc":
-            return ("Traer FD", traer_fd)
+            return ("Traer", traer_fd)
 
         if id_fila.startswith("fma_"):
             tipo = id_fila.split("_", 1)[1]
             return ("Generar", lambda t=tipo: generar_fma(t))
 
         if id_fila == "db_subastas":
-            return ("Traer subastas", traer_subastas)
+            return ("Traer", traer_subastas)
 
+        # Los botones dicen SOLO el verbo (pedido del usuario): de que
+        # hoja se trata ya lo dice la fila en la que esta el boton.
         if id_fila == "pagos:compensacion_central":
-            return ("Resumir compensación",
+            return ("Resumir",
                     lambda: actualizar_pagos({"compensacion_central"}))
 
         if id_fila == "pagos:prorrata_retiros":
-            return ("Traer prorrata", lambda: actualizar_pagos({"prorrata_retiros"}))
+            return ("Traer", lambda: actualizar_pagos({"prorrata_retiros"}))
 
         if id_fila == "pagos:resumen":
-            return ("Asignar pagos", lambda: actualizar_pagos({"resumen"}))
+            return ("Asignar", lambda: actualizar_pagos({"resumen"}))
 
-        if id_fila == "consolidado":
-            return ("Actualizar todo", lambda: actualizar_consolidado(None))
-
-        if id_fila == "pagos":
-            return ("Calcular todo", lambda: actualizar_pagos(None))
+        # Las dos mitades de la planilla, de un solo boton: primero las
+        # entradas y despues el calculo (ese es el orden en que se
+        # necesitan, aunque en el libro queden al reves).
+        if id_fila == "salida":
+            return ("Actualizar", actualizar_planilla_entera)
 
         if id_fila.startswith("consolidado:"):
             seccion = id_fila.split(":", 1)[1]
@@ -786,7 +812,6 @@ def main():
                 prefijo,
                 fila["etiqueta"],
                 estado=fila["estado"],
-                detalle=fila["detalle"],
                 negrita=(fila["nivel"] == 0),
                 boton=_boton_de_fila(fila["id"]),
                 id_fila=fila["id"],
@@ -880,14 +905,16 @@ def main():
         try:
             _, filas = nucleo.revisar_estructura(ruta, var_aamm.get().strip())
         except Exception as error:
+            # El motivo va al registro: el diagrama ya no tiene
+            # columna de detalle donde ponerlo.
+            log(f"Error al revisar la carpeta: {error}")
             pintar_arbol(
                 [
                     {
                         "id": "error",
-                        "etiqueta": "Error al revisar",
+                        "etiqueta": "Error al revisar (ver el registro)",
                         "nivel": 0,
                         "estado": "falta",
-                        "detalle": str(error),
                     }
                 ]
             )
@@ -1271,8 +1298,9 @@ def main():
     def actualizar_consolidado(secciones):
         """
         secciones: set con UN id de SECCIONES_CONSOLIDADO (el boton
-        de esa hoja) o None para todas (el boton del archivo). Lo que
-        no entra se conserva tal cual esta hoy en el archivo.
+        de esa hoja) o None para todas. Lo que no entra se conserva
+        tal cual esta hoy en el archivo -- las hojas de calculo
+        incluidas: las dos mitades comparten planilla.
         """
 
         ruta = caso_listo()
@@ -1293,7 +1321,7 @@ def main():
         )
 
     def actualizar_pagos(secciones):
-        """Idem para Pagos_BESS.xlsx / SECCIONES_PAGOS."""
+        """Idem para las hojas de calculo / SECCIONES_PAGOS."""
 
         ruta = caso_listo()
         if ruta is None:
@@ -1306,8 +1334,46 @@ def main():
             nucleo.generar_pagos_bess,
             dict(carpeta_base=ruta, secciones_activas=secciones,
                  aamm=var_aamm.get().strip()),
-            nucleo.ARCHIVO_SALIDA_PAGOS,
+            nucleo.ARCHIVO_SALIDA,
         )
+
+    def actualizar_planilla_entera():
+        """
+        El boton de la fila del archivo: las dos mitades de la
+        planilla de una sola vez, en el orden en que se necesitan
+        -primero las entradas, despues el calculo que las lee-, en
+        una sola corrida con un solo registro.
+
+        No es lo mismo que "Ejecutar todo": aca no se trae ni se
+        genera ninguna ENTRADA (ni medidas, ni CMg, ni FD, ni
+        subastas), solo se rehacen las hojas de la planilla con lo que
+        ya hay en la carpeta del caso.
+        """
+
+        ruta = caso_listo()
+        if ruta is None:
+            return
+
+        aamm = var_aamm.get().strip()
+
+        def correr(registrar, progreso):
+
+            nucleo.generar_consolidado(
+                carpeta_base=ruta,
+                aamm=aamm,
+                secciones_activas={s[0] for s in nucleo.SECCIONES_CONSOLIDADO},
+                registrar=registrar,
+                progreso=lambda v: progreso(v / 2),
+            )
+            nucleo.generar_pagos_bess(
+                carpeta_base=ruta,
+                aamm=aamm,
+                secciones_activas={s[0] for s in nucleo.SECCIONES_PAGOS},
+                registrar=registrar,
+                progreso=lambda v: progreso(50 + v / 2),
+            )
+
+        lanzar(correr, {}, nucleo.ARCHIVO_SALIDA)
 
     # --------------------------------------------------------
     # CASO NUEVO: CREAR LA CARPETA DEL PERIODO CON SUS SUBCARPETAS
@@ -1668,7 +1734,7 @@ def main():
             lanzar(
                 nucleo.ejecutar_plan,
                 dict(carpeta_base=ruta, aamm=aamm, seleccion=ids),
-                f"{nucleo.ARCHIVO_SALIDA} / {nucleo.ARCHIVO_SALIDA_PAGOS}",
+                nucleo.ARCHIVO_SALIDA,
             )
 
         btn_ejecutar.config(command=ejecutar)
@@ -1730,11 +1796,11 @@ def main():
     log(
         "Selecciona la carpeta base del caso e ingresa el periodo "
         "(AAMM). Cada fila del diagrama de abajo trae su propio boton: "
-        "'Traer cmg_15min' y 'Generar' en Cmg/, 'Traer FD' y un "
-        "'Generar' por cada FMA en 'FD y FMA/', 'Traer subastas' en "
-        "Subastas/DB subastas/, 'Actualizar' en cada hoja de "
-        "Consolidado_entradas.xlsx y 'Calcular' en cada hoja de "
-        "Pagos_BESS.xlsx. Cada archivo y cada carpeta del diagrama "
+        "'Traer' y 'Generar' en Cmg/, 'Traer' y un 'Generar' por cada "
+        "FMA en 'FD y FMA/', 'Traer' en Subastas/DB subastas/, y en "
+        f"{nucleo.ARCHIVO_SALIDA} un boton por hoja ('Actualizar' en "
+        "las de entrada, 'Calcular' / 'Resumir' / 'Traer' / 'Asignar' "
+        "en las de calculo). Cada archivo y cada carpeta del diagrama "
         "es un link a su ruta, y las filas que traen algo de afuera "
         "dicen 'Origen: ...' con un link a la carpeta de origen."
     )

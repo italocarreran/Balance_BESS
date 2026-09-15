@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 
 from .parametros import (
-    ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
-    ARCHIVO_SALIDA_PAGOS, CARPETA_AUXILIARES, CARPETA_CMG,
+    ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_CONTROL, ARCHIVO_MEDIDAS_SAE,
+    ARCHIVO_SALIDA, CARPETA_AUXILIARES, CARPETA_CMG,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_FD_FMA_ANTIGUA,
     CARPETA_MEDIDAS, CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS,
     CARPETA_SUBASTAS,
@@ -57,8 +57,10 @@ def resolver_rutas(carpeta_base):
         "trabajo_medidas": medidas_dir / CARPETA_TRABAJO_MEDIDAS,
         "centrales": auxiliares_dir / ARCHIVO_CENTRALES,
         "cmg": cmg_dir / ARCHIVO_CMG,
+        # Una sola planilla (entradas + calculo) y, al lado, el
+        # archivo de control de la corrida.
         "salida": base / ARCHIVO_SALIDA,
-        "salida_pagos": base / ARCHIVO_SALIDA_PAGOS,
+        "control": base / ARCHIVO_CONTROL,
     }
 
 

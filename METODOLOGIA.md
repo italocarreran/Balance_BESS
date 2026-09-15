@@ -255,7 +255,7 @@ resto del proceso es puro pandas y sí se puede verificar.
   El resumen intermedio equivalente a la hoja
   "Resumen Ofertas SSCC" del `.xlsm` original (con una columna por
   servicio `_RS`) es puramente auxiliar para construir la tabla W:Y — no
-  se persiste en `Consolidado_entradas.xlsx`, solo vive en memoria dentro de
+  se persiste en la planilla, solo vive en memoria dentro de
   `construir_medidores()`. `R`, `S`, `T` sí son columnas por fila y están
   implementadas: dependen de las macros de Ofertas SSCC
   (`Generar_Resumen_Ofertas_SSCC`, `Resumir_Medidores_Central_Ventana_
@@ -279,7 +279,7 @@ resto del proceso es puro pandas y sí se puede verificar.
   distinto.
 - **Columnas deliberadamente vacías:** se agregan igual al DataFrame de
   salida (como `pd.NA`, listadas en `COLUMNAS_VACIAS` para `Medidores`) en
-  vez de omitirse, para que la forma de `Consolidado_entradas.xlsx` sea
+  vez de omitirse, para que la forma de la hoja `Medidores` sea
   comparable con la planilla 11 aunque la columna no tenga valor.
 - **CMg, FD, Subastas (plan §23):** replican únicamente las macros de
   *carga* de esas hojas (`Cargar_CMg_Desde_Archivo`,
@@ -307,11 +307,10 @@ resto del proceso es puro pandas y sí se puede verificar.
   `_contiene_bess_o_sae()` (Ofertas SSCC) sí. Son dos filtros distintos que
   se parecen — no fusionarlos en una sola función aunque parezca tentador.
 - **Subastas!N queda vacía a propósito:** su fórmula real depende de
-  `'Calculo E Costos'!D/G/P`; la hoja ya existe (en `Pagos_BESS.xlsx`,
-  etapa base, plan §25) pero todavía no las columnas específicas que esa
+  `'Calculo E Costos'!D/G/P`; la hoja ya existe (etapa base, plan §25)
+  pero todavía no las columnas específicas que esa
   fórmula necesita. No se adivina su valor.
-- **`Calculo E Costos` (plan §25), etapa base, en archivo separado
-  (`Pagos_BESS.xlsx`, nombre provisorio):** replica solo una parte de
+- **`Calculo E Costos` (plan §25), etapa base:** replica solo una parte de
   `Traspasar_Medidores_A_Calculos_Rapido` (traspaso A:G con D↔E
   invertidas, I/J según signo y `Ventana_No_Completa`, J→K, K→P) y de
   `Asignar_CMg_a_Calculos_Turbo` (columna Q, con `escribirR=False` — la
@@ -384,8 +383,8 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   fija.** Confirmado en el plan §16.1: ni letras de columna ni offsets
   constantes entre el nombre de la central y `Time Stamp`/`Value`, porque
   esa distancia varía entre archivos mensuales.
-- **`Consolidado_entradas.xlsx` (antes `Hoja_Medidas.xlsx`) es un artefacto
-  de validación, no un archivo versionado.** Se genera por caso en la
+- **La planilla de salida es un artefacto de validación, no un archivo
+  versionado.** Se genera por caso en la
   carpeta base del usuario y se ignora en git (ver `.gitignore`); el
   repositorio no guarda salidas de casos concretos. Se renombró porque ya
   no es solo la etapa Medidores: consolida varias entradas materializadas
@@ -407,9 +406,10 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   Confiar en un regex sobre el nombre para extraer el período era frágil;
   pedirlo explícitamente en la ventana es la fuente de verdad y además
   sirve para validar el archivo de SoC encontrado (debe contener ese AAMM).
-- **`Calculo E Costos` vive en un archivo separado (`Pagos_BESS.xlsx`,
-  nombre provisorio), no en `Consolidado_entradas.xlsx`.** Pedido explícito
-  del usuario. Y se implementa **por etapas**: primero H (Barra) + CMg +
+- **`Calculo E Costos` se implementa por etapas.** Vivió un tiempo en un
+  archivo separado (`Pagos_BESS.xlsx`, nombre provisorio) a pedido del
+  usuario; hoy vuelve a estar en la misma planilla que las entradas — ver
+  la entrada "Una sola planilla de salida" más abajo. Las etapas: primero H (Barra) + CMg +
   traspaso base desde Medidores (elegido explícitamente por el usuario
   frente a la alternativa de traducir de una sola vez toda
   `Actualizar_Calculos_Columnas`, ~1500 líneas con dependencias profundas);
@@ -439,7 +439,7 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   en vez de un único botón "Ejecutar" para todo.** Pedido explícito del
   usuario, con un archivo de referencia (`Revisor_Reliquidacion.py`) para
   el estilo de ventana (diagrama de carpetas + botón por fila). Al
-  destildar una sección en la ventana de `Consolidado_entradas.xlsx`, esa
+  no pedir una sección, esa
   parte se **conserva** tal cual estaba (copia cruda de la hoja existente,
   no un recálculo ni un vaciado) — confirmado explícitamente con el
   usuario frente a las otras dos alternativas (recalcular todo siempre, o
@@ -447,8 +447,30 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   cada archivo de entrada: `"medidores"` agrupa Medidas_SAE + SoC +
   Centrales + OfertasSSCC porque `construir_medidores()` los necesita
   siempre juntos, no se pueden actualizar por separado a ese nivel de
-  detalle. `Pagos_BESS.xlsx` por ahora no tiene casillas (una sola hoja de
-  salida) — "ajustamos detalles después" (palabras del usuario).
+  detalle. Hoy cada hoja de las dos mitades tiene su propio botón en la
+  fila de esa hoja, y no hay ninguna ventana intermedia de casillas.
+- **Una sola planilla de salida, ordenada de fin a inicio, y el control
+  aparte.** Pedido explícito del usuario: *"combinar el consolidado
+  entradas con pagos bess pero ordenados de fin a inicio, el fin es el
+  resumen y el inicio las entradas"*, y *"que las hojas de Alertas,
+  Ejecución y Log queden en una planilla diferente"*. Así que:
+  `Consolidado_entradas.xlsx` + `Pagos_BESS.xlsx` = `Balance_BESS.xlsx`
+  (`ARCHIVO_SALIDA`), con las hojas en `ORDEN_HOJAS_SALIDA` — `Resumen`
+  arriba, `Medidores` abajo —, y `Control_corrida.xlsx` (`ARCHIVO_CONTROL`)
+  al lado con `Ejecucion`, `Alertas` y `Log`.
+
+  Las dos mitades se siguen **escribiendo por separado** (cada hoja tiene
+  su botón y su cálculo detrás): lo que cambió es que la que escribe
+  preserva las hojas de la otra (`_preservar_ajenas()`) y reordena el libro
+  al final (`_ordenar_hojas()`). La alternativa —una sola función que
+  escribiera las diez hojas de un viaje— hubiera obligado a recalcular todo
+  en cada botón, que es justo lo que el usuario no quiere.
+
+  Trampa que deja esto: el `ExcelWriter` **trunca** el archivo, así que el
+  libro anterior se lee SIEMPRE antes de abrirlo (`_abrir_existente()`), no
+  solo cuando se pide una actualización parcial. Si eso se saltea, escribir
+  una hoja se lleva puestas las otras nueve.
+
 - **Las hojas de salida no reproducen los auxiliares de la planilla
   original, y el orden de las hojas es el de lectura.** Pedido explícito
   del usuario ("ordena las planillas, quita los auxiliares innecesarios"),
@@ -495,10 +517,10 @@ Lista de solo agregar, para no volver a discutir lo mismo en cada sesión.
   las hojas que dependen de ellas quedan fuera del plan, a la vista y
   con el motivo. Mover una entrada de un grupo al otro es una decisión
   de producto, no un detalle: se decide con el usuario.
-- **Lo que ya está en `Consolidado_entradas.xlsx` se lee de ahí, no de
+- **Lo que ya está escrito en la planilla se lee de ahí, no de
   su origen.** Vale para `Medidores`, `Ofertas SSCC`, `Subastas`, `FD`
   y ahora también `CMg` (antes la etapa de pagos reabría `cmg.xlsx`).
-  El consolidado es la ÚNICA foto de las entradas con la que se paga:
+  Las hojas de entrada son la ÚNICA foto con la que se paga:
   si una entrada cambia después de generarlo, se regenera su hoja con
   su botón, no se lee el archivo nuevo por un costado. Y al leer varias
   hojas del mismo libro se abre UNA vez (`pd.ExcelFile`), porque cada

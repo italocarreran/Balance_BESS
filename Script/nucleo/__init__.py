@@ -63,16 +63,18 @@ from .externos import (
 )
 
 from .parametros import (
-    ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
-    ARCHIVO_SALIDA_PAGOS, CARPETA_AUXILIARES, CARPETA_CMG,
+    ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_CONTROL, ARCHIVO_MEDIDAS_SAE,
+    ARCHIVO_SALIDA, CARPETA_AUXILIARES, CARPETA_CMG,
     CARPETA_DB_SUBASTAS, CARPETA_FD_FMA, CARPETA_FD_FMA_ANTIGUA,
     CARPETA_MEDIDAS, CARPETA_OFERTAS, CARPETA_PRORRATA_RETIROS,
     CARPETA_SUBASTAS,
     CARPETA_TRABAJO_MEDIDAS, COLUMNAS_AI,
     COLUMNAS_AUXILIARES_MEDIDORES, COLUMNAS_MEDIDORES_SALIDA,
     COLUMNAS_VACIAS,
-    EXTENSIONES_EXCEL, HOJA_CALCULO_ECOSTOS, HOJA_CALCULO_RE545,
-    HOJA_PRORRATA_RETIROS, HOJA_RESUMEN,
+    EXTENSIONES_EXCEL, HOJA_ALERTAS, HOJA_CALCULO_ECOSTOS,
+    HOJA_CALCULO_RE545, HOJA_CMG, HOJA_EJECUCION, HOJA_FD, HOJA_LOG,
+    HOJA_MEDIDORES, HOJA_PRORRATA_RETIROS, HOJA_RESUMEN, HOJA_SUBASTAS,
+    ORDEN_HOJAS_CONTROL, ORDEN_HOJAS_SALIDA,
     HOJA_CMG_ORIGEN, HOJA_CPF_HORARIO, HOJA_CSF_HORARIO,
     HOJA_DICCIONARIO, HOJA_MEDIDAS_SAE, HOJA_RESUMEN_BESS,
     COLUMNAS_OFERTAS_EN_MEDIDORES, INICIO_VENTANA, LETRA_A_CAMPO,
@@ -106,7 +108,8 @@ from .rutas import (
 )
 from .origenes import ORIGENES, origen, ruta_origen
 from .estructura import (
-    SECCIONES_CONSOLIDADO, SECCIONES_PAGOS, _fila, _filas_de_hojas,
+    SECCIONES_CONSOLIDADO, SECCIONES_PAGOS, SECCIONES_SALIDA, _fila,
+    _filas_de_hojas,
     hojas_con_datos, hojas_de, revisar_estructura,
 )
 from .prorrata_retiros import (
@@ -217,7 +220,8 @@ from .formato import formatear_hoja, formatear_libro
 from .escritura import (
     _COLUMNA_Q_INDICE, _HOJAS_CONSOLIDADO,
     _HOJAS_PAGOS, _copiar_hoja_existente, _escribir_encabezados_grupo,
-    _escribir_tabla_con_titulo, escribir_pagos_bess, escribir_salida,
+    _escribir_tabla_con_titulo, escribir_control, escribir_pagos_bess,
+    escribir_salida,
 )
 from .proceso import generar_consolidado, generar_pagos_bess
 from .orquestador import (
@@ -245,7 +249,7 @@ __all__ = [
     "Generacion_Real", "Homologacion", "desempeno_fd", "extrae_cmg",
     "fma_subastas", "indicadores_dco", "indices_fma", "ofertas_adj",
     "ARCHIVO_CENTRALES", "ARCHIVO_CMG", "ARCHIVO_MEDIDAS_SAE",
-    "ARCHIVO_SALIDA", "ARCHIVO_SALIDA_PAGOS", "CARPETA_AUXILIARES",
+    "ARCHIVO_SALIDA", "ARCHIVO_CONTROL", "CARPETA_AUXILIARES",
     "CARPETA_CMG", "CARPETA_DB_SUBASTAS", "CARPETA_FD_FMA",
     "CARPETA_FD_FMA_ANTIGUA", "CARPETA_MEDIDAS", "CARPETA_OFERTAS",
     "CARPETA_PRORRATA_RETIROS",
@@ -257,7 +261,10 @@ __all__ = [
     "formatear_hoja", "formatear_libro", "leer_cmg_consolidado",
     "GRUPOS", "GRUPO_POR_ID", "TAREAS", "TAREA_POR_ID", "dependientes",
     "ejecutar_plan", "planificar", "propagar_seleccion",
-    "EXTENSIONES_EXCEL", "HOJA_CALCULO_ECOSTOS",
+    "EXTENSIONES_EXCEL", "HOJA_CALCULO_ECOSTOS", "HOJA_ALERTAS",
+    "HOJA_EJECUCION", "HOJA_LOG", "HOJA_MEDIDORES", "HOJA_CMG",
+    "HOJA_FD", "HOJA_SUBASTAS", "ORDEN_HOJAS_SALIDA",
+    "ORDEN_HOJAS_CONTROL", "SECCIONES_SALIDA", "escribir_control",
     "HOJA_CALCULO_RE545", "HOJA_PRORRATA_RETIROS", "HOJA_RESUMEN",
     "HOJA_CMG_ORIGEN", "HOJA_CPF_HORARIO",
     "HOJA_CSF_HORARIO", "HOJA_DICCIONARIO", "HOJA_MEDIDAS_SAE",

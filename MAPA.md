@@ -108,34 +108,47 @@ importable como cualquier módulo.
   subcarpetas — ver `rutas.py`), **Ejecutar todo** (abre el plan de la
   corrida y la ejecuta respetando el grafo de dependencias — ver
   `orquestador.py`) y **Abrir carpeta del caso**. Las columnas del diagrama son
-  `Estructura | Estado | Acción | Detalle` — el botón va a la **izquierda**
-  del detalle, en una celda de ancho fijo (`ANCHO_ACCION`, en píxeles) para
-  que el detalle arranque siempre en la misma columna tenga o no botón esa
-  fila.
+  `Estructura | Estado | Acción | Origen` — ya **no hay columna de detalle**
+  (el usuario la pidió sacar): a la derecha del botón queda solo el
+  `Origen: ...` con su link, en las filas que traen algo de afuera del caso.
+  Las cuatro columnas son celdas (`Frame`) de ancho fijo **en píxeles**
+  (`ANCHO_ESTRUCTURA`, `ANCHO_ESTADO`, `ANCHO_ACCION`) con
+  `pack_propagate(False)`: antes estaban en "caracteres" y una fila en
+  negrita (las de nivel 0) corría el estado y el botón a la derecha respecto
+  del resto. Cada botón ocupa su celda entera, así que todos miden lo mismo
+  y quedan en una columna recta.
 
   | Fila | Botón | Qué hace |
   |---|---|---|
   | `Medidas/Medidas_SAE.xlsx` | **Actualizar** | `nucleo.generar_medidas_sae` — corre los cuatro pasos de Medidas de un viaje |
-  | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer cmg_15min** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
+  | `Cmg/cmg<AAMM>_def_15minutal.csv` | **Traer** | `nucleo.traer_csv_cmg` — copia el CSV del período desde la unidad de red a `Cmg/` |
   | `Cmg/cmg.xlsx` | **Generar** | `nucleo.generar_cmg` — arma `cmg.xlsx` con el CSV que quedó al lado |
-  | `FD y FMA/SSCC_Desempeño_*` | **Traer FD** | `nucleo.traer_fd` — baja el FD del período del árbol de indicadores del DCO y descomprime el zip |
+  | `FD y FMA/SSCC_Desempeño_*` | **Traer** | `nucleo.traer_fd` — baja el FD del período del árbol de indicadores del DCO y descomprime el zip |
   | `FD y FMA/fma_cpf_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"cpf"}` — desde los reportes diarios del DCO |
   | `FD y FMA/fma_csf_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"csf"}` — trae los reportes del AGC a `agcface/` y los concatena |
   | `FD y FMA/fma_cft_<AAMM>.xlsx` | **Generar** | `nucleo.generar_fma` con `{"ctf"}` — desde el `CTF_<AAAA><MM>.csv` del DCO |
-  | `Subastas/DB subastas/` | **Traer subastas** | `nucleo.traer_subastas` — copia los `OfertasSSCCAdj*.accdb` del período desde la unidad de red |
-  | `Consolidado_entradas.xlsx` | **Actualizar todo** | `generar_consolidado` con todas las secciones |
-  | cada `hoja '...'` de esa salida | **Actualizar** | `generar_consolidado` con esa sola sección |
-  | `Pagos_BESS.xlsx` | **Calcular todo** | `generar_pagos_bess` con todas |
-  | cada `hoja '...'` de esa salida | **Calcular** | `generar_pagos_bess` con esa sola |
-  | `Pagos_BESS.xlsx/COMPENSACION_CENTRAL` | **Resumir compensación** | compensación por central y ciclo/ventana, y total por empresa |
-  | `Pagos_BESS.xlsx/PRORRATA_RETIROS` | **Traer prorrata** | reparte el monto de cada cuarto de hora segun `Prorrata 15min` |
-  | `Pagos_BESS.xlsx/Resumen` | **Asignar pagos** | consolida `RECIBE`, `PAGA` y `NETO` por empresa |
+  | `Subastas/DB subastas/` | **Traer** | `nucleo.traer_subastas` — copia los `OfertasSSCCAdj*.accdb` del período desde la unidad de red |
+  | `Balance_BESS.xlsx` | **Actualizar** | las dos mitades de un viaje: `generar_consolidado` con todas las secciones y después `generar_pagos_bess` con todas |
+  | cada `hoja '...'` de entrada | **Actualizar** | `generar_consolidado` con esa sola sección |
+  | cada `hoja '...'` de cálculo | **Calcular** | `generar_pagos_bess` con esa sola |
+  | `Balance_BESS.xlsx/COMPENSACION_CENTRAL` | **Resumir** | compensación por central y ciclo/ventana, y total por empresa |
+  | `Balance_BESS.xlsx/PRORRATA_RETIROS` | **Traer** | reparte el monto de cada cuarto de hora segun `Prorrata 15min` |
+  | `Balance_BESS.xlsx/Resumen` | **Asignar** | consolida `RECIBE`, `PAGA` y `NETO` por empresa |
+  | `Control_corrida.xlsx` | (sin botón) | lo deja cada corrida: `Ejecucion`, `Alertas` y `Log` |
 
-  Las dos salidas se desglosan por hoja igual que `Centrales.xlsx`: lo que
+  Los botones dicen **solo el verbo** (pedido del usuario: *"los botones de
+  resumir y traer que digan solo eso"*): de qué hoja se trata ya lo dice la
+  fila en la que está el botón.
+
+  La salida es **una sola planilla** (`ARCHIVO_SALIDA`), con las hojas
+  ordenadas de fin a inicio (`ORDEN_HOJAS_SALIDA`: `Resumen` arriba,
+  `Medidores` abajo). Se desglosa por hoja igual que `Centrales.xlsx`: lo que
   no se actualiza se **conserva** tal cual estaba en el archivo (no se
   recalcula ni se borra — ver `escribir_salida`/`hojas_regenerar`), y si el
   archivo todavía no existe se crea con el resto de las hojas vacías (queda
-  registrado en su hoja `Log` y el diagrama las muestra como PENDIENTE).
+  registrado en la hoja `Log` del archivo de control y el diagrama las
+  muestra como PENDIENTE). Cada mitad preserva además las hojas de la otra
+  (`_preservar_ajenas`): son el mismo archivo.
 
   **Todo es link.** El nombre de cada archivo y de cada carpeta del
   diagrama abre en el explorador **la carpeta** de esa ruta (la que
@@ -181,8 +194,8 @@ importable como cualquier módulo.
   último AAMM recordados, por PC/usuario).
 - **Produce:** `config.json` actualizado con la carpeta base y el AAMM
   elegidos; dispara en `nucleo` la escritura del CSV de CMg, `cmg.xlsx`,
-  `Consolidado_entradas.xlsx` y/o `Pagos_BESS.xlsx` dentro de la carpeta
-  base del caso (cada uno por su botón).
+  `Balance_BESS.xlsx` (y `Control_corrida.xlsx`) dentro de la carpeta
+  base del caso (cada hoja por su botón).
 - **Expone:** `main()` — punto de entrada (`python Balance_BESS.py`);
   `carpeta_a_abrir(ruta, es_archivo=False)` y
   `abrir_en_explorador(ruta, es_archivo=False)` (la carpeta que abre cada
@@ -580,9 +593,11 @@ importable como cualquier módulo.
   SSCC), la carga de CMg, FD y Subastas, y una primera etapa (base) de
   Calculo E Costos, sin interfaz. Resuelve las rutas de un caso a partir de
   la carpeta base, valida que existan las entradas requeridas (incluido el
-  período AAMM que ingresa el usuario), y escribe `Consolidado_entradas.xlsx`
-  (hojas `Medidores`, `Ofertas SSCC`, `CMg`, `FD`, `Subastas`, `Log`) y
-  `Pagos_BESS.xlsx` (hoja `Calculo E Costos`, nombre y alcance provisorios).
+  período AAMM que ingresa el usuario), y escribe `Balance_BESS.xlsx` (una
+  sola planilla: `Resumen`, `PRORRATA_RETIROS`, `COMPENSACION_CENTRAL`,
+  `Calculo RE545`, `Calculo E Costos`, `Subastas`, `FD`, `CMg`,
+  `Ofertas SSCC`, `Medidores`) y `Control_corrida.xlsx` (`Ejecucion`,
+  `Alertas`, `Log`).
 
   **Medidores**: calculadas J (SoC), L (Ventana), O (Indicador_SoC).
 
@@ -689,8 +704,9 @@ importable como cualquier módulo.
   `Ventana_No_Completa = 1`; si no, la fila es de `Calculo RE545`, fuera de
   alcance), K/`SoC` (copia de `Medidores!SoC`), P/`Copia_Ventana` (copia de
   `Medidores!Copia_Ventana`) y Q/`CMg` (homologado por `Barra` + `Cuarto de
-  Hora` normalizado, vía `NormalizaCuarto`). Va a un archivo **separado**
-  (`Pagos_BESS.xlsx`, nombre provisorio) a pedido explícito del usuario.
+  Hora` normalizado, vía `NormalizaCuarto`). Vivió un tiempo en un archivo
+  separado (`Pagos_BESS.xlsx`); hoy es una hoja más de la única planilla
+  `Balance_BESS.xlsx` (el usuario pidió volver a combinarlas).
 
   **Calculo E Costos, etapas 2 y 3** (plan §25.6-25.10): agrega `L, M, N,
   O, R, S, T, U, W, X, Y, AB, AC, AD, AE, AF, AG, AH, AI, AJ, AK, AL, AM,
@@ -734,12 +750,11 @@ importable como cualquier módulo.
   anotado no existía. Fuera de alcance: la columna `AY` (que la macro
   original tampoco escribe).
 
-  **`Pagos_BESS.xlsx` tiene casillas por hoja** en su ventana "Generar"
-  (`SECCIONES_PAGOS`, mismo patron que `SECCIONES_CONSOLIDADO`): una
-  para `Calculo E Costos`, otra para `Calculo RE545`. La hoja que se
-  destilda se preserva tal cual estaba en el archivo existente (no se
-  recalcula ni se borra), mismo criterio de `escribir_salida()` para
-  `Consolidado_entradas.xlsx`. Solo `Calculo E Costos` exige el archivo
+  **Las hojas de cálculo tienen su propio botón** (`SECCIONES_PAGOS`,
+  mismo patrón que `SECCIONES_CONSOLIDADO`). La hoja que no se pide se
+  preserva tal cual estaba en el archivo existente (no se recalcula ni se
+  borra), mismo criterio de `escribir_salida()` para las hojas de
+  entrada. Solo `Calculo E Costos` exige el archivo
   `SSCC_Desempeño_*`; `Calculo RE545` no lo necesita, asi que tildar
   solo esa seccion no lo pide.
 
@@ -791,22 +806,25 @@ importable como cualquier módulo.
   - Los Access `OfertasSSCCAdj<AAAAMMDD>[_HH].accdb` del período que estén
     en `<CARPETA_BASE>/Subastas/DB subastas/` — **el origen real de la hoja
     `Subastas` desde esta sesión** (ver `Script/Subastas/`). La carpeta la
-    crea el programa si no existe y se llena con el botón "Traer subastas".
+    crea el programa si no existe y se llena con el botón "Traer".
   - La planilla `3_REMUNERACIÓN_SUBASTAS_E_ID_*` **ya no se usa** (el
     usuario lo confirmó): se sacó de la ventana y del código. Nunca fue el
     origen
 - **Produce:**
-  - `<CARPETA_BASE>/Consolidado_entradas.xlsx`, hojas: `Medidores`, `Ofertas
-    SSCC` (las tablas W:Y y AB:AE equivalentes, una al lado de la otra — ver
-    `_escribir_tabla_con_titulo()`), `CMg`, `FD` (los bloques CSF y CPF lado
-    a lado, columnas A:M y Q:AE, con sus nombres reales), `Subastas` (con
-    sus nombres reales), `Log`.
-  - `<CARPETA_BASE>/Pagos_BESS.xlsx` (nombre provisorio), hoja `Calculo E
-    Costos` hasta `AV` (ver más arriba). `AM:AR` sale de la hoja `FD` del
-    propio `Consolidado_entradas.xlsx` (`leer_fd_consolidado()`), no de
-    releer el `SSCC_Desempeño_*`: el consolidado es la única foto de las
-    entradas con la que se calcula, igual que ya pasaba con `Medidores` y
-    `Subastas`.
+  - `<CARPETA_BASE>/Balance_BESS.xlsx` — **una sola planilla**, con las
+    hojas de fin a inicio (`ORDEN_HOJAS_SALIDA`): `Resumen`,
+    `PRORRATA_RETIROS`, `COMPENSACION_CENTRAL`, `Calculo RE545`,
+    `Calculo E Costos`, `Subastas` (con sus nombres reales), `FD` (los
+    bloques CSF y CPF lado a lado, columnas A:M y Q:AE, con sus nombres
+    reales), `CMg`, `Ofertas SSCC` (las tablas W:Y y AB:AE equivalentes,
+    una al lado de la otra — ver `_escribir_tabla_con_titulo()`) y
+    `Medidores`. `'Calculo E Costos'!AM:AR` sale de la hoja `FD` de la
+    misma planilla (`leer_fd_consolidado()`), no de releer el
+    `SSCC_Desempeño_*`: las hojas de entrada son la única foto con la que
+    se calcula, igual que ya pasaba con `Medidores` y `Subastas`.
+  - `<CARPETA_BASE>/Control_corrida.xlsx` — el control de la corrida:
+    `Ejecucion`, `Alertas` y `Log`. Sale aparte a pedido del usuario, para
+    que no ensucie la planilla de trabajo (`escribir_control()`).
 - **Expone (funciones clave agregadas hasta ahora, además de las básicas
   de E/S y homologación):**
   - Diagnóstico de homologaciones: `_avisar_claves_sin_mapeo()` agrupa por
@@ -898,8 +916,15 @@ importable como cualquier módulo.
     estén en el set se copian tal cual desde `ruta_existente`
     (`_copiar_hoja_existente()`, copia cruda vía `openpyxl`, sin fórmulas ni
     formato) en vez de recalcularse.
+  - `SECCIONES_SALIDA` — las dos mitades juntas, en el orden en que quedan
+    las hojas del libro (`(prefijo_id, sección)`), con un `assert` que
+    obliga a que ese orden sea exactamente `ORDEN_HOJAS_SALIDA`: si alguien
+    agrega una hoja en un lado y se olvida del otro, revienta al importar.
+  - `escribir_control(ruta_control, df_log=None, registro=None, ...)` —
+    escribe `Control_corrida.xlsx` (`Ejecucion`, `Alertas`, `Log`),
+    preservando las hojas que esa pasada no reescribe.
   - `SECCIONES_CONSOLIDADO` — tupla de `(id, etiqueta, descripción, hojas)`
-    por cada casilla de la ventana "Generar" de `Consolidado_entradas.xlsx`.
+    por cada hoja de ENTRADA de la planilla (una por botón).
     `"medidores"` y `"ofertas_sscc"` son ids SEPARADOS (una casilla cada
     uno). La dependencia entre las dos se dio vuelta: ahora `Ofertas SSCC`
     necesita `Medidores` (de ahí salen las centrales y las ventanas) y no
@@ -908,7 +933,8 @@ importable como cualquier módulo.
     Medidores en memoria pero no lo reescribe si no se pidió. `"cmg"`,
     `"fd"`, `"subastas"` siguen siendo independientes de punta a punta.
   - `generar_consolidado(carpeta_base, aamm, secciones_activas, registrar=print, progreso=None)`
-    — genera/actualiza `Consolidado_entradas.xlsx` recalculando solo las
+    — genera/actualiza las hojas de entrada de `Balance_BESS.xlsx`
+    recalculando solo las
     secciones pedidas; valida los archivos de entrada únicamente para esas
     secciones (si no se pide `"medidores"`, no exige
     Medidas_SAE/SoC/Centrales/Ofertas). Si el archivo no existe, se crea.
@@ -926,7 +952,7 @@ importable como cualquier módulo.
     particular de este.
   - `traer_csv_cmg(carpeta_base, aamm, registrar=print, progreso=None)` —
     copia el CSV 15-minutal del período de la unidad de red a
-    `<CARPETA_BASE>/Cmg/` (botón **Traer cmg_15min**). Se copia en vez de
+    `<CARPETA_BASE>/Cmg/` (botón **Traer**). Se copia en vez de
     leerlo directo de la red para que el caso quede autocontenido: una vez
     traído, `cmg.xlsx` se puede regenerar sin la unidad conectada y queda
     registrado con qué archivo se trabajó.
@@ -940,8 +966,9 @@ importable como cualquier módulo.
     layout) vive en `Script/Cmg/Extrae_CMG_barras.py`, ver su bloque más
     arriba.
   - `generar_pagos_bess(carpeta_base, registrar=print, progreso=None)` —
-    genera/actualiza `Pagos_BESS.xlsx`; lee `Medidores` Y `Subastas` desde
-    `Consolidado_entradas.xlsx` ya generado (no los recalcula), y
+    genera/actualiza las hojas de cálculo de `Balance_BESS.xlsx`; lee
+    `Medidores` Y `Subastas` de las hojas de entrada ya generadas de esa
+    misma planilla (no los recalcula), y
     Centrales.xlsx/cmg.xlsx/`SSCC_Desempeño_*` frescos (este último, nuevo,
     para `AM:AR`). Sin `aamm` como parámetro: nada de las etapas 2/3 de
     Calculo E Costos lo necesita (todo sale de `Medidores`/`Subastas`, que

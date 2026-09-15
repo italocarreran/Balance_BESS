@@ -42,8 +42,7 @@ from .estructura import revisar_estructura
 from .externos import Homologacion
 from .parametros import (
     ARCHIVO_CENTRALES, ARCHIVO_CMG, ARCHIVO_MEDIDAS_SAE, ARCHIVO_SALIDA,
-    ARCHIVO_SALIDA_PAGOS, HOJA_COMPENSACION_CENTRAL, HOJA_DICCIONARIO,
-    HOJA_RESUMEN_BESS,
+    HOJA_COMPENSACION_CENTRAL, HOJA_DICCIONARIO, HOJA_RESUMEN_BESS,
 )
 from .proceso import generar_consolidado, generar_pagos_bess
 from .medidas_sae import generar_medidas_sae
@@ -129,8 +128,15 @@ GRUPOS = (
     Grupo("fma", "Salidas de FMA", "fd_fma", _correr_fma),
     Grupo("subastas_db", "Access de subastas", "subastas",
           _correr_traer_subastas),
-    Grupo("consolidado", ARCHIVO_SALIDA, "consolidado", _correr_consolidado),
-    Grupo("pagos", ARCHIVO_SALIDA_PAGOS, "pagos", _correr_pagos),
+    # Los dos escriben el MISMO archivo (una sola planilla), asi que
+    # comparten recurso: nunca pueden correr a la vez.
+    Grupo(
+        "consolidado", f"{ARCHIVO_SALIDA} (entradas)", "salida",
+        _correr_consolidado,
+    ),
+    Grupo(
+        "pagos", f"{ARCHIVO_SALIDA} (calculo)", "salida", _correr_pagos,
+    ),
 )
 
 GRUPO_POR_ID = {grupo.id: grupo for grupo in GRUPOS}
@@ -180,7 +186,7 @@ TAREAS = (
         "subastas_db", None, "db_subastas",
         (), (), (),
     ),
-    # --- Consolidado_entradas.xlsx (las 5 hojas, en UNA escritura) ---
+    # --- Las 5 hojas de entrada de la planilla (en UNA escritura) ---
     Tarea(
         "consolidado:medidores", "hoja 'Medidores'",
         "consolidado", "medidores", "consolidado:medidores",
@@ -213,7 +219,7 @@ TAREAS = (
         _REQ_CENTRALES, ("subastas_db", "fd_sscc"),
         ("fma_cpf", "fma_csf", "fma_ctf"),
     ),
-    # --- Pagos_BESS.xlsx (las 4 hojas, en UNA escritura) -------------
+    # --- Las hojas de calculo de la planilla (en UNA escritura) ------
     Tarea(
         "pagos:ecostos", "hoja 'Calculo E Costos'",
         "pagos", "ecostos", "pagos:ecostos",

@@ -75,17 +75,57 @@ HOJA_CSF_HORARIO = "CSF Horario"
 # Ofertas_Adjudicadas.py, no este modulo.
 CARPETA_DB_SUBASTAS = ofertas_adj.CARPETA_DB_SUBASTAS
 
-ARCHIVO_SALIDA = "Consolidado_entradas.xlsx"
+# UNA sola planilla de salida (pedido del usuario: "combinar el
+# consolidado entradas con pagos bess"). Antes eran dos
+# (Consolidado_entradas.xlsx + Pagos_BESS.xlsx); ahora las entradas y
+# el calculo viven en el mismo libro, ordenado de FIN A INICIO: el
+# Resumen primero y las entradas al final (ver ORDEN_HOJAS_SALIDA).
+ARCHIVO_SALIDA = "Balance_BESS.xlsx"
 
-# Etapa siguiente (Calculo E Costos / "Ecostos"): el usuario pidio que
-# viva en una planilla aparte de Consolidado_entradas.xlsx. Nombre
-# provisorio, puede cambiar.
-ARCHIVO_SALIDA_PAGOS = "Pagos_BESS.xlsx"
+# Las hojas de control de la corrida (Alertas, Ejecucion, Log) ya no
+# ensucian la planilla de trabajo: viven en su propio archivo, al lado
+# (pedido del usuario).
+ARCHIVO_CONTROL = "Control_corrida.xlsx"
+
+# --- hojas de la planilla de salida --------------------------------
+# Las entradas (el "inicio").
+HOJA_MEDIDORES = "Medidores"
+HOJA_OFERTAS_SSCC = "Ofertas SSCC"
+HOJA_CMG = "CMg"
+HOJA_FD = "FD"
+HOJA_SUBASTAS = "Subastas"
+
+# El calculo y el cierre (el "fin").
 HOJA_CALCULO_ECOSTOS = "Calculo E Costos"
 HOJA_CALCULO_RE545 = "Calculo RE545"
 HOJA_COMPENSACION_CENTRAL = "COMPENSACION_CENTRAL"
 HOJA_PRORRATA_RETIROS = "PRORRATA_RETIROS"
 HOJA_RESUMEN = "Resumen"
+
+# El orden en que quedan las hojas del libro, de FIN A INICIO: se abre
+# en el Resumen (quien paga y quien recibe, que es lo que se mira
+# primero) y se termina en las entradas de las que sale todo. Es el
+# orden que usan la escritura (escritura.py) y el diagrama de la
+# ventana (estructura.py): si se agrega una hoja, va aca.
+ORDEN_HOJAS_SALIDA = (
+    HOJA_RESUMEN,
+    HOJA_PRORRATA_RETIROS,
+    HOJA_COMPENSACION_CENTRAL,
+    HOJA_CALCULO_RE545,
+    HOJA_CALCULO_ECOSTOS,
+    HOJA_SUBASTAS,
+    HOJA_FD,
+    HOJA_CMG,
+    HOJA_OFERTAS_SSCC,
+    HOJA_MEDIDORES,
+)
+
+# --- hojas del archivo de control ----------------------------------
+HOJA_EJECUCION = "Ejecucion"
+HOJA_ALERTAS = "Alertas"
+HOJA_LOG = "Log"
+
+ORDEN_HOJAS_CONTROL = (HOJA_EJECUCION, HOJA_ALERTAS, HOJA_LOG)
 
 # El periodo AAMM (ej. "2607") ya no se infiere del nombre del archivo:
 # lo ingresa el usuario en la ventana. El archivo de SoC solo debe

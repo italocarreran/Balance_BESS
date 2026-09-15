@@ -10,7 +10,7 @@ from pathlib import Path
 from .lectura import (
     ROL_BALANCE_BESS, ROL_OFERTAS, ROL_SUBASTAS, filas_diccionario,
 )
-from .parametros import INICIO_VENTANA
+from .parametros import HOJA_OFERTAS_SSCC, INICIO_VENTANA
 from .utiles import (
     ErrorEntrada, _es_numero, _texto_seguro, _tiene_valor, _valor_clave,
 )
@@ -652,8 +652,9 @@ def calcular_t(clave, ventana, resumen_ventana_oferta):
 
 # Titulo de cada una de las dos tablas de la hoja. Los usa escritura.py
 # para escribirlas y leer_ofertas_sscc_consolidado() para encontrarlas:
-# si alguien cambia uno, las dos puntas se mueven juntas.
-HOJA_OFERTAS_SSCC = "Ofertas SSCC"
+# si alguien cambia uno, las dos puntas se mueven juntas. El nombre
+# de la hoja sale de parametros.py (ORDEN_HOJAS_SALIDA), y se
+# reexporta aca porque medio modulo la busca por este nombre.
 TITULO_OFERTAS_POR_DIA = (
     "Ofertas SSCC por dia (equivalente a Medidores!W:Y)"
 )
@@ -665,7 +666,7 @@ TITULO_RESUMEN_VENTANA = (
 def leer_ofertas_sscc_consolidado(ruta_consolidado, registrar=print, libro=None):
     """
     Las dos tablas de la hoja "Ofertas SSCC" de
-    Consolidado_entradas.xlsx: (df_wxy, df_resumen_ventana).
+    la planilla de salida: (df_wxy, df_resumen_ventana).
 
     libro: un pd.ExcelFile ya abierto del consolidado. Se pasa cuando
     hay que leer VARIAS hojas del mismo archivo (generar_pagos_bess
@@ -690,7 +691,7 @@ def leer_ofertas_sscc_consolidado(ruta_consolidado, registrar=print, libro=None)
         raise ErrorEntrada(
             f"{ruta_consolidado.name} no tiene la hoja "
             f"'{HOJA_OFERTAS_SSCC}' todavia. Genera "
-            f"Consolidado_entradas.xlsx primero (tildando "
+            f"esa hoja primero (tildando "
             f"'Ofertas SSCC')."
         ) from error
 
